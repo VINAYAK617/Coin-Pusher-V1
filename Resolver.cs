@@ -5,7 +5,9 @@ namespace CoinPusherEngine;
 /// For each consecutive pair (cur, next):
 ///   1. Simulate cur's push+rotate to get the naturally-delivered board.
 ///   2. For EVERY position in next.Board (not just zone rows), spawn the planned cell
-///      unless the simulation already delivers an identical cell (same Sym, Stack, IsFeat).
+///      only when the simulation leaves that position empty. Natural cells are never
+///      overwritten by spawns; if a non-empty position differs, the natural cell becomes
+///      the next planned board cell and Verifier decides whether the outcome still works.
 ///   3. Place feature tokens into reserved filler-spawn slots only.
 ///
 /// Full-board validation (not zone-only) is required for correctness: a mismatch in a
@@ -32,11 +34,10 @@ internal sealed class Resolver
     }
 
     /// <summary>
-    /// For each position in next.Board, spawn the planned cell unless the natural
-    /// simulation already delivers an identical cell. Correctness requires this check
-    /// to cover EVERY board position, not just zone rows: a mismatch in a non-zone
-    /// position today silently corrupts whatever zone it rotates into on a future spin,
-    /// so partial (zone-only) validation lets errors propagate undetected.
+    /// For each position in next.Board, spawn the planned cell only if the natural
+    /// simulation leaves that position empty. Correctness requires this check to cover
+    /// EVERY board position: a mismatch in an occupied non-zone position must follow
+    /// natural board motion, not a visual overwrite.
     /// </summary>
     private void DoSpin(SpinPlan cur, SpinPlan next)
     {
@@ -54,6 +55,12 @@ internal sealed class Resolver
                           || sv.IsFeat != plan.IsFeat
                           || sv.Sym    != plan.Sym
                           || sv.Stack  != plan.Stack;
+
+            if (needSpawn && sv != null)
+            {
+                next.Board[r, c] = sv.Clone();
+                continue;
+            }
 
             if (needSpawn)
                 cur.Spawns[(r, c)] = plan.Clone();

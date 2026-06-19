@@ -9,6 +9,9 @@ public sealed class MathInput
     public IReadOnlyDictionary<string, int>       Required  { get; init; } = new Dictionary<string, int>();
     public IReadOnlyList<int>?                    WheelSymOrder { get; init; }
     public IReadOnlyDictionary<int, int>?         PrizeTiers    { get; init; }
+    public IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>>? PrizeValues { get; init; }
+    public IReadOnlyDictionary<int, int>?         NonWinTargets { get; init; }
+    public IReadOnlyDictionary<int, int>?         NonWinPrizeTiers { get; init; }
 
     /// <summary>
     /// The highest valid SYMBOL id in this game's config (e.g. 6 for a 6-symbol game).
@@ -101,6 +104,10 @@ public sealed class GamePlan
     public IReadOnlyList<int>            WinSyms    { get; init; } = Array.Empty<int>();
     public IReadOnlyList<int>            FillSyms   { get; init; } = Array.Empty<int>();
     public IReadOnlyDictionary<int, int> PrizeTiers { get; init; } = new Dictionary<int, int>();
+    public IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>> PrizeValues { get; init; } =
+        new Dictionary<int, IReadOnlyDictionary<int, decimal>>();
+    public IReadOnlyDictionary<int, int> NonWinTargets { get; init; } = new Dictionary<int, int>();
+    public IReadOnlyDictionary<int, int> NonWinPrizeTiers { get; init; } = new Dictionary<int, int>();
     public bool                          Verified   { get; set; }
     public List<string>                  Log        { get; init; } = new();
     internal List<SpinPlan>              Spins      { get; init; } = new();

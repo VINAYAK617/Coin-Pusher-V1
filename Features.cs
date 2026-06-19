@@ -168,13 +168,23 @@ internal sealed class PrupFeat : Feat
 
         foreach (var (sym, targetTier) in ctx.Input.PrizeTiers.OrderBy(kv => kv.Key))
         {
-            if (!ctx.Input.Targets.ContainsKey(sym)) continue;   // sym must be a real win target
+            if (!ctx.Input.Targets.ContainsKey(sym)) continue;   // sym must be planned for collection
             if (targetTier <= 0) continue;                       // tier 0 needs no token at all
 
             int already = alreadyPerSym.GetValueOrDefault(sym, 0);
             if (already >= targetTier) continue;                 // this symbol already fully climbed
 
             int nextTier = already + 1;
+            int lastSpin = ctx.Done
+                .Where(f => f.Id == "PRIZE_UPGRADE" && f.PrupSym == sym)
+                .Select(f => f.Spin)
+                .DefaultIfEmpty(0)
+                .Max();
+            if (ctx.Spin <= lastSpin) continue;                  // tier N must appear after tier N-1
+
+            int remainingAfterThis = targetTier - nextTier;
+            if (ctx.Spin + remainingAfterThis >= ctx.MaxSpin) continue;
+
             return new PlacedFeat { Id="PRIZE_UPGRADE", Spin=ctx.Spin, Col=ctx.Col,
                                      PrupSym=sym, PrupTier=nextTier };
         }
