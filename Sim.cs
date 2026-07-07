@@ -62,6 +62,12 @@ internal static class Sim
     // ── Phase 5: FireAll ───────────────────────────────────────────────────
     internal static void FireAll(Cell?[,] board, SpinPlan sp, SpinPlan? next, int fallback)
     {
+        FireFeaturePass(board, next, fallback, wheelPass: false);
+        FireFeaturePass(board, next, fallback, wheelPass: true);
+    }
+
+    private static void FireFeaturePass(Cell?[,] board, SpinPlan? next, int fallback, bool wheelPass)
+    {
         bool any;
         do
         {
@@ -76,6 +82,9 @@ internal static class Sim
                              ? FeatReg.Get(fc.FeatId)
                              : FeatReg.HasSym(fc.Sym) ? FeatReg.GetSym(fc.Sym) : null;
 
+                var isWheel = feat?.Id == "WHEEL" || fc.Sym == K.F_WHEEL;
+                if (isWheel != wheelPass) continue;
+
                 if (feat == null) { board[r, c] = Cvt(fc); any = true; continue; }
 
                 feat.Fire(new FireCtx { Board=board, Col=c, Fp=fc.Fp ?? new FP { FeatId=feat.Id } });
@@ -87,7 +96,12 @@ internal static class Sim
                 any = true;
             }
         }
-        while (any && board.Cast<Cell?>().Any(x => x?.IsFeat == true));
+        while (any && board.Cast<Cell?>().Any(x =>
+        {
+            if (x?.IsFeat != true) return false;
+            var isWheel = x.Sym == K.F_WHEEL || x.FeatId == "WHEEL";
+            return isWheel == wheelPass;
+        }));
     }
 
     /// <summary>

@@ -32,7 +32,8 @@ internal sealed class WheelFeat : Feat
         if (sym == 0) return null;
         if (!ctx.Input.Targets.TryGetValue(sym, out int tgt) || tgt <= 0) return null;
 
-        int n = WMath.BestN(tgt), stack = 1 << n, zone = WMath.Zone(tgt, stack);
+        int n = PickStackValue(sym, tgt, spin, col);
+        int stack = WMath.StackFromValue(n), zone = WMath.Zone(tgt, stack);
         if (zone == 0) return null;
 
         bool isMulti = ctx.Done.Any(f => f.Id == "WHEEL" && f.WSym == sym);
@@ -49,7 +50,7 @@ internal sealed class WheelFeat : Feat
         // Don't overflow a spin's zone with multiple WHEELs
         int existZone = ctx.Done
             .Where(f => f.Id == "WHEEL" && f.Spin == spin)
-            .Sum(f => ctx.Input.Targets.TryGetValue(f.WSym, out int ft) ? WMath.Zone(ft, 1 << f.WN) : 0);
+            .Sum(f => ctx.Input.Targets.TryGetValue(f.WSym, out int ft) ? WMath.Zone(ft, WMath.StackFromValue(f.WN)) : 0);
         if (existZone + zone > K.COLS - 1) return null;
 
         return new PlacedFeat { Id="WHEEL", Spin=spin, Col=col, WSym=sym, WN=n };
@@ -64,7 +65,7 @@ internal sealed class WheelFeat : Feat
         {
             var cell = ctx.Board[r, c];
             if (cell != null && !cell.IsFeat && cell.Sym == sym)
-                cell.Stack = st;
+                cell.Stack = Math.Min(K.MAX_COIN_STACK, cell.Stack + st - 1);
         }
     }
 
@@ -79,6 +80,38 @@ internal sealed class WheelFeat : Feat
         var once = usedCount.Where(kv => kv.Value==1).Select(kv => kv.Key).ToList();
         if (once.Count > 0 && ctx.Rng.NextDouble() < 0.15) return once[ctx.Rng.Next(once.Count)];
         return 0;
+    }
+
+    private static int PickStackValue(int sym, int target, int spin, int col)
+    {
+        var candidates = WMath.ValidStackValues(target).ToHashSet();
+        if (candidates.Count == 0) return WMath.BestN(target);
+
+        var roll = WheelStackRoll(sym, target, spin, col);
+        var picked = roll < K.P_WHEEL_STACK_VALUE_1
+            ? 1
+            : roll < K.P_WHEEL_STACK_VALUE_1 + K.P_WHEEL_STACK_VALUE_2
+                ? 2
+                : 3;
+
+        return candidates.Contains(picked) ? picked : WMath.BestN(target);
+    }
+
+    private static double WheelStackRoll(int sym, int target, int spin, int col)
+    {
+        unchecked
+        {
+            uint h = (uint)(sym * 374761393)
+                     + (uint)(target * 668265263)
+                     + (uint)spin * 2246822519u
+                     + (uint)col * 3266489917u;
+            h ^= h >> 15;
+            h *= 2246822519u;
+            h ^= h >> 13;
+            h *= 3266489917u;
+            h ^= h >> 16;
+            return (h & 0x7fffffffu) / (double)0x80000000u;
+        }
     }
 }
 
@@ -166,27 +199,44 @@ internal sealed class PrupFeat : Feat
             .GroupBy(f => f.PrupSym)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        foreach (var (sym, targetTier) in ctx.Input.PrizeTiers.OrderBy(kv => kv.Key))
+        var candidate = ctx.Input.PrizeTiers
+            .Where(kv => ctx.Input.Targets.ContainsKey(kv.Key) && kv.Value > 0)
+            .Select(kv =>
+            {
+                var sym = kv.Key;
+                var targetTier = kv.Value;
+                var already = alreadyPerSym.GetValueOrDefault(sym, 0);
+                var nextTier = already + 1;
+                var lastSpin = ctx.Done
+                    .Where(f => f.Id == "PRIZE_UPGRADE" && f.PrupSym == sym)
+                    .Select(f => f.Spin)
+                    .DefaultIfEmpty(0)
+                    .Max();
+                var remainingAfterThis = targetTier - nextTier;
+                var slack = (ctx.MaxSpin - 1 - ctx.Spin) - remainingAfterThis;
+                return new
+                {
+                    Sym = sym,
+                    TargetTier = targetTier,
+                    Already = already,
+                    NextTier = nextTier,
+                    LastSpin = lastSpin,
+                    RemainingAfterThis = remainingAfterThis,
+                    Slack = slack,
+                };
+            })
+            .Where(x => x.Already < x.TargetTier)
+            .Where(x => ctx.Spin > x.LastSpin)
+            .Where(x => x.Slack >= 0)
+            .OrderBy(x => x.Slack)
+            .ThenByDescending(x => x.RemainingAfterThis)
+            .ThenBy(x => x.Sym)
+            .FirstOrDefault();
+
+        if (candidate != null)
         {
-            if (!ctx.Input.Targets.ContainsKey(sym)) continue;   // sym must be planned for collection
-            if (targetTier <= 0) continue;                       // tier 0 needs no token at all
-
-            int already = alreadyPerSym.GetValueOrDefault(sym, 0);
-            if (already >= targetTier) continue;                 // this symbol already fully climbed
-
-            int nextTier = already + 1;
-            int lastSpin = ctx.Done
-                .Where(f => f.Id == "PRIZE_UPGRADE" && f.PrupSym == sym)
-                .Select(f => f.Spin)
-                .DefaultIfEmpty(0)
-                .Max();
-            if (ctx.Spin <= lastSpin) continue;                  // tier N must appear after tier N-1
-
-            int remainingAfterThis = targetTier - nextTier;
-            if (ctx.Spin + remainingAfterThis >= ctx.MaxSpin) continue;
-
             return new PlacedFeat { Id="PRIZE_UPGRADE", Spin=ctx.Spin, Col=ctx.Col,
-                                     PrupSym=sym, PrupTier=nextTier };
+                                     PrupSym=candidate.Sym, PrupTier=candidate.NextTier };
         }
 
         return null;   // every declared symbol has already reached its target tier

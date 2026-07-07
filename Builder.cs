@@ -196,19 +196,13 @@ internal sealed class Builder
                 (col == K.COLS - 1 ? spawn : safe).Add(pos);
             }
         }
-        safe.Sort((a, b) => a.c != b.c ? a.c.CompareTo(b.c) : a.r.CompareTo(b.r));
+        var positions = safe.Concat(spawn).ToList();
 
-        var q = new Queue<int>();
-        foreach (var (sym, cnt) in alloc.OrderByDescending(kv => kv.Value))
-            for (int i = 0; i < cnt; i++) q.Enqueue(sym);
-
-        foreach (var (r, c) in safe.Concat(spawn)) board[r, c] = null;
+        foreach (var (r, c) in positions) board[r, c] = null;
         foreach (var pos in tokenReserved) board[pos.Item1, pos.Item2] = null;
 
-        foreach (var (r, c) in safe.Concat(spawn))
+        foreach (var (r, c) in PlaceAllocatedSymbols(board, positions, alloc))
         {
-            if (q.Count > 0) { board[r, c] = Grid.Norm(q.Dequeue()); continue; }
-
             // Leftover zone capacity after the real, scheduled wins are placed — this
             // position is GUARANTEED collected THIS spin (it's inside the zone), so it's
             // the only place a "decorative" win-symbol filler can be placed with zero
@@ -236,8 +230,91 @@ internal sealed class Builder
             }
         }
 
-        if (q.Count > 0)
-            _log.Add($"  WARN: {q.Count} zone wins overflow — should be structurally impossible");
+    }
+
+    private List<(int r, int c)> PlaceAllocatedSymbols(
+        Cell?[,] board,
+        IReadOnlyList<(int r, int c)> positions,
+        IReadOnlyDictionary<int, int> alloc)
+    {
+        var remaining = alloc
+            .Where(kv => kv.Value > 0)
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+        var unfilled = positions.ToList();
+        if (remaining.Count == 0) return unfilled;
+
+        var order = positions
+            .OrderBy(_ => _rng.Next())
+            .ThenBy(pos => pos.r)
+            .ThenBy(pos => pos.c)
+            .ToList();
+
+        foreach (var pos in order)
+        {
+            if (remaining.Values.Sum() <= 0) break;
+
+            var chosen = PickLeastPatternedSymbol(board, pos, remaining);
+            board[pos.r, pos.c] = Grid.Norm(chosen);
+            remaining[chosen]--;
+            if (remaining[chosen] == 0) remaining.Remove(chosen);
+            unfilled.Remove(pos);
+        }
+
+        if (remaining.Count > 0)
+        {
+            var overflow = remaining.Values.Sum();
+            _log.Add($"  WARN: {overflow} zone wins overflow - should be structurally impossible");
+        }
+
+        return unfilled;
+    }
+
+    private int PickLeastPatternedSymbol(
+        Cell?[,] board,
+        (int r, int c) pos,
+        IReadOnlyDictionary<int, int> remaining)
+    {
+        return remaining
+            .Select(kv => new
+            {
+                Sym = kv.Key,
+                NeighborMatches = AdjacentMatchCount(board, pos, kv.Key),
+                ColumnLoad = CountSymbolInColumn(board, pos.c, kv.Key),
+                Remaining = kv.Value,
+                Jitter = _rng.Next(),
+            })
+            .OrderBy(x => x.NeighborMatches)
+            .ThenBy(x => x.ColumnLoad)
+            .ThenByDescending(x => x.Remaining)
+            .ThenBy(x => x.Jitter)
+            .First().Sym;
+    }
+
+    private static int AdjacentMatchCount(Cell?[,] board, (int r, int c) pos, int sym)
+    {
+        var count = 0;
+        if (SameSymbol(board, pos.r, pos.c - 1, sym)) count++;
+        if (SameSymbol(board, pos.r, pos.c + 1, sym)) count++;
+        if (SameSymbol(board, pos.r - 1, pos.c, sym)) count++;
+        if (SameSymbol(board, pos.r + 1, pos.c, sym)) count++;
+        return count;
+    }
+
+    private static bool SameSymbol(Cell?[,] board, int row, int col, int sym) =>
+        row >= 0 && row < K.ROWS
+        && col >= 0 && col < K.COLS
+        && board[row, col]?.IsFeat != true
+        && board[row, col]?.Sym == sym;
+
+    private static int CountSymbolInColumn(Cell?[,] board, int col, int sym)
+    {
+        var count = 0;
+        for (var row = 0; row < K.ROWS; row++)
+        {
+            var cell = board[row, col];
+            if (cell?.IsFeat != true && cell?.Sym == sym) count++;
+        }
+        return count;
     }
 
     /// <summary>
@@ -360,8 +437,9 @@ internal sealed class Builder
     private static FP MakeFP(PlacedFeat f)
     {
         var fp = new FP { FeatId = f.Id };
-        if (f.Id == "WHEEL")         { fp.WheelSym = f.WSym; fp.WheelStack = 1 << f.WN; }
+        if (f.Id == "WHEEL")         { fp.WheelSym = f.WSym; fp.WheelStack = WMath.StackFromValue(f.WN); }
         if (f.Id == "PRIZE_UPGRADE") { fp.PrupSym  = f.PrupSym; fp.PrupTier = f.PrupTier; }
         return fp;
     }
 }
+

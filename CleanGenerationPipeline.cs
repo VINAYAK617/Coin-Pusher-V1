@@ -1,0 +1,527 @@
+namespace CoinPusherEngine;
+
+/// <summary>
+/// Clean ticket generation architecture. This file owns the orchestration
+/// contracts; low-level physics primitives such as Builder, Resolver, Sim, and
+/// Verifier remain reusable engines underneath these explicit stages.
+/// </summary>
+internal sealed class CleanGenerationPipeline
+{
+    private readonly ObjectiveStage _objectives = new();
+    private readonly FeaturePlanStage _features = new();
+    private readonly PlacementStage _placement = new();
+    private readonly AllocationStage _allocation = new();
+    private readonly BoardRealizationStage _realization;
+
+    internal CleanGenerationPipeline(IPlanAssemblyPipeline? boardPipeline = null)
+    {
+        _realization = new BoardRealizationStage(boardPipeline ?? new DefaultPlanAssemblyPipeline());
+    }
+
+    internal GamePlan Generate(GenerationRequest request)
+    {
+        var objectives = _objectives.Resolve(request);
+        var featurePlan = _features.Resolve(objectives);
+        var placements = _placement.Resolve(featurePlan);
+        var allocations = _allocation.Resolve(placements);
+        return _realization.Resolve(allocations);
+    }
+}
+
+internal sealed record GenerationRequest(
+    MathInput Input,
+    int Seed,
+    Random Rng,
+    int PlanningPressure,
+    List<string> Log);
+
+internal sealed record ObjectivePlan(
+    MathInput SourceInput,
+    IReadOnlyList<int> WinSymbols,
+    IReadOnlyList<int> FillSymbols,
+    IReadOnlyDictionary<int, int> WinTargets,
+    IReadOnlyDictionary<int, int> NonWinTargets,
+    IReadOnlyDictionary<int, int> NonWinPrizeTiers,
+    int PlanningPressure,
+    int Seed,
+    Random Rng,
+    List<string> Log);
+
+internal sealed record FeaturePlan(
+    ObjectivePlan Objectives,
+    MathInput SchedulingInput,
+    IReadOnlyDictionary<int, int> AllocationTargets,
+    IReadOnlyDictionary<int, int> PrizeTiers,
+    IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>> PrizeValues);
+
+internal sealed record PlacementPlan(
+    FeaturePlan Features,
+    IReadOnlyList<PlacedFeat> PlacedFeatures,
+    IReadOnlyList<WLock> WheelLocks,
+    int TotalSpins);
+
+internal sealed record AllocationPlan(
+    PlacementPlan Placements,
+    IReadOnlyList<Dictionary<int, int>> Allocations);
+
+internal sealed class ObjectiveStage
+{
+    internal ObjectivePlan Resolve(GenerationRequest request)
+    {
+        var input = request.Input;
+        var winSymbols = input.Targets.Keys.OrderBy(x => x).ToArray();
+        var topPrizeSym = TopPrizeSymbol(input);
+        var fillSymbols = Enumerable.Range(1, input.MaxSym)
+            .Except(winSymbols)
+            .ToArray();
+        var nearMissCandidates = fillSymbols;
+
+        var nonWinTargets = ResolveNonWinTargets(input, nearMissCandidates, request.Rng, request.PlanningPressure);
+        var nonWinPrizeTiers = ResolveNonWinPrizeTiers(input, nonWinTargets, request.Rng, request.PlanningPressure);
+
+        request.Log.Add($"wins=[{string.Join(",", winSymbols)}] fills=[{string.Join(",", fillSymbols)}]");
+        if (nonWinTargets.Count > 0)
+        {
+            request.Log.Add("nonWins=[" + string.Join(",",
+                nonWinTargets.Select(kv => $"sym{kv.Key}>={kv.Value}<cap{K.FILL_CAP}")) + "]");
+        }
+        if (nonWinPrizeTiers.Count > 0)
+        {
+            request.Log.Add("nonWinPrizeUpgrades=[" + string.Join(",",
+                nonWinPrizeTiers.Select(kv => $"sym{kv.Key}@tier{kv.Value}")) + "]");
+        }
+
+        return new ObjectivePlan(
+            input,
+            winSymbols,
+            fillSymbols,
+            input.Targets.ToDictionary(kv => kv.Key, kv => kv.Value),
+            nonWinTargets,
+            nonWinPrizeTiers,
+            request.PlanningPressure,
+            request.Seed,
+            request.Rng,
+            request.Log);
+    }
+
+    private static Dictionary<int, int> ResolveNonWinTargets(
+        MathInput input,
+        IReadOnlyList<int> fillSymbols,
+        Random rng,
+        int planningPressure)
+    {
+        if (input.NonWinTargets != null)
+            return input.NonWinTargets.ToDictionary(kv => kv.Key, kv => kv.Value);
+        if (fillSymbols.Count == 0)
+            return new Dictionary<int, int>();
+
+        var profile = PickNonWinProfile(rng);
+        if (profile.MaxSymbols <= 0 || profile.Max <= 0)
+            return new Dictionary<int, int>();
+
+        var maxSymbols = Math.Min(profile.MaxSymbols, NearMissSymbolCap(input, fillSymbols.Count, planningPressure));
+        var count = PickNearMissCount(input, maxSymbols, fillSymbols.Count, planningPressure, rng);
+        var minTarget = Math.Min(Math.Max(profile.Min, K.NONWIN_MIN_TARGET), K.FILL_CAP - 1);
+        var maxTarget = Math.Min(profile.Max, K.FILL_CAP - 1);
+
+        return fillSymbols
+            .OrderBy(_ => rng.Next())
+            .Take(count)
+            .ToDictionary(sym => sym, _ => rng.Next(minTarget, maxTarget + 1));
+    }
+
+    private static int NearMissSymbolCap(MathInput input, int fillSymbolCount, int planningPressure)
+    {
+        if (fillSymbolCount <= 0) return 0;
+        if (planningPressure >= 2 || IsHighPressureTicket(input))
+            return Math.Min(1, fillSymbolCount);
+
+        var byWinCount = input.Targets.Count switch
+        {
+            1 => 5,
+            2 => 4,
+            3 => 3,
+            _ => 2,
+        };
+
+        if (planningPressure >= 1)
+            byWinCount = Math.Min(byWinCount, 2);
+
+        return Math.Min(byWinCount, fillSymbolCount);
+    }
+
+    private static int PickNearMissCount(
+        MathInput input,
+        int maxSymbols,
+        int fillSymbolCount,
+        int planningPressure,
+        Random rng)
+    {
+        var capped = Math.Min(maxSymbols, fillSymbolCount);
+        if (capped <= 1) return capped;
+
+        if (planningPressure >= 2 || IsHighPressureTicket(input))
+            return 1;
+
+        var min = input.Targets.Count switch
+        {
+            1 when capped >= 5 => 4,
+            1 when capped >= 3 => 3,
+            2 when capped >= 4 => 2,
+            3 when capped >= 3 => 2,
+            _ => 1,
+        };
+
+        var allowedMin = Math.Min(min, capped);
+        var weights = K.NONWIN_COUNT_WEIGHTS
+            .Select((entry, index) => new
+            {
+                Count = index + 1,
+                Weight = K.Weight(entry.EnvName, entry.DefaultWeight),
+            })
+            .Where(x => x.Count >= allowedMin && x.Count <= capped && x.Weight > 0)
+            .ToArray();
+        if (weights.Length == 0) return allowedMin;
+
+        var total = weights.Sum(x => x.Weight);
+        var roll = rng.NextDouble() * total;
+        var acc = 0.0;
+        foreach (var item in weights)
+        {
+            acc += item.Weight;
+            if (roll <= acc) return item.Count;
+        }
+
+        return weights[^1].Count;
+    }
+
+    private static (double P, int Min, int Max, int MaxSymbols) PickNonWinProfile(Random rng)
+    {
+        var roll = rng.NextDouble();
+        var acc = 0.0;
+        foreach (var profile in K.NONWIN_TARGET_PROFILES)
+        {
+            acc += profile.P;
+            if (roll <= acc) return profile;
+        }
+
+        return K.NONWIN_TARGET_PROFILES[^1];
+    }
+
+    private static Dictionary<int, int> ResolveNonWinPrizeTiers(
+        MathInput input,
+        IReadOnlyDictionary<int, int> nonWinTargets,
+        Random rng,
+        int planningPressure)
+    {
+        if (input.NonWinPrizeTiers != null)
+            return input.NonWinPrizeTiers.ToDictionary(kv => kv.Key, kv => kv.Value);
+        if (planningPressure >= 1)
+            return new Dictionary<int, int>();
+
+        var eligible = nonWinTargets
+            .Where(kv => kv.Key != TopPrizeSymbol(input))
+            .Where(kv => kv.Value >= K.NONWIN_MIN_TARGET && HasUpgradeTier(input, kv.Key, 1))
+            .Select(kv => kv.Key)
+            .OrderBy(_ => rng.Next())
+            .ToArray();
+
+        if (eligible.Length == 0 || rng.NextDouble() >= K.P_NONWIN_PRIZE_UPGRADE)
+            return new Dictionary<int, int>();
+
+        return new Dictionary<int, int> { [eligible[0]] = 1 };
+    }
+
+    private static bool HasUpgradeTier(MathInput input, int sym, int tier) =>
+        input.PrizeValues != null
+        && input.PrizeValues.TryGetValue(sym, out var tiers)
+        && tiers.ContainsKey(tier);
+
+    private static int TopPrizeSymbol(MathInput input)
+    {
+        if (input.PrizeValues == null || input.PrizeValues.Count == 0) return 0;
+        return input.PrizeValues
+            .Select(kv => (Sym: kv.Key, Value: kv.Value.Values.DefaultIfEmpty(0m).Max()))
+            .OrderByDescending(x => x.Value)
+            .ThenBy(x => x.Sym)
+            .First().Sym;
+    }
+
+    private static bool IsHighPressureTicket(MathInput input) =>
+        input.Targets.Count >= 4
+        || input.Targets.Values.Sum() >= 80
+        || input.Required.GetValueOrDefault("PRIZE_UPGRADE") >= 4;
+}
+
+internal sealed class FeaturePlanStage
+{
+    internal FeaturePlan Resolve(ObjectivePlan objectives)
+    {
+        var input = objectives.SourceInput;
+        var log = objectives.Log;
+        var required = input.Required.ToDictionary(kv => kv.Key, kv => kv.Value);
+        var winTargets = input.Targets.ToDictionary(kv => kv.Key, kv => kv.Value);
+        var allocationTargets = winTargets
+            .Concat(objectives.NonWinTargets)
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+
+        var nonWinPrupTokens = objectives.NonWinPrizeTiers.Values.Sum();
+        if (nonWinPrupTokens > 0)
+            required["PRIZE_UPGRADE"] = required.GetValueOrDefault("PRIZE_UPGRADE") + nonWinPrupTokens;
+
+        var wheelPlan = PlanWheelAndCapacity(objectives, required);
+        required = wheelPlan.Required;
+
+        var wheelOrder = wheelPlan.WheelOrder.Count > 0
+            ? wheelPlan.WheelOrder
+            : input.WheelSymOrder;
+        var prizeTiers = MergeTiers(input.PrizeTiers, objectives.NonWinPrizeTiers);
+
+        var schedulingInput = new MathInput
+        {
+            Targets = allocationTargets,
+            BaseSpins = input.BaseSpins,
+            Required = required,
+            WheelSymOrder = wheelOrder,
+            PrizeTiers = prizeTiers.Count > 0 ? prizeTiers : null,
+            PrizeValues = input.PrizeValues,
+            NonWinTargets = objectives.NonWinTargets,
+            NonWinPrizeTiers = objectives.NonWinPrizeTiers,
+            MaxSym = input.MaxSym,
+        };
+
+        log.Add($"features: {string.Join(",", required.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}={kv.Value}"))}");
+
+        return new FeaturePlan(
+            objectives,
+            schedulingInput,
+            allocationTargets,
+            input.PrizeTiers?.ToDictionary(kv => kv.Key, kv => kv.Value) ?? new Dictionary<int, int>(),
+            ClonePrizeValues(input.PrizeValues));
+    }
+
+    private static (Dictionary<string, int> Required, IReadOnlyList<int> WheelOrder) PlanWheelAndCapacity(
+        ObjectivePlan objectives,
+        Dictionary<string, int> required)
+    {
+        var input = objectives.SourceInput;
+        var rng = objectives.Rng;
+        var fillCount = objectives.FillSymbols.Count;
+        var plannedFillerLoad = objectives.NonWinTargets.Values.Sum();
+        var wheels = required.GetValueOrDefault("WHEEL");
+        var flushes = required.GetValueOrDefault("FLUSH");
+        var physWins = CapacityAnalyzer.PhysicalWins(input.Targets, wheels);
+        var plannedLoad = physWins + plannedFillerLoad;
+        var tokenLoad = RequiredTokenLoad(required);
+        var wheelOrder = new List<int>();
+
+        if (!required.ContainsKey("WHEEL"))
+        {
+            foreach (var sym in objectives.WinSymbols.OrderByDescending(s => input.Targets[s]))
+            {
+                var target = input.Targets[sym];
+                var without = CapacityAnalyzer.MinExtraSpins(plannedLoad, fillCount, tokenLoad, flushes, wheels);
+                var withOnePhys = CapacityAnalyzer.PhysicalWins(input.Targets, wheels + 1);
+                var withOneLoad = withOnePhys + plannedFillerLoad;
+                var withOne = CapacityAnalyzer.MinExtraSpins(withOneLoad, fillCount, tokenLoad + 1, flushes, wheels + 1);
+                var needed = withOne >= 0 && without < 0;
+                var headroom = CapacityAnalyzer.FillerBudget(plannedLoad, K.BASE_SPINS, tokenLoad, flushes, wheels);
+                var optional = objectives.PlanningPressure == 0
+                    && !needed && without == 0 && withOne == 0 && headroom >= fillCount
+                    && target >= 10 && rng.NextDouble() < K.P_WHEEL_OPTIONAL;
+                if (!needed && !optional) continue;
+
+                wheels++;
+                required["WHEEL"] = wheels;
+                wheelOrder.Add(sym);
+                physWins = withOnePhys;
+                plannedLoad = withOneLoad;
+                tokenLoad++;
+                if (wheels >= FeatReg.Cfg["WHEEL"].Max) break;
+            }
+        }
+
+        var wheelBudget = FeatReg.Cfg["WHEEL"].Max - wheels;
+        if (wheelBudget > 0 && objectives.PlanningPressure == 0)
+        {
+            foreach (var sym in objectives.NonWinTargets.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).Take(1))
+            {
+                if (rng.NextDouble() >= K.P_NONWIN_WHEEL) continue;
+                wheels++;
+                required["WHEEL"] = wheels;
+                wheelOrder.Add(sym);
+                tokenLoad++;
+                break;
+            }
+        }
+
+        if (!required.ContainsKey("FLUSH"))
+        {
+            while (flushes < K.COLS - 1)
+            {
+                var without = CapacityAnalyzer.MinExtraSpins(plannedLoad, fillCount, tokenLoad, flushes, wheels);
+                var withOne = CapacityAnalyzer.MinExtraSpins(plannedLoad, fillCount, tokenLoad, flushes + 1, wheels);
+                var needed = withOne >= 0 && (without < 0 || withOne < without);
+                var optional = objectives.PlanningPressure == 0
+                    && !needed && without == 0 && rng.NextDouble() < K.P_FLUSH_OPTIONAL;
+                if (!needed && !optional) break;
+                flushes++;
+            }
+            if (flushes > 0) required["FLUSH"] = flushes;
+        }
+
+        var extraExisting = required.GetValueOrDefault("EXTRA_SPIN");
+        var extrasNeeded = CapacityAnalyzer.MinExtraSpins(plannedLoad, fillCount, tokenLoad, flushes, wheels);
+        if (extrasNeeded > extraExisting)
+            required["EXTRA_SPIN"] = extrasNeeded;
+
+        return (required, wheelOrder);
+    }
+
+    private static int RequiredTokenLoad(IReadOnlyDictionary<string, int> required) =>
+        required.Where(kv => FeatReg.Has(kv.Key) && FeatReg.Get(kv.Key).HasToken)
+            .Sum(kv => kv.Value);
+
+    private static Dictionary<int, int> MergeTiers(
+        IReadOnlyDictionary<int, int>? prizeTiers,
+        IReadOnlyDictionary<int, int> nonWinPrizeTiers)
+    {
+        var merged = prizeTiers?.ToDictionary(kv => kv.Key, kv => kv.Value)
+            ?? new Dictionary<int, int>();
+        foreach (var (sym, tier) in nonWinPrizeTiers)
+            merged[sym] = tier;
+        return merged;
+    }
+
+    private static Dictionary<int, IReadOnlyDictionary<int, decimal>> ClonePrizeValues(
+        IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>>? prizeValues) =>
+        prizeValues?.ToDictionary(kv => kv.Key,
+            kv => (IReadOnlyDictionary<int, decimal>)kv.Value.ToDictionary(t => t.Key, t => t.Value))
+        ?? new Dictionary<int, IReadOnlyDictionary<int, decimal>>();
+}
+
+internal sealed class PlacementStage
+{
+    internal PlacementPlan Resolve(FeaturePlan features)
+    {
+        var log = features.Objectives.Log;
+        var placed = new Placer(features.SchedulingInput, features.Objectives.Rng, log).Place();
+        var totalSpins = features.SchedulingInput.BaseSpins + placed.Count(f => f.Id == "EXTRA_SPIN");
+        var locks = BuildLocks(placed, features.AllocationTargets, features.Objectives);
+        return new PlacementPlan(features, placed, locks, totalSpins);
+    }
+
+    private static IReadOnlyList<WLock> BuildLocks(
+        IReadOnlyList<PlacedFeat> placed,
+        IReadOnlyDictionary<int, int> targets,
+        ObjectivePlan objectives)
+    {
+        var locks = new List<WLock>();
+        foreach (var group in placed.Where(f => f.Id == "WHEEL" && f.WSym != 0).GroupBy(f => f.WSym))
+        {
+            var sym = group.Key;
+            var target = targets[sym];
+            var ordered = group.OrderBy(f => f.Spin).ToArray();
+            foreach (var feature in ordered.Take(1))
+            {
+                var wheelN = feature.WN > 0 ? feature.WN : WMath.BestN(target);
+                var lockPlan = WMath.MakeLock(sym, target, feature.Spin, wheelN);
+                locks.Add(lockPlan);
+                objectives.Log.Add($"  WHEEL sym={sym} tgt={target} stack={lockPlan.Stack} pre={lockPlan.Pre} post={lockPlan.Post} zone={lockPlan.Zone} @S{feature.Spin}");
+            }
+        }
+        return locks;
+    }
+}
+
+internal sealed class AllocationStage
+{
+    internal AllocationPlan Resolve(PlacementPlan placements)
+    {
+        var features = placements.Features;
+        var allocations = new Scheduler(
+                features.AllocationTargets,
+                placements.PlacedFeatures.ToList(),
+                placements.WheelLocks,
+                features.Objectives.Log,
+                features.Objectives.WinSymbols)
+            .Schedule(placements.TotalSpins);
+        EnsureFinalWinAllocation(allocations, placements, features.Objectives.WinSymbols, features.Objectives.Log);
+
+        return new AllocationPlan(placements, allocations);
+    }
+
+    private static void EnsureFinalWinAllocation(
+        IReadOnlyList<Dictionary<int, int>> allocations,
+        PlacementPlan placements,
+        IReadOnlyList<int> winSymbols,
+        List<string> log)
+    {
+        if (allocations.Count == 0) return;
+        var finalSlot = allocations.Count - 1;
+        var final = allocations[finalSlot];
+        if (winSymbols.Any(sym => final.GetValueOrDefault(sym) > 0)) return;
+        if (FinalSlotCapacity(placements, finalSlot) - final.Values.Sum() <= 0) return;
+
+        foreach (var sym in winSymbols.OrderBy(sym => sym))
+        {
+            for (var slot = finalSlot - 1; slot >= 0; slot--)
+            {
+                if (!allocations[slot].TryGetValue(sym, out var count) || count <= 0) continue;
+
+                allocations[slot][sym] = count - 1;
+                if (allocations[slot][sym] == 0) allocations[slot].Remove(sym);
+                final[sym] = final.GetValueOrDefault(sym) + 1;
+                log.Add($"finalWinNormalized=sym{sym} moved S{slot + 1}->S{finalSlot + 1}");
+                return;
+            }
+        }
+    }
+
+    private static int FinalSlotCapacity(PlacementPlan placements, int finalSlot)
+    {
+        var spinNum = finalSlot + 1;
+        var flushCols = placements.PlacedFeatures.Count(f => f.Id == "FLUSH" && f.Spin == spinNum);
+        var wheelSpin = placements.WheelLocks.Any(lockPlan => lockPlan.FireSpin == spinNum);
+        var reserved = placements.PlacedFeatures.Count(f => f.Spin == finalSlot
+            && FeatReg.Has(f.Id)
+            && FeatReg.Get(f.Id).HasToken);
+        var freeCols = K.COLS - flushCols;
+        var push = wheelSpin ? K.MIN_PUSH : K.MAX_PUSH;
+        return Math.Max(0, freeCols * push + flushCols * K.ROWS - reserved);
+    }
+}
+
+internal sealed class BoardRealizationStage
+{
+    private readonly IPlanAssemblyPipeline _pipeline;
+
+    internal BoardRealizationStage(IPlanAssemblyPipeline pipeline)
+    {
+        _pipeline = pipeline;
+    }
+
+    internal GamePlan Resolve(AllocationPlan allocation)
+    {
+        var placements = allocation.Placements;
+        var features = placements.Features;
+        var objectives = features.Objectives;
+        return _pipeline.Assemble(new PlanAssemblyRequest(
+            objectives.SourceInput,
+            objectives.WinTargets,
+            objectives.WinSymbols,
+            objectives.FillSymbols,
+            objectives.NonWinTargets,
+            objectives.NonWinPrizeTiers,
+            features.PrizeTiers,
+            features.PrizeValues,
+            placements.PlacedFeatures,
+            placements.WheelLocks,
+            allocation.Allocations,
+            placements.TotalSpins,
+            features.SchedulingInput.BaseSpins,
+            new Dictionary<int, int>(),
+            objectives.Rng.Next(),
+            objectives.Log));
+    }
+}

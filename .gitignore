@@ -5,3 +5,7 @@
 /.vs
 /obj
 /bin
+/tests/CoinPusher.Engine.Tests/bin/Debug/net8.0
+/tests/CoinPusher.Engine.Tests/obj/Debug/net8.0
+/src
+/tests/CoinPusher.Engine.Tests/obj

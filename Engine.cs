@@ -7,7 +7,12 @@ namespace CoinPusherEngine;
 public sealed class Engine
 {
     private readonly GamePlan _plan;
-    public Engine(GamePlan plan) { _plan = plan; }
+    public Engine(GamePlan plan)
+    {
+        if (!plan.Verified)
+            throw new ArgumentException("Engine requires a verified GamePlan.", nameof(plan));
+        _plan = plan;
+    }
 
     public GameResult Run()
     {
