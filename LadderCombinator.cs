@@ -48,9 +48,9 @@ public sealed class BundleEntry
 
 /// <summary>
 /// Result of bundling a whole prize list into one ticket: the ready-to-plan MathInput,
-/// which symbol covered which amount(s), and which requested amounts couldn't be included
-/// because every requested prize amount must consume a distinct symbol; if the ladder
-/// cannot represent all requested prizes distinctly, bundling throws.
+/// which symbol covered which amount(s). Bundle() is mandatory-cover: requested
+/// amounts are never silently dropped; if the full set cannot fit in the current
+/// engine envelope, bundling throws before Planner receives an invalid input.
 /// </summary>
 public sealed class BundleResult
 {
@@ -158,16 +158,17 @@ public sealed class LadderCombinator
     /// Every multi-symbol combination is applied atomically — either every symbol in
     /// the chosen combination merges cleanly, or that combination isn't used at all.
     ///
-    /// Failure is loud, never silent: if an amount cannot be reached by any distinct
-    /// single candidate AND no distinct combination of candidates sums to it, Bundle()
-    /// throws an InvalidOperationException naming the amount — it never returns a result
-    /// with amounts quietly missing or silently shared.
+    /// Failure is explicit, never silent: if an amount cannot be reached by any distinct
+    /// single candidate or combination that still leaves the ticket structurally feasible,
+    /// Bundle() throws an InvalidOperationException naming the amount. It never returns
+    /// a result with requested prizes quietly missing or silently shared.
     /// </summary>
     public BundleResult Bundle(IEnumerable<decimal> amounts)
     {
         var ordered = amounts.OrderBy(a => a).ToList();
         var bySym   = new Dictionary<int, BundleEntry>();
         var covered = new List<decimal>();
+        var skipped = new List<decimal>();
 
         foreach (var amount in ordered)
         {
@@ -195,7 +196,7 @@ public sealed class LadderCombinator
                     second = new List<LadderCandidate>();
                 }
 
-                var single = TryPick(bySym, first) ?? TryPick(bySym, second);
+                var single = TryPickFeasible(bySym, first) ?? TryPickFeasible(bySym, second);
                 if (single != null) winningCombo = new List<LadderCandidate> { single };
             }
 
@@ -203,18 +204,20 @@ public sealed class LadderCombinator
             // one would reuse an already-consumed symbol) — search for a SUBSET of
             // candidates across unused DIFFERENT symbols whose amounts sum to the target exactly.
             // No cap on how many symbols may combine. When multiple valid combinations
-            // exist, one is picked uniformly at random among all of them.
             if (winningCombo == null)
             {
                 var allCombos = FindSumCombinations(amount, bySym);
-                if (allCombos.Count > 0)
-                    winningCombo = allCombos[_rng.Next(allCombos.Count)];
+                var feasibleCombos = allCombos
+                    .Where(combo => IsFeasibleAddition(bySym, combo))
+                    .ToList();
+                if (feasibleCombos.Count > 0)
+                    winningCombo = feasibleCombos[_rng.Next(feasibleCombos.Count)];
             }
 
             if (winningCombo == null)
                 throw new InvalidOperationException(
-                    $"${amount} cannot be reached — no single symbol/tier matches it exactly, " +
-                    "and no distinct combination of unused symbols/tiers sums to it either.");
+                    $"${amount} cannot be reached without violating ticket capacity. " +
+                    "Increase the spin/feature envelope or split the requested prizes across tickets.");
 
             // Apply the whole winning combination atomically.
             foreach (var c in winningCombo)
@@ -236,7 +239,7 @@ public sealed class LadderCombinator
             Input   = input,
             Entries = bySym.Values.ToList(),
             Covered = covered,
-            Skipped = new List<decimal>(),
+            Skipped = skipped,
         };
     }
 
@@ -253,6 +256,88 @@ public sealed class LadderCombinator
                 return candidate;
         }
         return null;
+    }
+
+    private LadderCandidate? TryPickFeasible(Dictionary<int, BundleEntry> bySym, List<LadderCandidate> pool)
+    {
+        foreach (var candidate in pool)
+        {
+            if (bySym.ContainsKey(candidate.Sym)) continue;
+            if (IsFeasibleAddition(bySym, new[] { candidate }))
+                return candidate;
+        }
+        return null;
+    }
+
+    private bool IsFeasibleAddition(
+        Dictionary<int, BundleEntry> bySym,
+        IEnumerable<LadderCandidate> addition)
+    {
+        var entries = bySym.Values
+            .Select(e => new BundleEntry
+            {
+                Sym = e.Sym,
+                Target = e.Target,
+                Tier = e.Tier,
+                Amounts = new List<decimal>(e.Amounts),
+            })
+            .ToDictionary(e => e.Sym);
+
+        foreach (var candidate in addition)
+        {
+            if (!entries.ContainsKey(candidate.Sym))
+            {
+                entries[candidate.Sym] = new BundleEntry
+                {
+                    Sym = candidate.Sym,
+                    Target = candidate.Target,
+                    Tier = candidate.Tier,
+                    Amounts = new List<decimal>(),
+                };
+            }
+        }
+
+        return IsStructurallyFeasible(entries.Values);
+    }
+
+    private bool IsStructurallyFeasible(IEnumerable<BundleEntry> entries)
+    {
+        var list = entries.ToList();
+        if (list.Count == 0) return false;
+        var targets = list.ToDictionary(e => e.Sym, e => e.Target);
+        var requiredPrizeUpgrades = list.Sum(e => Math.Max(0, e.Tier));
+        var maxSym = SymbolPoolSizeFor(list.Count);
+        var fillSymbols = Enumerable.Range(1, maxSym)
+            .Except(targets.Keys)
+            .ToArray();
+        if (fillSymbols.Length < 2) return false;
+
+        var maxWheels = Math.Min(FeatReg.Cfg["WHEEL"].Max, list.Count);
+        var maxFlushes = K.COLS - 1;
+        var maxExtras = K.MAX_SPINS - K.BASE_SPINS;
+
+        for (var wheels = 0; wheels <= maxWheels; wheels++)
+        for (var flushes = 0; flushes <= maxFlushes; flushes++)
+        for (var extras = 0; extras <= maxExtras; extras++)
+        {
+            var totalSpins = K.BASE_SPINS + extras;
+            var wheelFireSpins = Math.Min(wheels, Math.Max(0, totalSpins - 2));
+            var physWins = CapacityAnalyzer.PhysicalWins(targets, wheels);
+            var tokenLoad = wheels + extras + requiredPrizeUpgrades;
+
+            if (CapacityAnalyzer.IsFeasible(
+                    physWins,
+                    totalSpins,
+                    fillSymbols,
+                    tokenLoad,
+                    flushes,
+                    wheelFireSpins))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

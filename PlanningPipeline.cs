@@ -46,7 +46,7 @@ internal interface IPlanVerificationStage
 
 internal sealed class DefaultPlanAssemblyPipeline : IPlanAssemblyPipeline
 {
-    private const int LocalRealizationAttempts = 16;
+    private const int LocalRealizationAttempts = 32;
 
     private readonly ISpinPlanBuildStage _builder;
     private readonly ISpawnResolutionStage _resolver;

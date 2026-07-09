@@ -36,6 +36,20 @@ if (args.Length > 0 && args[0] == "spinprobe")
     RunSpinProbe(seed);
     return;
 }
+if (args.Length > 0 && args[0] == "bundlecheck")
+{
+    int count = args.Length > 1 && int.TryParse(args[1], out var parsedCount) ? parsedCount : 1000;
+    int seed = args.Length > 2 && int.TryParse(args[2], out var parsedSeed) ? parsedSeed : 20260703;
+    RunBundleCheck(count, seed);
+    return;
+}
+if (args.Length > 0 && args[0] == "pusheraudit")
+{
+    int count = args.Length > 1 && int.TryParse(args[1], out var parsedCount) ? parsedCount : 1000;
+    int seed = args.Length > 2 && int.TryParse(args[2], out var parsedSeed) ? parsedSeed : 20260703;
+    RunPusherAudit(count, seed);
+    return;
+}
 
 var rows = new List<PrizeLadderRow>
 {
@@ -46,10 +60,10 @@ var rows = new List<PrizeLadderRow>
     new() { Target = 25, Tiers = new decimal[] { 100, 200, 500 } },
     new() { Target = 30, Tiers = new decimal[] { 10000 } },
 };
-
 var bundle = new LadderCombinator(rows).Bundle(new decimal[] { 1, 20,100});
 Console.WriteLine($"Covered: [${string.Join(",",bundle.Covered.Select(a=>$"${a}"))}]");
 Console.WriteLine($"Entries: [{string.Join(";",bundle.Entries.Select(e=>$"sym{e.Sym}@tier{e.Tier}"))}]");
+Console.WriteLine($"Skipped: [${string.Join(",",bundle.Skipped.Select(a=>$"${a}"))}]");
 Console.WriteLine($"Targets: [{string.Join(",",bundle.Input.Targets.Select(kv=>$"sym{kv.Key}={kv.Value}"))}]");
 Console.WriteLine($"BaseSpins: {bundle.Input.BaseSpins}");
 
@@ -224,6 +238,162 @@ static void RunVolumeTest(int count, int seed)
     }
 }
 
+static void RunBundleCheck(int count, int seed)
+{
+    var rows = new List<PrizeLadderRow>
+    {
+        new() { Target = 20, Tiers = new decimal[] { 1, 2, 5 } },
+        new() { Target = 20, Tiers = new decimal[] { 2, 4, 8 } },
+        new() { Target = 20, Tiers = new decimal[] { 5, 10, 25 } },
+        new() { Target = 25, Tiers = new decimal[] { 10, 20, 50 } },
+        new() { Target = 25, Tiers = new decimal[] { 100, 200, 500 } },
+        new() { Target = 30, Tiers = new decimal[] { 10000 } },
+    };
+    var amounts = new decimal[] { 1, 2, 5, 10, 100, 10000 };
+    var failures = new List<string>();
+    var nonWinCounts = new Dictionary<int, int>();
+    var spinCounts = new Dictionary<int, int>();
+    var coveredCounts = new Dictionary<string, int>();
+    var skippedCounts = new Dictionary<string, int>();
+
+    for (var i = 0; i < count; i++)
+    {
+        var bundleSeed = VolumeSeed(seed, i);
+        var plannerSeed = VolumeSeed(seed + 1, i);
+        try
+        {
+            var bundle = new LadderCombinator(rows, bundleSeed).Bundle(amounts);
+            var coveredKey = string.Join(",", bundle.Covered);
+            var skippedKey = string.Join(",", bundle.Skipped);
+            coveredCounts[coveredKey] = coveredCounts.GetValueOrDefault(coveredKey) + 1;
+            skippedCounts[skippedKey] = skippedCounts.GetValueOrDefault(skippedKey) + 1;
+
+            var plan = new Planner(bundle.Input, plannerSeed).Plan();
+            var ticket = TicketSerializer.ToTicketObject(plan);
+            var report = TicketChecker.CheckTicket(ticket);
+            var failure = report.Checks.FirstOrDefault(check => check.Result == TicketChecker.Status.Fail);
+            if (failure != null)
+                throw new InvalidOperationException(
+                    $"TicketChecker failed {failure.Category}/{failure.Name}: {failure.Detail}");
+
+            nonWinCounts[plan.NonWinTargets.Count] = nonWinCounts.GetValueOrDefault(plan.NonWinTargets.Count) + 1;
+            spinCounts[plan.TotalSpins] = spinCounts.GetValueOrDefault(plan.TotalSpins) + 1;
+        }
+        catch (Exception ex)
+        {
+            var bundle = new LadderCombinator(rows, bundleSeed).Bundle(amounts);
+            failures.Add(
+                $"#{i} bundleSeed={bundleSeed} plannerSeed={plannerSeed}: " +
+                $"{DeepestMessage(ex)} " +
+                $"covered=[{string.Join(",", bundle.Covered)}] skipped=[{string.Join(",", bundle.Skipped)}] " +
+                $"targets=[{string.Join(",", bundle.Input.Targets.Select(kv => $"sym{kv.Key}={kv.Value}"))}] " +
+                $"required=[{string.Join(",", bundle.Input.Required.Select(kv => $"{kv.Key}={kv.Value}"))}]");
+            if (failures.Count >= 20) break;
+        }
+    }
+
+    Console.WriteLine("==== BUNDLE CHECK ====");
+    Console.WriteLine($"tickets={count}");
+    Console.WriteLine($"failures={failures.Count}");
+    Console.WriteLine("nonWinCounts=" + FormatCounts(nonWinCounts));
+    Console.WriteLine("spins=" + FormatCounts(spinCounts));
+    Console.WriteLine("covered=" + FormatStringCounts(coveredCounts));
+    Console.WriteLine("skipped=" + FormatStringCounts(skippedCounts));
+    foreach (var failure in failures)
+        Console.WriteLine("failure: " + failure);
+    if (failures.Count > 0) Environment.Exit(1);
+}
+
+static void RunPusherAudit(int count, int seed)
+{
+    var rows = new List<PrizeLadderRow>
+    {
+        new() { Target = 20, Tiers = new decimal[] { 1, 2, 5 } },
+        new() { Target = 20, Tiers = new decimal[] { 2, 4, 8 } },
+        new() { Target = 20, Tiers = new decimal[] { 5, 10, 25 } },
+        new() { Target = 25, Tiers = new decimal[] { 10, 20, 50 } },
+        new() { Target = 25, Tiers = new decimal[] { 100, 200, 500 } },
+        new() { Target = 30, Tiers = new decimal[] { 10000 } },
+    };
+    var amounts = new decimal[] { 1, 2, 5, 10, 100, 10000 };
+    var pushValueCounts = new Dictionary<int, int>();
+    var patternCounts = new Dictionary<string, int>();
+    var failures = new List<string>();
+    var totalTurns = 0;
+    var allThreeTurns = 0;
+    var monotonicMixedTurns = 0;
+    var flushPushers = 0;
+
+    for (var i = 0; i < count; i++)
+    {
+        var bundleSeed = VolumeSeed(seed, i);
+        var plannerSeed = VolumeSeed(seed + 1, i);
+        try
+        {
+            var bundle = new LadderCombinator(rows, bundleSeed).Bundle(amounts);
+            var plan = new Planner(bundle.Input, plannerSeed).Plan();
+            var ticket = TicketSerializer.ToTicketObject(plan);
+            var report = TicketChecker.CheckTicket(ticket);
+            var failure = report.Checks.FirstOrDefault(check => check.Result == TicketChecker.Status.Fail);
+            if (failure != null)
+                throw new InvalidOperationException(
+                    $"TicketChecker failed {failure.Category}/{failure.Name}: {failure.Detail}");
+
+            foreach (var turn in ticket.Turns)
+            {
+                totalTurns++;
+                var normal = turn.Pushers
+                    .Where(pusher => pusher.FeatureId != K.F_FLUSH_ID)
+                    .Select(pusher => pusher.PushValue)
+                    .ToArray();
+                foreach (var push in normal)
+                    pushValueCounts[push] = pushValueCounts.GetValueOrDefault(push) + 1;
+                flushPushers += turn.Pushers.Count(pusher => pusher.FeatureId == K.F_FLUSH_ID);
+
+                var pattern = string.Join("-", turn.Pushers.Select(pusher =>
+                    pusher.FeatureId == K.F_FLUSH_ID ? "F" : pusher.PushValue.ToString()));
+                patternCounts[pattern] = patternCounts.GetValueOrDefault(pattern) + 1;
+                if (normal.Length == K.COLS && normal.All(push => push == K.MAX_PUSH))
+                    allThreeTurns++;
+                if (normal.Length > 1
+                    && normal.Distinct().Count() > 1
+                    && (normal.SequenceEqual(normal.OrderBy(x => x))
+                        || normal.SequenceEqual(normal.OrderByDescending(x => x))))
+                {
+                    monotonicMixedTurns++;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            failures.Add($"#{i} bundleSeed={bundleSeed} plannerSeed={plannerSeed}: {DeepestMessage(ex)}");
+        }
+    }
+
+    Console.WriteLine("==== PUSHER AUDIT ====");
+    Console.WriteLine($"tickets={count}");
+    Console.WriteLine($"failures={failures.Count}");
+    Console.WriteLine($"turns={totalTurns}");
+    Console.WriteLine($"allThreeTurns={allThreeTurns}");
+    Console.WriteLine($"monotonicMixedTurns={monotonicMixedTurns}");
+    Console.WriteLine($"flushPushers={flushPushers}");
+    Console.WriteLine("pushValues=" + FormatCounts(pushValueCounts));
+    Console.WriteLine("topPatterns=" + string.Join(",", patternCounts.OrderByDescending(kv => kv.Value)
+        .ThenBy(kv => kv.Key)
+        .Take(12)
+        .Select(kv => $"{kv.Key}:{kv.Value}")));
+    foreach (var failure in failures.Take(10))
+        Console.WriteLine("failure: " + failure);
+    if (failures.Count > 0) Environment.Exit(1);
+}
+
+static string DeepestMessage(Exception ex)
+{
+    var leaf = ex;
+    while (leaf.InnerException != null) leaf = leaf.InnerException;
+    return leaf.Message;
+}
+
 static void RunNearMissDiagnostic(int seedsPerScenario)
 {
     var rows = new List<PrizeLadderRow>
@@ -311,7 +481,7 @@ static void RunNearMissDiagnostic(int seedsPerScenario)
                 {
                     samples.Add(
                         $"amounts=[{string.Join(",", amounts)}] seed={seed} sym={sym} " +
-                        $"target>={target}<20 actual={actual} wheel={hasWheel} prup={hasPrizeUpgrade}");
+                        $"target>={target}<{K.SymbolFillCap(sym)} actual={actual} wheel={hasWheel} prup={hasPrizeUpgrade}");
                 }
             }
         }
@@ -410,6 +580,10 @@ static void RunFeatureAudit(int count, int seed)
     var allFeatureCounts = new Dictionary<int, int>();
     var chainRootCounts = new Dictionary<int, int>();
     var chainPairCounts = new Dictionary<string, int>();
+    var firstSpinFeatureTokens = 0;
+    var finalSpinWheelTokens = 0;
+    var prizeUpgradeTokens = 0;
+    var latePrizeUpgradeTokens = 0;
     var flushPushers = 0;
     var physicalExtraTokens = 0;
     var serializedExtraTokens = 0;
@@ -440,34 +614,44 @@ static void RunFeatureAudit(int count, int seed)
                 .Count(cell => cell.IsFeat && cell.Sym == K.F_PRUP);
 
             var hasRetrigger = false;
-            foreach (var turn in ticket.Turns)
+            foreach (var (turn, turnIndex) in ticket.Turns.Select((turn, index) => (turn, index)))
             {
                 flushPushers += turn.Pushers.Count(pusher => pusher.FeatureId == K.F_FLUSH_ID);
-            }
 
-            foreach (var turn in ticket.Turns)
-            foreach (var spawn in turn.Spawns)
-            {
-                if (spawn.Feature == null) continue;
-                CountFeatureAudit(spawn.Feature, rootFeatureCounts);
-                CountFeatureAuditRecursive(spawn.Feature, allFeatureCounts);
-                serializedExtraTokens += CountFeatureIdAudit(spawn.Feature, K.F_XSPIN);
-                serializedPrizeUpgradeTokens += CountFeatureIdAudit(spawn.Feature, K.F_PRUP);
-
-                if (spawn.Feature.FeatureId == K.F_WHEEL && spawn.Feature.WheelStackValue.HasValue)
+                foreach (var spawn in turn.Spawns)
                 {
-                    var value = spawn.Feature.WheelStackValue.Value;
-                    wheelValues[value] = wheelValues.GetValueOrDefault(value) + 1;
-                }
+                    if (spawn.Feature == null) continue;
+                    if (turnIndex == 0) firstSpinFeatureTokens++;
+                    if (turnIndex == ticket.Turns.Length - 1 && spawn.Feature.FeatureId == K.F_WHEEL)
+                        finalSpinWheelTokens++;
 
-                if (spawn.Feature.ReTrigger.Length > 0)
-                {
-                    hasRetrigger = true;
-                    chainRootCounts[spawn.Feature.FeatureId] = chainRootCounts.GetValueOrDefault(spawn.Feature.FeatureId) + 1;
-                    foreach (var nestedId in FlattenFeatureIds(spawn.Feature.ReTrigger))
+                    CountFeatureAudit(spawn.Feature, rootFeatureCounts);
+                    CountFeatureAuditRecursive(spawn.Feature, allFeatureCounts);
+                    serializedExtraTokens += CountFeatureIdAudit(spawn.Feature, K.F_XSPIN);
+                    serializedPrizeUpgradeTokens += CountFeatureIdAudit(spawn.Feature, K.F_PRUP);
+
+                    if (spawn.Feature.FeatureId == K.F_PRUP)
                     {
-                        var pair = $"{spawn.Feature.FeatureId}->{nestedId}";
-                        chainPairCounts[pair] = chainPairCounts.GetValueOrDefault(pair) + 1;
+                        prizeUpgradeTokens++;
+                        if (turnIndex >= Math.Max(0, ticket.Turns.Length - 3))
+                            latePrizeUpgradeTokens++;
+                    }
+
+                    if (spawn.Feature.FeatureId == K.F_WHEEL && spawn.Feature.WheelStackValue.HasValue)
+                    {
+                        var value = spawn.Feature.WheelStackValue.Value;
+                        wheelValues[value] = wheelValues.GetValueOrDefault(value) + 1;
+                    }
+
+                    if (spawn.Feature.ReTrigger.Length > 0)
+                    {
+                        hasRetrigger = true;
+                        chainRootCounts[spawn.Feature.FeatureId] = chainRootCounts.GetValueOrDefault(spawn.Feature.FeatureId) + 1;
+                        foreach (var nestedId in FlattenFeatureIds(spawn.Feature.ReTrigger))
+                        {
+                            var pair = $"{spawn.Feature.FeatureId}->{nestedId}";
+                            chainPairCounts[pair] = chainPairCounts.GetValueOrDefault(pair) + 1;
+                        }
                     }
                 }
             }
@@ -490,6 +674,9 @@ static void RunFeatureAudit(int count, int seed)
     Console.WriteLine($"serializedExtraSpinTokens={serializedExtraTokens}");
     Console.WriteLine($"physicalPrizeUpgradeTokens={physicalPrizeUpgradeTokens}");
     Console.WriteLine($"serializedPrizeUpgradeTokens={serializedPrizeUpgradeTokens}");
+    Console.WriteLine($"firstSpinFeatureTokens={firstSpinFeatureTokens}");
+    Console.WriteLine($"finalSpinWheelTokens={finalSpinWheelTokens}");
+    Console.WriteLine($"latePrizeUpgradeTokens={latePrizeUpgradeTokens}/{prizeUpgradeTokens}");
     Console.WriteLine($"flushPushers={flushPushers}");
     Console.WriteLine($"ticketsWithRetrigger={ticketsWithRetrigger}");
     Console.WriteLine($"chainRootCounts={FormatCounts(chainRootCounts)}");
@@ -731,8 +918,9 @@ static void VerifyInternalReplay(GamePlan plan)
     foreach (var (sym, target) in plan.NonWinTargets)
     {
         replay.TryGetValue(sym, out var got);
-        if (got < target || got >= K.FILL_CAP)
-            throw new InvalidOperationException($"Internal replay non-win mismatch sym={sym} got={got} target>={target} cap<{K.FILL_CAP}");
+        var cap = K.SymbolFillCap(sym);
+        if (got < target || got >= cap)
+            throw new InvalidOperationException($"Internal replay non-win mismatch sym={sym} got={got} target>={target} cap<{cap}");
     }
 }
 

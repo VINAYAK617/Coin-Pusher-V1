@@ -83,7 +83,7 @@ internal sealed class ObjectiveStage
         if (nonWinTargets.Count > 0)
         {
             request.Log.Add("nonWins=[" + string.Join(",",
-                nonWinTargets.Select(kv => $"sym{kv.Key}>={kv.Value}<cap{K.FILL_CAP}")) + "]");
+                nonWinTargets.Select(kv => $"sym{kv.Key}>={kv.Value}<cap{K.SymbolFillCap(kv.Key)}")) + "]");
         }
         if (nonWinPrizeTiers.Count > 0)
         {
@@ -121,13 +121,19 @@ internal sealed class ObjectiveStage
 
         var maxSymbols = Math.Min(profile.MaxSymbols, NearMissSymbolCap(input, fillSymbols.Count, planningPressure));
         var count = PickNearMissCount(input, maxSymbols, fillSymbols.Count, planningPressure, rng);
-        var minTarget = Math.Min(Math.Max(profile.Min, K.NONWIN_MIN_TARGET), K.FILL_CAP - 1);
-        var maxTarget = Math.Min(profile.Max, K.FILL_CAP - 1);
+        var minTarget = Math.Max(profile.Min, K.NONWIN_MIN_TARGET);
 
         return fillSymbols
             .OrderBy(_ => rng.Next())
             .Take(count)
-            .ToDictionary(sym => sym, _ => rng.Next(minTarget, maxTarget + 1));
+            .ToDictionary(
+                sym => sym,
+                sym =>
+                {
+                    var symbolMax = Math.Min(profile.Max, K.SymbolFillCap(sym) - 1);
+                    var symbolMin = Math.Min(minTarget, symbolMax);
+                    return rng.Next(symbolMin, symbolMax + 1);
+                });
     }
 
     private static int NearMissSymbolCap(MathInput input, int fillSymbolCount, int planningPressure)
@@ -308,36 +314,46 @@ internal sealed class FeaturePlanStage
         var rng = objectives.Rng;
         var fillCount = objectives.FillSymbols.Count;
         var plannedFillerLoad = objectives.NonWinTargets.Values.Sum();
-        var wheels = required.GetValueOrDefault("WHEEL");
-        var flushes = required.GetValueOrDefault("FLUSH");
-        var physWins = CapacityAnalyzer.PhysicalWins(input.Targets, wheels);
-        var plannedLoad = physWins + plannedFillerLoad;
-        var tokenLoad = RequiredTokenLoad(required);
-        var wheelOrder = new List<int>();
+        var minWheels = required.GetValueOrDefault("WHEEL");
+        var minFlushes = required.GetValueOrDefault("FLUSH");
+        var minExtras = required.GetValueOrDefault("EXTRA_SPIN");
+        var fixedTokenLoad = RequiredTokenLoad(required) - minWheels - minExtras;
+        var plan = ChooseMandatoryFeatureCounts(
+            input,
+            fillCount,
+            plannedFillerLoad,
+            fixedTokenLoad,
+            minWheels,
+            minFlushes,
+            minExtras);
 
-        if (!required.ContainsKey("WHEEL"))
+        var wheels = plan.Wheels;
+        var flushes = plan.Flushes;
+        var extras = plan.Extras;
+        var wheelOrder = BuildMandatoryWheelOrder(objectives, wheels);
+
+        if (objectives.PlanningPressure == 0)
         {
-            foreach (var sym in objectives.WinSymbols.OrderByDescending(s => input.Targets[s]))
+            foreach (var sym in objectives.WinSymbols
+                         .OrderByDescending(s => input.Targets[s])
+                         .Where(sym => !wheelOrder.Contains(sym) && input.Targets[sym] >= 10))
             {
-                var target = input.Targets[sym];
-                var without = CapacityAnalyzer.MinExtraSpins(plannedLoad, fillCount, tokenLoad, flushes, wheels);
-                var withOnePhys = CapacityAnalyzer.PhysicalWins(input.Targets, wheels + 1);
-                var withOneLoad = withOnePhys + plannedFillerLoad;
-                var withOne = CapacityAnalyzer.MinExtraSpins(withOneLoad, fillCount, tokenLoad + 1, flushes, wheels + 1);
-                var needed = withOne >= 0 && without < 0;
-                var headroom = CapacityAnalyzer.FillerBudget(plannedLoad, K.BASE_SPINS, tokenLoad, flushes, wheels);
-                var optional = objectives.PlanningPressure == 0
-                    && !needed && without == 0 && withOne == 0 && headroom >= fillCount
-                    && target >= 10 && rng.NextDouble() < K.P_WHEEL_OPTIONAL;
-                if (!needed && !optional) continue;
+                if (wheels >= FeatReg.Cfg["WHEEL"].Max) break;
+                if (rng.NextDouble() >= K.P_WHEEL_OPTIONAL) continue;
+                if (!IsFeatureShapeFeasible(
+                        input,
+                        fillCount,
+                        plannedFillerLoad,
+                        fixedTokenLoad,
+                        wheels + 1,
+                        flushes,
+                        extras))
+                {
+                    continue;
+                }
 
                 wheels++;
-                required["WHEEL"] = wheels;
                 wheelOrder.Add(sym);
-                physWins = withOnePhys;
-                plannedLoad = withOneLoad;
-                tokenLoad++;
-                if (wheels >= FeatReg.Cfg["WHEEL"].Max) break;
             }
         }
 
@@ -347,35 +363,180 @@ internal sealed class FeaturePlanStage
             foreach (var sym in objectives.NonWinTargets.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).Take(1))
             {
                 if (rng.NextDouble() >= K.P_NONWIN_WHEEL) continue;
+                if (!IsFeatureShapeFeasible(
+                        input,
+                        fillCount,
+                        plannedFillerLoad,
+                        fixedTokenLoad,
+                        wheels + 1,
+                        flushes,
+                        extras))
+                {
+                    continue;
+                }
+
                 wheels++;
-                required["WHEEL"] = wheels;
                 wheelOrder.Add(sym);
-                tokenLoad++;
                 break;
             }
         }
 
-        if (!required.ContainsKey("FLUSH"))
+        if (objectives.PlanningPressure == 0)
         {
             while (flushes < K.COLS - 1)
             {
-                var without = CapacityAnalyzer.MinExtraSpins(plannedLoad, fillCount, tokenLoad, flushes, wheels);
-                var withOne = CapacityAnalyzer.MinExtraSpins(plannedLoad, fillCount, tokenLoad, flushes + 1, wheels);
-                var needed = withOne >= 0 && (without < 0 || withOne < without);
-                var optional = objectives.PlanningPressure == 0
-                    && !needed && without == 0 && rng.NextDouble() < K.P_FLUSH_OPTIONAL;
-                if (!needed && !optional) break;
+                if (rng.NextDouble() >= K.P_FLUSH_OPTIONAL) break;
+                if (!IsFeatureShapeFeasible(
+                        input,
+                        fillCount,
+                        plannedFillerLoad,
+                        fixedTokenLoad,
+                        wheels,
+                        flushes + 1,
+                        extras))
+                {
+                    break;
+                }
+
                 flushes++;
             }
-            if (flushes > 0) required["FLUSH"] = flushes;
         }
 
-        var extraExisting = required.GetValueOrDefault("EXTRA_SPIN");
-        var extrasNeeded = CapacityAnalyzer.MinExtraSpins(plannedLoad, fillCount, tokenLoad, flushes, wheels);
-        if (extrasNeeded > extraExisting)
-            required["EXTRA_SPIN"] = extrasNeeded;
+        SetRequired(required, "WHEEL", wheels);
+        SetRequired(required, "FLUSH", flushes);
+        SetRequired(required, "EXTRA_SPIN", extras);
 
         return (required, wheelOrder);
+    }
+
+    private static (int Wheels, int Flushes, int Extras) ChooseMandatoryFeatureCounts(
+        MathInput input,
+        int fillCount,
+        int plannedFillerLoad,
+        int fixedTokenLoad,
+        int minWheels,
+        int minFlushes,
+        int minExtras)
+    {
+        var maxWheels = FeatReg.Cfg["WHEEL"].Max;
+        var maxFlushes = Math.Min(FeatReg.Cfg["FLUSH"].Max, K.COLS - 1);
+        var maxExtras = K.MAX_SPINS - K.BASE_SPINS;
+        (int Wheels, int Flushes, int Extras, int Score)? best = null;
+
+        for (var wheels = minWheels; wheels <= maxWheels; wheels++)
+        for (var flushes = minFlushes; flushes <= maxFlushes; flushes++)
+        for (var extras = minExtras; extras <= maxExtras; extras++)
+        {
+            if (!IsFeatureShapeFeasible(
+                    input,
+                    fillCount,
+                    plannedFillerLoad,
+                    fixedTokenLoad,
+                    wheels,
+                    flushes,
+                    extras))
+            {
+                continue;
+            }
+
+            var physWins = CapacityAnalyzer.PhysicalWins(input.Targets, wheels);
+            var plannedLoad = physWins + plannedFillerLoad;
+            var tokenLoad = fixedTokenLoad + wheels + extras;
+            var fillerBudget = CapacityAnalyzer.FillerBudget(plannedLoad, K.BASE_SPINS + extras, tokenLoad, flushes, wheels);
+            var maxFiller = input.MaxSym > 0
+                ? Enumerable.Range(1, input.MaxSym)
+                    .Except(input.Targets.Keys)
+                    .Sum(sym => K.SymbolFillCap(sym) - 2)
+                : fillCount * (K.FILL_CAP - 2);
+            var lowHeadroomPenalty = Math.Max(0, fillCount - fillerBudget) * 10;
+            var highHeadroomPenalty = Math.Max(0, fillerBudget - maxFiller + fillCount) * 10;
+            var totalSpins = K.BASE_SPINS + extras;
+            var comfortablePushCapacity = totalSpins * K.COLS * 2;
+            var pushPressurePenalty = Math.Max(0, plannedLoad + tokenLoad - comfortablePushCapacity) * 500;
+            var score = extras * 100
+                + wheels * 100
+                + flushes * 20
+                + pushPressurePenalty
+                + lowHeadroomPenalty
+                + highHeadroomPenalty;
+
+            if (best == null || score < best.Value.Score)
+                best = (wheels, flushes, extras, score);
+        }
+
+        if (best == null)
+            throw new InvalidOperationException(
+                "Could not find a feasible mandatory feature plan for this ticket envelope.");
+
+        return (best.Value.Wheels, best.Value.Flushes, best.Value.Extras);
+    }
+
+    private static List<int> BuildMandatoryWheelOrder(ObjectivePlan objectives, int wheels)
+    {
+        var reliable = objectives.WinSymbols
+            .Where(sym => objectives.SourceInput.Targets[sym] < 45)
+            .OrderBy(sym => objectives.SourceInput.Targets[sym])
+            .ToArray();
+        var fallback = objectives.WinSymbols
+            .Where(sym => objectives.SourceInput.Targets[sym] >= 45)
+            .OrderBy(sym => objectives.SourceInput.Targets[sym])
+            .ToArray();
+        var order = new List<int>();
+
+        foreach (var sym in reliable)
+        {
+            if (order.Count >= wheels) return order;
+            order.Add(sym);
+        }
+
+        foreach (var sym in fallback)
+        {
+            if (order.Count >= wheels) return order;
+            order.Add(sym);
+        }
+
+        var repeatIndex = 0;
+        while (order.Count < wheels && reliable.Length > 0)
+        {
+            order.Add(reliable[repeatIndex % reliable.Length]);
+            repeatIndex++;
+        }
+
+        return order;
+    }
+
+    private static bool IsFeatureShapeFeasible(
+        MathInput input,
+        int fillCount,
+        int plannedFillerLoad,
+        int fixedTokenLoad,
+        int wheels,
+        int flushes,
+        int extras)
+    {
+        if (wheels > FeatReg.Cfg["WHEEL"].Max) return false;
+        if (flushes > Math.Min(FeatReg.Cfg["FLUSH"].Max, K.COLS - 1)) return false;
+        if (extras > K.MAX_SPINS - K.BASE_SPINS) return false;
+
+        var physWins = CapacityAnalyzer.PhysicalWins(input.Targets, wheels);
+        var plannedLoad = physWins + plannedFillerLoad;
+        var tokenLoad = fixedTokenLoad + wheels + extras;
+        var fillSymbols = Enumerable.Range(1, input.MaxSym)
+            .Except(input.Targets.Keys)
+            .ToArray();
+        return CapacityAnalyzer.IsFeasible(
+            plannedLoad,
+            K.BASE_SPINS + extras,
+            fillSymbols,
+            tokenLoad,
+            flushes,
+            wheels);
+    }
+
+    private static void SetRequired(Dictionary<string, int> required, string id, int count)
+    {
+        if (count > 0) required[id] = count;
+        else required.Remove(id);
     }
 
     private static int RequiredTokenLoad(IReadOnlyDictionary<string, int> required) =>
@@ -422,12 +583,17 @@ internal sealed class PlacementStage
             var sym = group.Key;
             var target = targets[sym];
             var ordered = group.OrderBy(f => f.Spin).ToArray();
-            foreach (var feature in ordered.Take(1))
+            foreach (var (feature, index) in ordered.Select((feature, index) => (feature, index)))
             {
-                var wheelN = feature.WN > 0 ? feature.WN : WMath.BestN(target);
-                var lockPlan = WMath.MakeLock(sym, target, feature.Spin, wheelN);
+                var segmentTarget = ordered.Length == 1
+                    ? target
+                    : Math.Max(1, (int)Math.Ceiling(target / (double)ordered.Length));
+                var remainingTarget = Math.Max(1, target - segmentTarget * index);
+                var lockTarget = Math.Min(segmentTarget, remainingTarget);
+                var wheelN = feature.WN > 0 ? feature.WN : WMath.BestN(lockTarget);
+                var lockPlan = WMath.MakeLock(sym, lockTarget, feature.Spin, wheelN);
                 locks.Add(lockPlan);
-                objectives.Log.Add($"  WHEEL sym={sym} tgt={target} stack={lockPlan.Stack} pre={lockPlan.Pre} post={lockPlan.Post} zone={lockPlan.Zone} @S{feature.Spin}");
+                objectives.Log.Add($"  WHEEL sym={sym} tgt={lockTarget}/{target} stack={lockPlan.Stack} pre={lockPlan.Pre} post={lockPlan.Post} zone={lockPlan.Zone} @S{feature.Spin}");
             }
         }
         return locks;

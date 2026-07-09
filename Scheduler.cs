@@ -40,6 +40,7 @@ internal sealed class Scheduler
         var tokenReserve = new Dictionary<int, int>();
         foreach (var f in _placed.Where(f => FeatReg.Has(f.Id) && FeatReg.Get(f.Id).HasToken))
             tokenReserve[f.Spin] = tokenReserve.GetValueOrDefault(f.Spin, 0) + 1;
+        var wheelZoneCells = ResolveWheelZoneCells(totalSpins, tokenReserve);
 
         var slots = Enumerable.Range(0, totalSpins).Select(_ => new Dictionary<int, int>()).ToList();
 
@@ -47,9 +48,7 @@ internal sealed class Scheduler
         foreach (var lk in _locks)
         {
             if (lk.FireSpin >= totalSpins) continue;
-            int reserve   = tokenReserve.GetValueOrDefault(lk.FireSpin, 0);
-            int zoneCells = Math.Max(0, lk.Zone - reserve);
-            Add(slots[lk.FireSpin], lk.Sym, zoneCells);
+            Add(slots[lk.FireSpin], lk.Sym, wheelZoneCells.GetValueOrDefault(lk));
         }
 
         // EDF: distribute remaining wins, respecting exact zone capacity ceiling
@@ -60,9 +59,7 @@ internal sealed class Scheduler
             int effectivePost = myLocks.Sum(lk =>
             {
                 if (lk.FireSpin >= totalSpins) return 0;
-                int reserve   = tokenReserve.GetValueOrDefault(lk.FireSpin, 0);
-                int zoneCells = Math.Max(0, lk.Zone - reserve);
-                return zoneCells * lk.Stack;
+                return wheelZoneCells.GetValueOrDefault(lk) * lk.Stack;
             });
 
             int remaining = Math.Max(0, target - effectivePost);
@@ -109,6 +106,31 @@ internal sealed class Scheduler
         }
 
         return slots;
+    }
+
+    private Dictionary<WLock, int> ResolveWheelZoneCells(
+        int totalSpins,
+        IReadOnlyDictionary<int, int> tokenReserve)
+    {
+        var result = _locks.ToDictionary(lk => lk, lk => lk.FireSpin < totalSpins ? lk.Zone : 0);
+
+        foreach (var group in _locks.Where(lk => lk.FireSpin < totalSpins).GroupBy(lk => lk.FireSpin))
+        {
+            var reserveLeft = tokenReserve.GetValueOrDefault(group.Key);
+            if (reserveLeft <= 0) continue;
+
+            // Token reservations consume cells from the shared next-spin WHEEL zone.
+            // Subtract them once per slot, not once per WHEEL lock.
+            foreach (var lk in group.OrderBy(lk => lk.Zone).ThenByDescending(lk => lk.Sym))
+            {
+                if (reserveLeft <= 0) break;
+                var take = Math.Min(result[lk], reserveLeft);
+                result[lk] -= take;
+                reserveLeft -= take;
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

@@ -79,10 +79,48 @@ internal sealed class Resolver
     private void DoLast(SpinPlan last)
     {
         var sim = Simulate(last);
+        foreach (var (featId, origCol, fp) in last.Tokens)
+        {
+            if (!FeatReg.Has(featId)) continue;
+            var feat = FeatReg.Get(featId);
+            var slot = FindLastSpinSlot(sim, last.Spawns, origCol);
+            if (slot.r < 0)
+            {
+                throw new InvalidOperationException(
+                    $"No final-spin slot available for required {featId} token at spin {last.Spin}.");
+            }
+
+            last.Spawns[slot] = Grid.Feat(feat.FeatSym, EndBoardSym(), fp);
+            sim[slot.Item1, slot.Item2] = last.Spawns[slot].Clone();
+        }
+
         for (int r = 0; r < K.ROWS; r++)
         for (int c = 0; c < K.COLS; c++)
             if (sim[r, c] == null)
                 last.Spawns[(r, c)] = Grid.Norm(EndBoardSym());
+    }
+
+    private static (int r, int c) FindLastSpinSlot(
+        Cell?[,] sim,
+        Dictionary<(int, int), Cell> spawns,
+        int origCol)
+    {
+        for (int r = K.ROWS - 1; r >= 0; r--)
+        {
+            var pos = (r, origCol);
+            if (sim[r, origCol] == null && !spawns.ContainsKey(pos))
+                return pos;
+        }
+
+        for (int r = K.ROWS - 1; r >= 0; r--)
+        for (int c = K.COLS - 1; c >= 0; c--)
+        {
+            var pos = (r, c);
+            if (sim[r, c] == null && !spawns.ContainsKey(pos))
+                return pos;
+        }
+
+        return (-1, -1);
     }
 
     private int EndBoardSym() =>

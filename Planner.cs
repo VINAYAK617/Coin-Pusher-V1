@@ -16,7 +16,7 @@ public sealed class Planner
     private static readonly IPlanAssemblyPipeline DefaultBoardPipeline = new DefaultPlanAssemblyPipeline();
     private static readonly CleanGenerationPipeline DefaultPipeline = new(DefaultBoardPipeline);
 
-    private const int MaxPlanAttempts = 16;
+    private const int MaxPlanAttempts = 64;
 
     public Planner(MathInput inp, int? seed = null)
         : this(inp, seed, DefaultBoardPipeline)
@@ -203,8 +203,9 @@ public sealed class Planner
                     throw new ArgumentException($"NonWinTargets sym {sym} out of range 1..{input.MaxSym}");
                 if (input.Targets.ContainsKey(sym))
                     throw new ArgumentException($"NonWinTargets sym {sym} is already a winning target");
-                if (target < K.NONWIN_MIN_TARGET || target >= K.FILL_CAP)
-                    throw new ArgumentException($"NonWinTargets sym {sym} must be in range {K.NONWIN_MIN_TARGET}..{K.FILL_CAP - 1}");
+                var cap = K.SymbolFillCap(sym);
+                if (target < K.NONWIN_MIN_TARGET || target >= cap)
+                    throw new ArgumentException($"NonWinTargets sym {sym} must be in range {K.NONWIN_MIN_TARGET}..{cap - 1}");
             }
         }
 

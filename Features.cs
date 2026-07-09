@@ -33,8 +33,7 @@ internal sealed class WheelFeat : Feat
         if (!ctx.Input.Targets.TryGetValue(sym, out int tgt) || tgt <= 0) return null;
 
         int n = PickStackValue(sym, tgt, spin, col);
-        int stack = WMath.StackFromValue(n), zone = WMath.Zone(tgt, stack);
-        if (zone == 0) return null;
+        int stack = WMath.StackFromValue(n), zone = Math.Max(1, WMath.Zone(tgt, stack));
 
         bool isMulti = ctx.Done.Any(f => f.Id == "WHEEL" && f.WSym == sym);
         if (isMulti)
@@ -50,7 +49,9 @@ internal sealed class WheelFeat : Feat
         // Don't overflow a spin's zone with multiple WHEELs
         int existZone = ctx.Done
             .Where(f => f.Id == "WHEEL" && f.Spin == spin)
-            .Sum(f => ctx.Input.Targets.TryGetValue(f.WSym, out int ft) ? WMath.Zone(ft, WMath.StackFromValue(f.WN)) : 0);
+                .Sum(f => ctx.Input.Targets.TryGetValue(f.WSym, out int ft)
+                    ? Math.Max(1, WMath.Zone(ft, WMath.StackFromValue(f.WN)))
+                    : 0);
         if (existZone + zone > K.COLS - 1) return null;
 
         return new PlacedFeat { Id="WHEEL", Spin=spin, Col=col, WSym=sym, WN=n };
@@ -71,11 +72,21 @@ internal sealed class WheelFeat : Feat
 
     private static int PickSym(PlaceCtx ctx)
     {
-        var order = ctx.Input.WheelSymOrder?.Where(s => ctx.Input.Targets.ContainsKey(s)).Distinct().ToList()
+        var order = ctx.Input.WheelSymOrder?.Where(s => ctx.Input.Targets.ContainsKey(s)).ToList()
                  ?? ctx.Input.Targets.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).ToList();
         var usedCount = ctx.Done.Where(f => f.Id=="WHEEL" && f.WSym!=0)
                             .GroupBy(f => f.WSym).ToDictionary(g => g.Key, g => g.Count());
-        var fresh = order.Where(s => !usedCount.ContainsKey(s)).ToList();
+
+        if (ctx.Input.WheelSymOrder != null && ctx.Input.WheelSymOrder.Count > 0)
+        {
+            var desired = order
+                .GroupBy(s => s)
+                .ToDictionary(g => g.Key, g => g.Count());
+            var nextPlanned = order.FirstOrDefault(sym => usedCount.GetValueOrDefault(sym) < desired[sym]);
+            if (nextPlanned != 0) return nextPlanned;
+        }
+
+        var fresh = order.Distinct().Where(s => !usedCount.ContainsKey(s)).ToList();
         if (fresh.Count > 0) return fresh[0];
         var once = usedCount.Where(kv => kv.Value==1).Select(kv => kv.Key).ToList();
         if (once.Count > 0 && ctx.Rng.NextDouble() < 0.15) return once[ctx.Rng.Next(once.Count)];
@@ -263,9 +274,9 @@ internal static class FeatReg
     internal static readonly IReadOnlyDictionary<string, (double P, int Max, int MinS, int MaxS, int Ord)> Cfg =
         new Dictionary<string, (double, int, int, int, int)>
         {
-            ["WHEEL"]         = (0.40, 4, 2, 98, 1),
+            ["WHEEL"]         = (0.40, 6, 1, 98, 1),
             ["FLUSH"]         = (0.30, 5, 1, 99, 2),
-            ["EXTRA_SPIN"]    = (0.20, 3, 1, 97, 3),
+            ["EXTRA_SPIN"]    = (0.20, 7, 1, 97, 3),
             ["PRIZE_UPGRADE"] = (0.15, 2, 1, 97, 4),
         };
 

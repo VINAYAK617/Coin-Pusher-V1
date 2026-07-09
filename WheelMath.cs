@@ -41,7 +41,6 @@ internal static class WMath
 
     internal static int StackFromValue(int wheelStackValue) => wheelStackValue + 1;
 
-    // min(target/stack, COLS-1)  — cap leaves 1 slot for the WHEEL token
     internal static int Zone(int target, int stack) =>
         Math.Min(target / stack, K.COLS - 1);
 

@@ -107,7 +107,7 @@ public static class TicketSerializer
                                      {
                                          Id = kv.Key,
                                          MinTarget = kv.Value,
-                                         MaxThreshold = K.FILL_CAP,
+                                         MaxThreshold = K.SymbolFillCap(kv.Key),
                                          PrizeTier = tier > 0 ? tier : null,
                                          PrizeValue = tier > 0 ? PrizeValueFor(plan, kv.Key, tier) : null,
                                      };

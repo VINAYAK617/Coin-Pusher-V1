@@ -10,14 +10,14 @@ internal static class K
     internal const int COLS       = 5;
     internal const int MIN_PUSH   = 1;    // minimum rows collected per column per spin
     internal const int MAX_PUSH   = 3;    // maximum rows collected per column per spin
-    internal const int FILL_CAP   = 20;   // filler over-collection guard: 20+ is invalid
+    internal const int FILL_CAP   = 20;   // conservative default filler threshold
 
     // Every ticket's baseline spin count is fixed at 5 — this is never computed or
     // clamped by capacity math. The only way to exceed it is to plan for and award
-    // the EXTRA_SPIN feature, which can add up to 3 more spins, for a hard ceiling
-    // of 8 total spins per ticket.
+    // the EXTRA_SPIN feature, which can add up to 7 more spins, for a hard ceiling
+    // of 12 total spins per ticket.
     internal const int BASE_SPINS = 5;
-    internal const int MAX_SPINS  = 8;
+    internal const int MAX_SPINS  = 12;
     internal const int MAX_COIN_STACK = 7;
     internal const int MAX_EXTRA_GO_PER_TURN = MAX_SPINS - BASE_SPINS;
     internal const int MIN_WHEEL_STACK_VALUE = 1;
@@ -59,7 +59,7 @@ internal static class K
     /// target &gt;= 2 is eligible, chance one of them additionally gets a WHEEL —
     /// purely cosmetic, the near-miss symbol's count is still governed by
     /// Verifier's non-winning cap either way.</summary>
-    internal static double P_NONWIN_WHEEL => Probability("COINPUSHER_P_NONWIN_WHEEL", 0.25);
+    internal static double P_NONWIN_WHEEL => Probability("COINPUSHER_P_NONWIN_WHEEL", 0.0);
 
     /// <summary>Given at least one near-miss filler symbol is eligible, chance one
     /// of them gets a single visual PRIZE_UPGRADE tier — purely cosmetic, never
@@ -113,6 +113,8 @@ internal static class K
     /// symbol. Raised from the original 1-3 range so the near-miss experience
     /// is visible to the player, while still staying below FILL_CAP.</summary>
     internal const int NONWIN_MIN_TARGET = 10;
+
+    internal static int SymbolFillCap(int sym) => sym >= 5 ? 25 : FILL_CAP;
 
     // Feature symbol IDs
     internal const int F_WHEEL    = 11;

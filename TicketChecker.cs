@@ -232,10 +232,11 @@ public static class TicketChecker
         foreach (var (sym, count) in replay.Totals)
         {
             if (declaredWin.Contains(sym) || declaredNonWin.Contains(sym) || K.IsFeat(sym) || count == 0) continue;
-            if (count >= K.FILL_CAP)
+            var cap = K.SymbolFillCap(sym);
+            if (count >= cap)
             {
                 fillerCapOk = false;
-                Add("Payout", $"Filler symbol {sym} under cap", Status.Fail, $"count={count} >= cap={K.FILL_CAP}");
+                Add("Payout", $"Filler symbol {sym} under cap", Status.Fail, $"count={count} >= cap={cap}");
             }
         }
         if (fillerCapOk) Add("Payout", "All ordinary filler symbols under cap", Status.Pass, "ok");
@@ -263,6 +264,15 @@ public static class TicketChecker
         else
             Add("Feature", "EXTRA_SPIN token count matches bonus spins", Status.Pass,
                 $"{extraSpinTokenCount} token(s) for {expectedExtras} extra spin(s)");
+
+        var finalTurn = t.Turns[^1];
+        var finalWheel = (finalTurn.Spawns ?? Array.Empty<SpawnDto>())
+            .FirstOrDefault(spawn => spawn.Feature?.FeatureId == K.F_WHEEL);
+        if (finalWheel != null)
+            Add("Feature", "WHEEL not on final spin", Status.Fail,
+                $"final turn contains WHEEL spawn at Pos={finalWheel.Pos}");
+        else
+            Add("Feature", "WHEEL not on final spin", Status.Pass, "ok");
 
         // ── 11. PRIZE_UPGRADE TIER CONSISTENCY ──────────────────────────────
         // Declared tiers can come from EITHER WinInfo.PrizeTiers (winning

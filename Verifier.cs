@@ -17,13 +17,17 @@ internal static class Verifier
         foreach (var (sym, target) in plan.NonWinTargets)
         {
             got.TryGetValue(sym, out int g);
-            if (g < target || g >= K.FILL_CAP)
+            var cap = K.SymbolFillCap(sym);
+            if (g < target || g >= cap)
                 throw new InvalidOperationException(
-                    $"VERIFY FAIL nonwin sym={sym} got={g} want>={target} and <{K.FILL_CAP}");
+                    $"VERIFY FAIL nonwin sym={sym} got={g} want>={target} and <{cap}");
         }
 
         if (!plan.WinSyms.Any(sym => plan.Spins[^1].Alloc.GetValueOrDefault(sym) > 0))
             throw new InvalidOperationException("VERIFY FAIL last spin has no win alloc");
+
+        if (plan.Spins[^1].Spawns.Values.Any(cell => cell.IsFeat && cell.Sym == K.F_XSPIN))
+            throw new InvalidOperationException("VERIFY FAIL EXTRA_SPIN token in final spin spawns");
 
         if (plan.Spins[^1].Spawns.Values.Any(cell => cell.IsFeat && cell.Sym == K.F_WHEEL))
             throw new InvalidOperationException("VERIFY FAIL WHEEL token in final spin spawns");
@@ -72,9 +76,10 @@ internal static class Verifier
         foreach (var (sym, count) in got)
         {
             if (count == 0 || plan.Targets.ContainsKey(sym) || K.IsFeat(sym)) continue;
-            if (count >= K.FILL_CAP)
+            var cap = K.SymbolFillCap(sym);
+            if (count >= cap)
                 throw new InvalidOperationException(
-                    $"VERIFY FAIL filler sym={sym} count={count} >= cap={K.FILL_CAP}");
+                    $"VERIFY FAIL filler sym={sym} count={count} >= cap={cap}");
         }
     }
 

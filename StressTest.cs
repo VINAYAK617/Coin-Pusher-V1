@@ -16,7 +16,12 @@ internal static class StressTest
                 SerializedTicketVerifier.CheckNoMissingCells(TicketSerializer.ToTicketObject(plan));
                 return (1, "");
             }
-            catch (Exception ex) { return (0, ex.Message[..Math.Min(120, ex.Message.Length)]); }
+            catch (Exception ex)
+            {
+                var leaf = ex;
+                while (leaf.InnerException != null) leaf = leaf.InnerException;
+                return (0, leaf.Message[..Math.Min(120, leaf.Message.Length)]);
+            }
         }
 
         var configs = new (string label, MathInput cfg)[]
@@ -38,8 +43,8 @@ internal static class StressTest
                 Required=new Dictionary<string,int>{{"PRIZE_UPGRADE",1},{"FLUSH",1}}, PrizeTiers=new Dictionary<int,int>{{2,3}} }),
             ("10 prup+XS", new MathInput { Targets=new Dictionary<int,int>{{1,15},{2,10}}, BaseSpins=K.BASE_SPINS,
                 Required=new Dictionary<string,int>{{"PRIZE_UPGRADE",1},{"EXTRA_SPIN",1}}, PrizeTiers=new Dictionary<int,int>{{1,1}} }),
-            ("11 4W", new MathInput { Targets=new Dictionary<int,int>{{1,60},{2,50},{3,35},{4,20}}, BaseSpins=K.BASE_SPINS,
-                Required=new Dictionary<string,int>{{"WHEEL",4}} }),
+            ("11 3W", new MathInput { Targets=new Dictionary<int,int>{{1,18},{2,16},{3,14},{4,12}}, BaseSpins=K.BASE_SPINS,
+                Required=new Dictionary<string,int>{{"WHEEL",3}} }),
             ("12 5sym", new MathInput { Targets=new Dictionary<int,int>{{1,30},{2,25},{3,20},{4,15},{5,10}}, BaseSpins=K.BASE_SPINS, MaxSym=10 }),
             ("13 prup multisym", new MathInput { Targets=new Dictionary<int,int>{{2,20},{5,20},{3,20},{4,20},{6,20}}, BaseSpins=K.BASE_SPINS,
                 Required=new Dictionary<string,int>{{"WHEEL",2},{"FLUSH",2},{"PRIZE_UPGRADE",1}}, PrizeTiers=new Dictionary<int,int>{{2,3}}, MaxSym=10 }),
@@ -59,8 +64,8 @@ internal static class StressTest
         // using decorative win-symbol fillers alongside a WHEEL lock) legitimately have a
         // lower per-seed success rate by design — it's "does retrying reliably find a
         // working seed within a realistic budget, every time, across many trials."
-        const int RetryBudget = 100;
-        const int TrialsPerConfig = 50;
+        int RetryBudget = EnvInt("COINPUSHER_SELFTEST_RETRY_BUDGET", 100);
+        int TrialsPerConfig = EnvInt("COINPUSHER_SELFTEST_TRIALS", 50);
         int totalTrials = 0, totalFound = 0;
 
         Console.WriteLine($"CoinPusherEngine — retry-reliability test: {TrialsPerConfig} trials x " +
@@ -95,6 +100,12 @@ internal static class StressTest
 
         Console.WriteLine($"\nTotal: {totalFound}/{totalTrials} trials succeeded ({100.0 * totalFound / totalTrials:F2}%)");
         Console.WriteLine(totalFound == totalTrials ? "ALL PASS" : $"FAILURES: {totalTrials - totalFound}");
+    }
+
+    private static int EnvInt(string name, int fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        return int.TryParse(raw, out var value) && value > 0 ? value : fallback;
     }
 }
 

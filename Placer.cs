@@ -31,10 +31,11 @@ internal sealed class Placer
             int limit   = req > 0 ? req : maxInst;
             double prob = FeatReg.Cfg[id].P;
             // maxS is an exclusive upper bound throughout this class and in
-            // Feat.TryPlace implementations. Token features may fire on the
-            // penultimate spin, so pass totalSpinsKnown (not totalSpinsKnown - 1)
-            // to keep the full legal placement window available.
-            int capSpin = Math.Min(maxS, totalSpinsKnown);
+            // Feat.TryPlace implementations. WHEEL and EXTRA_SPIN must not appear on
+            // the final spin. PRIZE_UPGRADE may, and is biased toward late spins.
+            int capSpin = Math.Min(maxS, id is "EXTRA_SPIN" or "WHEEL"
+                ? totalSpinsKnown
+                : totalSpinsKnown + 1);
 
             // EXTRA_SPIN has no safe "optional, for variety" mode at all — unlike
             // WHEEL/FLUSH (whose own ResolveFeatures gate adds a "needed OR lucky"
@@ -126,14 +127,14 @@ internal sealed class Placer
         var feat = FeatReg.Get("PRIZE_UPGRADE");
         int placed = 0;
 
-        // PRIZE_UPGRADE chains have hard chronological constraints. Dense cases
-        // such as two symbols needing two upgrades each must use every legal spin,
-        // so scan chronologically instead of aiming at rounded spread targets.
+        // PRIZE_UPGRADE chains have hard chronological constraints, but the player
+        // experience is better when upgrades tend to arrive late. Try the late-spin
+        // window first most of the time, then fall back to the full legal window.
         for (var token = 0; token < req; token++)
         {
             if (placed >= req) break;
             PlacedFeat? r = null;
-            for (var spin = minS; spin < maxS && r == null; spin++)
+            foreach (var spin in PrizeUpgradeSpinOrder(minS, maxS))
             {
                 if (ConflictsWithWheelSpin(feat, spin, done)) continue;
                 for (var col = 0; col < K.COLS - 1; col++)
@@ -152,6 +153,7 @@ internal sealed class Placer
                     });
                     if (r != null) break;
                 }
+                if (r != null) break;
             }
 
             if (r == null) break;
@@ -163,6 +165,17 @@ internal sealed class Placer
         }
 
         return placed;
+    }
+
+    private IEnumerable<int> PrizeUpgradeSpinOrder(int minS, int maxS)
+    {
+        var all = Enumerable.Range(minS, Math.Max(0, maxS - minS)).ToArray();
+        if (all.Length == 0) return all;
+        if (_rng.NextDouble() >= 0.80) return all;
+
+        var lateStart = Math.Max(minS, maxS - Math.Max(2, K.WIN_LATE_TAIL_SPINS + 1));
+        var late = all.Where(spin => spin >= lateStart).ToArray();
+        return late.Concat(all.Where(spin => spin < lateStart));
     }
 
     /// <summary>

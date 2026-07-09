@@ -31,6 +31,19 @@ internal static class CapacityAnalyzer
         return budget >= 0 && budget <= maxFiller;
     }
 
+    internal static bool IsFeasible(
+        int physWins,
+        int totalSpins,
+        IReadOnlyList<int> fillSymbols,
+        int tokenLoad,
+        int flushTokens = 0,
+        int wheelFireSpins = 0)
+    {
+        var budget = FillerBudget(physWins, totalSpins, tokenLoad, flushTokens, wheelFireSpins);
+        var maxFiller = fillSymbols.Sum(sym => K.SymbolFillCap(sym) - 2);
+        return budget >= 0 && budget <= maxFiller;
+    }
+
     internal static int MinExtraSpins(
         int physWins,
         int fillSymCount,

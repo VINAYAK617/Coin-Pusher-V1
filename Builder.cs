@@ -385,9 +385,6 @@ internal sealed class Builder
         int maxTotal = freeCols * K.MAX_PUSH;
         int targetTotal = Math.Clamp(needed, minTotal, maxTotal);
 
-        if (IsDenseTicket())
-            return MakeDeterministicPushValues(freeCols, targetTotal);
-
         var pv = Enumerable.Repeat(K.MIN_PUSH, freeCols).ToArray();
         int left = targetTotal - minTotal;
         while (left > 0)
@@ -415,23 +412,44 @@ internal sealed class Builder
             pv[lo]--;
         }
 
-        return pv;
+        return RandomizePushOrder(pv);
     }
 
-    private bool IsDenseTicket() =>
-        _targets.Count >= 4 || _targets.Values.Sum() >= 80;
-
-    private static int[] MakeDeterministicPushValues(int freeCols, int targetTotal)
+    private int[] RandomizePushOrder(int[] values)
     {
-        var pv = Enumerable.Repeat(K.MIN_PUSH, freeCols).ToArray();
-        int left = targetTotal - freeCols * K.MIN_PUSH;
-        for (int i = 0; i < freeCols && left > 0; i++)
+        if (values.Length <= 1) return values;
+
+        var best = values.ToArray();
+        for (var attempt = 0; attempt < 8; attempt++)
         {
-            int add = Math.Min(K.MAX_PUSH - K.MIN_PUSH, left);
-            pv[i] += add;
-            left -= add;
+            var shuffled = values.OrderBy(_ => _rng.Next()).ToArray();
+            if (!IsMonotonic(shuffled))
+                return shuffled;
+            best = shuffled;
         }
-        return pv;
+
+        if (!IsMonotonic(best)) return best;
+        for (var i = 1; i < best.Length - 1; i++)
+        {
+            var swapped = best.ToArray();
+            (swapped[i], swapped[^1]) = (swapped[^1], swapped[i]);
+            if (!IsMonotonic(swapped)) return swapped;
+        }
+
+        return best;
+    }
+
+    private static bool IsMonotonic(IReadOnlyList<int> values)
+    {
+        if (values.Distinct().Count() <= 1) return false;
+        var nonDecreasing = true;
+        var nonIncreasing = true;
+        for (var i = 1; i < values.Count; i++)
+        {
+            nonDecreasing &= values[i] >= values[i - 1];
+            nonIncreasing &= values[i] <= values[i - 1];
+        }
+        return nonDecreasing || nonIncreasing;
     }
 
     private static FP MakeFP(PlacedFeat f)
