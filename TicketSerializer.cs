@@ -15,10 +15,11 @@ namespace CoinPusherEngine;
 ///   EXTRA_SPIN    -> { FeatureId, ConvertToId, ReTrigger: [...] }
 ///   PRIZE_UPGRADE -> { FeatureId, ConvertToId, UpgradeSymbolId, UpgradePrizeValue }
 ///
-/// ReTrigger chaining: with configurable probability, multiple no-board-effect
-/// feature tokens of the same type (EXTRA_SPIN or PRIZE_UPGRADE) may be folded
-/// into a nested ReTrigger array. WHEEL always stays physical because its fire
-/// timing affects stacks.
+/// ReTrigger chaining: with configurable probability, one no-board-effect
+/// feature token (EXTRA_SPIN or PRIZE_UPGRADE) may be folded into another
+/// no-board-effect feature token's ReTrigger array. WHEEL always stays physical
+/// because its fire timing affects stacks. ReTrigger depth is intentionally capped
+/// at one nested feature.
 ///
 /// Pos field: every spawn carries "Pos": row*5+col (flat index), per the established schema.
 /// </summary>
@@ -203,35 +204,26 @@ public static class TicketSerializer
             .ToList();
         if (chainable.Count == 0) return FeatureChainPlan.Empty;
 
-        var groups = chainable
-            .GroupBy(token => token.Cell.Sym)
-            .Where(group => group.Count() > 1)
-            .OrderBy(group => group.Key)
-            .Select(group => group.OrderBy(token => token.Spin)
-                                  .ThenBy(token => token.Pos.Item1 * K.COLS + token.Pos.Item2)
-                                  .ToList())
+        if (chainable.Count < 2) return FeatureChainPlan.Empty;
+
+        var ordered = chainable
+            .OrderBy(token => token.Spin)
+            .ThenBy(token => token.Pos.Item1 * K.COLS + token.Pos.Item2)
+            .ThenBy(token => token.Cell.Sym)
             .ToList();
-        if (groups.Count == 0) return FeatureChainPlan.Empty;
 
-        var group = groups[DeterministicIndex(plan, groups.Count, salt: 97)];
-        var start = group[0];
-        var payload = group.Skip(1).ToList();
-        if (payload.Count == 0) return FeatureChainPlan.Empty;
+        var start = ordered[DeterministicIndex(plan, ordered.Count, salt: 97)];
+        var payloadCandidates = ordered
+            .Where(token => token.Spin != start.Spin || token.Pos != start.Pos)
+            .ToList();
+        if (payloadCandidates.Count == 0) return FeatureChainPlan.Empty;
 
-        var roll = DeterministicUnitInterval(plan, start.Cell.Sym, start.Spin, start.Pos, payload.Count);
+        var roll = DeterministicUnitInterval(plan, start.Cell.Sym, start.Spin, start.Pos, payloadCandidates.Count);
         if (roll >= K.P_FEATURE_RETRIGGER_CHAIN) return FeatureChainPlan.Empty;
 
-        FeatureDto? nested = null;
-        for (int i = payload.Count - 1; i >= 0; i--)
-        {
-            nested = FeatureObj(
-                payload[i].Cell,
-                plan,
-                nested is null ? System.Array.Empty<FeatureDto>() : new[] { nested },
-                depth: i + 1);
-        }
-
-        return new FeatureChainPlan(start, payload, nested);
+        var payload = payloadCandidates[DeterministicIndex(plan, payloadCandidates.Count, salt: 193)];
+        var nested = FeatureObj(payload.Cell, plan, System.Array.Empty<FeatureDto>(), depth: 1);
+        return new FeatureChainPlan(start, new[] { payload }, nested);
     }
 
     private static bool IsNoBoardEffectFeature(Cell cell) =>

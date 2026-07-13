@@ -115,7 +115,9 @@ internal sealed class ObjectiveStage
         if (fillSymbols.Count == 0)
             return new Dictionary<int, int>();
 
-        var profile = PickNonWinProfile(rng);
+        (double P, int Min, int Max, int MaxSymbols) profile = input.Targets.Count == 0
+            ? (1.0, K.NONWIN_MIN_TARGET, K.FILL_CAP - 1, 5)
+            : PickNonWinProfile(rng);
         if (profile.MaxSymbols <= 0 || profile.Max <= 0)
             return new Dictionary<int, int>();
 
@@ -123,8 +125,7 @@ internal sealed class ObjectiveStage
         var count = PickNearMissCount(input, maxSymbols, fillSymbols.Count, planningPressure, rng);
         var minTarget = Math.Max(profile.Min, K.NONWIN_MIN_TARGET);
 
-        return fillSymbols
-            .OrderBy(_ => rng.Next())
+        return PickNearMissSymbols(fillSymbols, count, rng)
             .Take(count)
             .ToDictionary(
                 sym => sym,
@@ -136,6 +137,82 @@ internal sealed class ObjectiveStage
                 });
     }
 
+    private static IReadOnlyList<int> PickNearMissSymbols(
+        IReadOnlyList<int> fillSymbols,
+        int count,
+        Random rng)
+    {
+        var available = fillSymbols.ToList();
+        var rankOrder = fillSymbols.OrderBy(sym => sym).ToArray();
+        var picked = new List<int>();
+
+        while (picked.Count < count && available.Count > 0)
+        {
+            var groups = available
+                .GroupBy(sym => NearMissBand(sym, rankOrder))
+                .Select(group => new
+                {
+                    Band = group.Key,
+                    Symbols = group.OrderBy(_ => rng.Next()).ToList(),
+                    Weight = NearMissBandWeight(group.Key),
+                })
+                .Where(group => group.Weight > 0)
+                .ToList();
+
+            if (groups.Count == 0)
+                groups = available
+                    .GroupBy(sym => NearMissBand(sym, rankOrder))
+                    .Select(group => new
+                    {
+                        Band = group.Key,
+                        Symbols = group.OrderBy(_ => rng.Next()).ToList(),
+                        Weight = 1.0,
+                    })
+                    .ToList();
+
+            var total = groups.Sum(group => group.Weight);
+            var roll = rng.NextDouble() * total;
+            var acc = 0.0;
+            var chosenGroup = groups[^1];
+            foreach (var group in groups)
+            {
+                acc += group.Weight;
+                if (roll <= acc)
+                {
+                    chosenGroup = group;
+                    break;
+                }
+            }
+
+            var sym = chosenGroup.Symbols[0];
+            picked.Add(sym);
+            available.Remove(sym);
+        }
+
+        return picked;
+    }
+
+    private static int NearMissBand(int sym, IReadOnlyList<int> orderedAvailableSymbols)
+    {
+        var index = 0;
+        for (; index < orderedAvailableSymbols.Count; index++)
+            if (orderedAvailableSymbols[index] == sym) break;
+
+        var lowCount = (int)Math.Ceiling(orderedAvailableSymbols.Count / 3.0);
+        var midCount = (int)Math.Ceiling(orderedAvailableSymbols.Count * 2 / 3.0);
+        if (index < lowCount) return 0;
+        if (index < midCount) return 1;
+        return 2;
+    }
+
+    private static double NearMissBandWeight(int band) =>
+        band switch
+        {
+            0 => K.W_NONWIN_LOW,
+            1 => K.W_NONWIN_MID,
+            _ => K.W_NONWIN_HIGH,
+        };
+
     private static int NearMissSymbolCap(MathInput input, int fillSymbolCount, int planningPressure)
     {
         if (fillSymbolCount <= 0) return 0;
@@ -144,6 +221,7 @@ internal sealed class ObjectiveStage
 
         var byWinCount = input.Targets.Count switch
         {
+            0 => 5,
             1 => 5,
             2 => 4,
             3 => 3,
@@ -171,6 +249,7 @@ internal sealed class ObjectiveStage
 
         var min = input.Targets.Count switch
         {
+            0 when capped >= 3 => 3,
             1 when capped >= 5 => 4,
             1 when capped >= 3 => 3,
             2 when capped >= 4 => 2,
@@ -180,10 +259,10 @@ internal sealed class ObjectiveStage
 
         var allowedMin = Math.Min(min, capped);
         var weights = K.NONWIN_COUNT_WEIGHTS
-            .Select((entry, index) => new
+            .Select((weight, index) => new
             {
                 Count = index + 1,
-                Weight = K.Weight(entry.EnvName, entry.DefaultWeight),
+                Weight = weight,
             })
             .Where(x => x.Count >= allowedMin && x.Count <= capped && x.Weight > 0)
             .ToArray();
@@ -475,11 +554,11 @@ internal sealed class FeaturePlanStage
     {
         var reliable = objectives.WinSymbols
             .Where(sym => objectives.SourceInput.Targets[sym] < 45)
-            .OrderBy(sym => objectives.SourceInput.Targets[sym])
+            .OrderBy(_ => objectives.Rng.Next())
             .ToArray();
         var fallback = objectives.WinSymbols
             .Where(sym => objectives.SourceInput.Targets[sym] >= 45)
-            .OrderBy(sym => objectives.SourceInput.Targets[sym])
+            .OrderBy(_ => objectives.Rng.Next())
             .ToArray();
         var order = new List<int>();
 

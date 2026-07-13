@@ -170,6 +170,17 @@ public sealed class LadderCombinator
         var covered = new List<decimal>();
         var skipped = new List<decimal>();
 
+        if (ordered.Count == 0)
+        {
+            return new BundleResult
+            {
+                Input = BuildNoWinInput(),
+                Entries = new List<BundleEntry>(),
+                Covered = covered,
+                Skipped = skipped,
+            };
+        }
+
         foreach (var amount in ordered)
         {
             var candidates = CandidatesFor(amount);
@@ -467,6 +478,17 @@ public sealed class LadderCombinator
             MaxSym     = maxSym,
         };
     }
+
+    private MathInput BuildNoWinInput() =>
+        new()
+        {
+            Targets = new Dictionary<int, int>(),
+            BaseSpins = K.BASE_SPINS,
+            Required = new Dictionary<string, int>(),
+            PrizeTiers = null,
+            PrizeValues = BuildPrizeValues(Enumerable.Range(1, _rows.Count)),
+            MaxSym = Math.Max(_rows.Count, 2),
+        };
 
     private MathInput BuildInput(LadderCandidate c)
     {

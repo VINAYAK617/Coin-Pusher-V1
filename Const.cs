@@ -49,27 +49,32 @@ internal static class K
     /// <summary>Per eligible WIN symbol, chance WHEEL is added even though the
     /// ticket doesn't need it for feasibility. Win symbols with target &lt; 10 are
     /// never offered this — too small to benefit meaningfully from compression.</summary>
-    internal static double P_WHEEL_OPTIONAL => Probability("COINPUSHER_P_WHEEL_OPTIONAL", 0.30);
+    internal static readonly double P_WHEEL_OPTIONAL =
+        Probability("COINPUSHER_P_WHEEL_OPTIONAL", 0.30);
 
     /// <summary>Per optional FLUSH slot (up to COLS-1 per ticket), chance it's
     /// added even though the ticket doesn't need it for feasibility.</summary>
-    internal static double P_FLUSH_OPTIONAL => Probability("COINPUSHER_P_FLUSH_OPTIONAL", 0.35);
+    internal static readonly double P_FLUSH_OPTIONAL =
+        Probability("COINPUSHER_P_FLUSH_OPTIONAL", 0.35);
 
     /// <summary>Given at least one near-miss (non-winning) filler symbol with
     /// target &gt;= 2 is eligible, chance one of them additionally gets a WHEEL —
     /// purely cosmetic, the near-miss symbol's count is still governed by
     /// Verifier's non-winning cap either way.</summary>
-    internal static double P_NONWIN_WHEEL => Probability("COINPUSHER_P_NONWIN_WHEEL", 0.0);
+    internal static readonly double P_NONWIN_WHEEL =
+        Probability("COINPUSHER_P_NONWIN_WHEEL", 0.0);
 
     /// <summary>Given at least one near-miss filler symbol is eligible, chance one
     /// of them gets a single visual PRIZE_UPGRADE tier — purely cosmetic, never
     /// turns the symbol into an actual payout target.</summary>
-    internal static double P_NONWIN_PRIZE_UPGRADE => Probability("COINPUSHER_P_NONWIN_PRIZE_UPGRADE", 1.0);
+    internal static readonly double P_NONWIN_PRIZE_UPGRADE =
+        Probability("COINPUSHER_P_NONWIN_PRIZE_UPGRADE", 1.0);
 
     /// <summary>Most tickets should not reveal every winning objective in the
     /// first few spins. This controls how often win-symbol allocations reserve a
     /// tail portion for the final spins.</summary>
-    internal static double P_WIN_LATE_COMPLETION => Probability("COINPUSHER_P_WIN_LATE_COMPLETION", 0.90);
+    internal static readonly double P_WIN_LATE_COMPLETION =
+        Probability("COINPUSHER_P_WIN_LATE_COMPLETION", 0.90);
     internal const int WIN_LATE_TAIL_SPINS = 2;
     internal const int WIN_LATE_MIN_TAIL = 2;
     internal const double WIN_LATE_TAIL_FRACTION = 0.20;
@@ -82,21 +87,34 @@ internal static class K
         (0.90, 10, 19, 5),
     };
 
-    internal static readonly (string EnvName, double DefaultWeight)[] NONWIN_COUNT_WEIGHTS =
+    internal static readonly double[] NONWIN_COUNT_WEIGHTS =
     {
-        ("COINPUSHER_W_NONWIN_COUNT_1", 0.15),
-        ("COINPUSHER_W_NONWIN_COUNT_2", 0.25),
-        ("COINPUSHER_W_NONWIN_COUNT_3", 0.25),
-        ("COINPUSHER_W_NONWIN_COUNT_4", 0.20),
-        ("COINPUSHER_W_NONWIN_COUNT_5", 0.15),
+        Weight("COINPUSHER_W_NONWIN_COUNT_1", 0.15),
+        Weight("COINPUSHER_W_NONWIN_COUNT_2", 0.25),
+        Weight("COINPUSHER_W_NONWIN_COUNT_3", 0.25),
+        Weight("COINPUSHER_W_NONWIN_COUNT_4", 0.20),
+        Weight("COINPUSHER_W_NONWIN_COUNT_5", 0.15),
     };
+
+    /// <summary>
+    /// Near-miss symbol band weights. Symbol IDs are treated as prize/value order:
+    /// low third, middle third, high third. Defaults intentionally make high-value
+    /// near misses less common so jackpots do not appear to "almost hit" too often.
+    /// </summary>
+    internal static readonly double W_NONWIN_LOW =
+        Weight("COINPUSHER_W_NONWIN_LOW", 0.40);
+    internal static readonly double W_NONWIN_MID =
+        Weight("COINPUSHER_W_NONWIN_MID", 0.40);
+    internal static readonly double W_NONWIN_HIGH =
+        Weight("COINPUSHER_W_NONWIN_HIGH", 0.20);
 
     /// <summary>
     /// Presentation-only chance that multiple same-type no-board-effect feature
     /// tokens are folded into a nested ReTrigger chain. When the roll misses,
     /// every feature remains a normal physical spawn.
     /// </summary>
-    internal static double P_FEATURE_RETRIGGER_CHAIN => Probability("COINPUSHER_P_FEATURE_RETRIGGER_CHAIN", 0.25);
+    internal static readonly double P_FEATURE_RETRIGGER_CHAIN =
+        Probability("COINPUSHER_P_FEATURE_RETRIGGER_CHAIN", 0.25);
 
     /// <summary>
     /// Feature ids that may be used as intermediate ConvertToId values while a

@@ -32,7 +32,7 @@ internal sealed class WheelFeat : Feat
         if (sym == 0) return null;
         if (!ctx.Input.Targets.TryGetValue(sym, out int tgt) || tgt <= 0) return null;
 
-        int n = PickStackValue(sym, tgt, spin, col);
+        int n = PickStackValue(sym, tgt, ctx.Rng);
         int stack = WMath.StackFromValue(n), zone = Math.Max(1, WMath.Zone(tgt, stack));
 
         bool isMulti = ctx.Done.Any(f => f.Id == "WHEEL" && f.WSym == sym);
@@ -93,36 +93,11 @@ internal sealed class WheelFeat : Feat
         return 0;
     }
 
-    private static int PickStackValue(int sym, int target, int spin, int col)
+    private static int PickStackValue(int sym, int target, Random rng)
     {
-        var candidates = WMath.ValidStackValues(target).ToHashSet();
-        if (candidates.Count == 0) return WMath.BestN(target);
-
-        var roll = WheelStackRoll(sym, target, spin, col);
-        var picked = roll < K.P_WHEEL_STACK_VALUE_1
-            ? 1
-            : roll < K.P_WHEEL_STACK_VALUE_1 + K.P_WHEEL_STACK_VALUE_2
-                ? 2
-                : 3;
-
-        return candidates.Contains(picked) ? picked : WMath.BestN(target);
-    }
-
-    private static double WheelStackRoll(int sym, int target, int spin, int col)
-    {
-        unchecked
-        {
-            uint h = (uint)(sym * 374761393)
-                     + (uint)(target * 668265263)
-                     + (uint)spin * 2246822519u
-                     + (uint)col * 3266489917u;
-            h ^= h >> 15;
-            h *= 2246822519u;
-            h ^= h >> 13;
-            h *= 3266489917u;
-            h ^= h >> 16;
-            return (h & 0x7fffffffu) / (double)0x80000000u;
-        }
+        var candidates = WMath.ValidStackValues(target).ToArray();
+        if (candidates.Length == 0) return WMath.BestN(target);
+        return candidates[rng.Next(candidates.Length)];
     }
 }
 

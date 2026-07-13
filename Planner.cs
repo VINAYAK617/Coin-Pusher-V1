@@ -139,8 +139,8 @@ public sealed class Planner
     {
         if (input.BaseSpins != K.BASE_SPINS)
             throw new ArgumentException($"BaseSpins must be exactly {K.BASE_SPINS}");
-        if (input.Targets.Count == 0)
-            throw new ArgumentException("Targets must not be empty");
+        if (input.Targets.Count == 0 && input.NonWinTargets is { Count: 0 })
+            throw new ArgumentException("Targets and NonWinTargets cannot both be empty");
         if (input.MaxSym < 2)
             throw new ArgumentException("MaxSym must be >= 2");
 

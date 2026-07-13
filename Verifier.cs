@@ -23,7 +23,8 @@ internal static class Verifier
                     $"VERIFY FAIL nonwin sym={sym} got={g} want>={target} and <{cap}");
         }
 
-        if (!plan.WinSyms.Any(sym => plan.Spins[^1].Alloc.GetValueOrDefault(sym) > 0))
+        if (plan.WinSyms.Count > 0
+            && !plan.WinSyms.Any(sym => plan.Spins[^1].Alloc.GetValueOrDefault(sym) > 0))
             throw new InvalidOperationException("VERIFY FAIL last spin has no win alloc");
 
         if (plan.Spins[^1].Spawns.Values.Any(cell => cell.IsFeat && cell.Sym == K.F_XSPIN))

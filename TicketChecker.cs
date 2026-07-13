@@ -255,6 +255,17 @@ public static class TicketChecker
         }
 
         // ── 10. EXTRA_SPIN CHAIN CONSISTENCY ────────────────────────────────
+        var tooDeepRetrigger = t.Turns
+            .SelectMany(turn => turn.Spawns ?? Array.Empty<SpawnDto>())
+            .Where(spawn => spawn.Feature != null)
+            .Select(spawn => (spawn.Pos, Depth: MaxReTriggerDepth(spawn.Feature!)))
+            .FirstOrDefault(item => item.Depth > 1);
+        if (tooDeepRetrigger.Depth > 1)
+            Add("Feature", "ReTrigger depth at most one", Status.Fail,
+                $"spawn Pos={tooDeepRetrigger.Pos} has ReTrigger depth={tooDeepRetrigger.Depth}");
+        else
+            Add("Feature", "ReTrigger depth at most one", Status.Pass, "ok");
+
         int extraSpinTokenCount = CountExtraSpinChain(t);
         int expectedExtras = totalSpins - K.BASE_SPINS;
         if (extraSpinTokenCount != expectedExtras)
@@ -561,6 +572,12 @@ public static class TicketChecker
         foreach (var nested in feature.ReTrigger ?? Array.Empty<FeatureDto>())
             count += CountFeatureId(nested, featureId);
         return count;
+    }
+
+    private static int MaxReTriggerDepth(FeatureDto feature)
+    {
+        if (feature.ReTrigger == null || feature.ReTrigger.Length == 0) return 0;
+        return 1 + feature.ReTrigger.Max(MaxReTriggerDepth);
     }
 
     private static void AccumulatePrizeUpgradeTokens(FeatureDto feature, ReplayResult result)
