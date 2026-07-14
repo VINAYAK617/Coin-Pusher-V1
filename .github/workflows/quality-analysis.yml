@@ -1,0 +1,112 @@
+name: Quality Analysis
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: windows-latest
+
+    env:
+      SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore .\CoinPusherEngine.sln
+
+      - name: Install SonarScanner
+        if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' && env.SONAR_PROJECT_KEY != ''
+        run: dotnet tool install --global dotnet-sonarscanner
+
+      - name: Begin SonarQube analysis
+        if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' && env.SONAR_PROJECT_KEY != ''
+        run: >
+          dotnet sonarscanner begin
+          /k:"$env:SONAR_PROJECT_KEY"
+          /d:sonar.host.url="$env:SONAR_HOST_URL"
+          /d:sonar.token="$env:SONAR_TOKEN"
+          /d:sonar.cs.opencover.reportsPaths="coverage/coverage.opencover.xml"
+
+      - name: Build
+        run: dotnet build .\CoinPusherEngine.sln -c Release --no-restore
+
+      - name: Coverage
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force coverage | Out-Null
+          $testProjects = Get-ChildItem -Recurse -Filter *.csproj |
+            Where-Object {
+              $_.FullName -notmatch '\\(bin|obj)\\' -and
+              ($_.BaseName -match 'Test|Tests|Spec|Specs')
+            }
+
+          if ($testProjects.Count -eq 0) {
+            "No test projects were found, so code coverage was not generated." |
+              Set-Content coverage\coverage-summary.txt
+            exit 0
+          }
+
+          foreach ($project in $testProjects) {
+            dotnet test $project.FullName -c Release --no-build `
+              /p:CollectCoverage=true `
+              /p:CoverletOutputFormat=opencover `
+              /p:CoverletOutput="$PWD\coverage\"
+          }
+
+      - name: End SonarQube analysis
+        if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' && env.SONAR_PROJECT_KEY != ''
+        run: dotnet sonarscanner end /d:sonar.token="$env:SONAR_TOKEN"
+
+      - name: Install Snyk
+        if: env.SNYK_TOKEN != ''
+        run: npm install -g snyk
+
+      - name: Snyk dependency scan
+        if: env.SNYK_TOKEN != ''
+        shell: pwsh
+        run: |
+          snyk auth $env:SNYK_TOKEN
+          snyk test --file=CoinPusherEngine.sln --package-manager=nuget --json-file-output=snyk-results.json
+        continue-on-error: true
+
+      - name: Snyk counts
+        if: env.SNYK_TOKEN != ''
+        shell: pwsh
+        run: |
+          if (!(Test-Path snyk-results.json)) {
+            "Snyk did not produce a result file."
+            exit 0
+          }
+
+          $json = Get-Content snyk-results.json -Raw | ConvertFrom-Json
+          $vulns = @($json.vulnerabilities)
+          $groups = $vulns | Group-Object severity
+
+          "Snyk vulnerability count: $($vulns.Count)"
+          foreach ($group in $groups) {
+            "$($group.Name): $($group.Count)"
+          }
+
+      - name: Upload quality artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-analysis
+          path: |
+            coverage/**
+            snyk-results.json
