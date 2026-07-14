@@ -26,7 +26,7 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Restore
+      - name: Restore packages
         run: dotnet restore .\CoinPusherEngine.sln
 
       - name: Install SonarScanner
@@ -36,7 +36,7 @@ jobs:
       - name: Begin SonarQube analysis
         if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' && env.SONAR_PROJECT_KEY != ''
         run: >
-          dotnet sonarscanner begin
+          dotnet-sonarscanner begin
           /k:"$env:SONAR_PROJECT_KEY"
           /d:sonar.host.url="$env:SONAR_HOST_URL"
           /d:sonar.token="$env:SONAR_TOKEN"
@@ -65,12 +65,14 @@ jobs:
             dotnet test $project.FullName -c Release --no-build `
               /p:CollectCoverage=true `
               /p:CoverletOutputFormat=opencover `
-              /p:CoverletOutput="$PWD\coverage\"
+              /p:CoverletOutput="$PWD\coverage\" `
+              /p:Threshold=85 `
+              /p:ThresholdType=line
           }
 
       - name: End SonarQube analysis
         if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' && env.SONAR_PROJECT_KEY != ''
-        run: dotnet sonarscanner end /d:sonar.token="$env:SONAR_TOKEN"
+        run: dotnet-sonarscanner end /d:sonar.token="$env:SONAR_TOKEN"
 
       - name: Install Snyk
         if: env.SNYK_TOKEN != ''

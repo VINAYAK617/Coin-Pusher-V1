@@ -5,6 +5,11 @@
 /.vs
 /obj
 /bin
+**/bin/
+**/obj/
+**/TestResults/
+/coverage/
+/CoinPusherEngine.Tests/coverage/
 /tests/CoinPusher.Engine.Tests/bin/Debug/net8.0
 /tests/CoinPusher.Engine.Tests/obj/Debug/net8.0
 /src
