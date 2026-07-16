@@ -14,7 +14,9 @@ internal abstract class Feat
 // ── WHEEL ─────────────────────────────────────────────────────────────────────
 internal sealed class WheelFeat : Feat
 {
-    internal override string Id      => "WHEEL";
+    private const string FeatureId = "WHEEL";
+
+    internal override string Id      => FeatureId;
     internal override int    FeatSym => K.F_WHEEL;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
@@ -32,14 +34,14 @@ internal sealed class WheelFeat : Feat
         if (sym == 0) return null;
         if (!ctx.Input.Targets.TryGetValue(sym, out int tgt) || tgt <= 0) return null;
 
-        int n = PickStackValue(sym, tgt, ctx.Rng);
+        int n = PickStackValue(tgt, ctx.Rng);
         int stack = WMath.StackFromValue(n), zone = Math.Max(1, WMath.Zone(tgt, stack));
 
-        bool isMulti = ctx.Done.Any(f => f.Id == "WHEEL" && f.WSym == sym);
+        bool isMulti = ctx.Done.Any(f => f.Id == FeatureId && f.WSym == sym);
         if (isMulti)
         {
             if (maxSpin < 5) return null;
-            int last = ctx.Done.Where(f => f.Id == "WHEEL" && f.WSym == sym).Max(f => f.Spin);
+            int last = ctx.Done.Where(f => f.Id == FeatureId && f.WSym == sym).Max(f => f.Spin);
             if (spin <= last + 1) return null;
         }
 
@@ -48,13 +50,13 @@ internal sealed class WheelFeat : Feat
 
         // Don't overflow a spin's zone with multiple WHEELs
         int existZone = ctx.Done
-            .Where(f => f.Id == "WHEEL" && f.Spin == spin)
+            .Where(f => f.Id == FeatureId && f.Spin == spin)
                 .Sum(f => ctx.Input.Targets.TryGetValue(f.WSym, out int ft)
                     ? Math.Max(1, WMath.Zone(ft, WMath.StackFromValue(f.WN)))
                     : 0);
         if (existZone + zone > K.COLS - 1) return null;
 
-        return new PlacedFeat { Id="WHEEL", Spin=spin, Col=col, WSym=sym, WN=n };
+        return new PlacedFeat { Id=FeatureId, Spin=spin, Col=col, WSym=sym, WN=n };
     }
 
     internal override void Fire(FireCtx ctx)
@@ -62,11 +64,13 @@ internal sealed class WheelFeat : Feat
         int sym = ctx.Fp.WheelSym, st = ctx.Fp.WheelStack;
         if (sym == 0 || st <= 1) return;
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
         {
-            var cell = ctx.Board[r, c];
-            if (cell != null && !cell.IsFeat && cell.Sym == sym)
-                cell.Stack = Math.Min(K.MAX_COIN_STACK, cell.Stack + st - 1);
+            for (int c = 0; c < K.COLS; c++)
+            {
+                var cell = ctx.Board[r, c];
+                if (cell != null && !cell.IsFeat && cell.Sym == sym)
+                    cell.Stack = Math.Min(K.MAX_COIN_STACK, cell.Stack + st - 1);
+            }
         }
     }
 
@@ -74,7 +78,7 @@ internal sealed class WheelFeat : Feat
     {
         var order = ctx.Input.WheelSymOrder?.Where(s => ctx.Input.Targets.ContainsKey(s)).ToList()
                  ?? ctx.Input.Targets.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).ToList();
-        var usedCount = ctx.Done.Where(f => f.Id=="WHEEL" && f.WSym!=0)
+        var usedCount = ctx.Done.Where(f => f.Id == FeatureId && f.WSym != 0)
                             .GroupBy(f => f.WSym).ToDictionary(g => g.Key, g => g.Count());
 
         if (ctx.Input.WheelSymOrder != null && ctx.Input.WheelSymOrder.Count > 0)
@@ -93,7 +97,7 @@ internal sealed class WheelFeat : Feat
         return 0;
     }
 
-    private static int PickStackValue(int sym, int target, Random rng)
+    private static int PickStackValue(int target, Random rng)
     {
         var candidates = WMath.ValidStackValues(target).ToArray();
         if (candidates.Length == 0) return WMath.BestN(target);
@@ -104,7 +108,9 @@ internal sealed class WheelFeat : Feat
 // ── FLUSH ─────────────────────────────────────────────────────────────────────
 internal sealed class FlushFeat : Feat
 {
-    internal override string Id       => "FLUSH";
+    private const string FeatureId = "FLUSH";
+
+    internal override string Id       => FeatureId;
     internal override int    FeatSym  => K.F_COIN;
     internal override bool   HasToken => false;
 
@@ -112,10 +118,10 @@ internal sealed class FlushFeat : Feat
     {
         if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin) return null;
         if (ctx.Used.Contains((ctx.Spin, ctx.Col))) return null;
-        return new PlacedFeat { Id="FLUSH", Spin=ctx.Spin, Col=ctx.Col };
+        return new PlacedFeat { Id=FeatureId, Spin=ctx.Spin, Col=ctx.Col };
     }
 
-    internal override void Fire(FireCtx _) { }
+    internal override void Fire(FireCtx ctx) { }
 
     internal override IEnumerable<Cell> Collect(FireCtx ctx)
     {
@@ -132,17 +138,19 @@ internal sealed class FlushFeat : Feat
 // ── EXTRA_SPIN ────────────────────────────────────────────────────────────────
 internal sealed class XSpinFeat : Feat
 {
-    internal override string Id      => "EXTRA_SPIN";
+    private const string FeatureId = "EXTRA_SPIN";
+
+    internal override string Id      => FeatureId;
     internal override int    FeatSym => K.F_XSPIN;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
     {
         if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin || ctx.Col >= K.COLS - 1) return null;
         if (ctx.Used.Contains((ctx.Spin, ctx.Col))) return null;
-        return new PlacedFeat { Id="EXTRA_SPIN", Spin=ctx.Spin, Col=ctx.Col };
+        return new PlacedFeat { Id=FeatureId, Spin=ctx.Spin, Col=ctx.Col };
     }
 
-    internal override void Fire(FireCtx _) { }
+    internal override void Fire(FireCtx ctx) { }
 }
 
 // ── PRIZE_UPGRADE ─────────────────────────────────────────────────────────────
@@ -166,7 +174,9 @@ internal sealed class XSpinFeat : Feat
 /// </summary>
 internal sealed class PrupFeat : Feat
 {
-    internal override string Id      => "PRIZE_UPGRADE";
+    private const string FeatureId = "PRIZE_UPGRADE";
+
+    internal override string Id      => FeatureId;
     internal override int    FeatSym => K.F_PRUP;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
@@ -181,7 +191,7 @@ internal sealed class PrupFeat : Feat
         // are placed for it. Symbols are tried in id order for determinism; the first symbol
         // that still has remaining tier steps to climb is the one this token will represent.
         var alreadyPerSym = ctx.Done
-            .Where(f => f.Id == "PRIZE_UPGRADE")
+            .Where(f => f.Id == FeatureId)
             .GroupBy(f => f.PrupSym)
             .ToDictionary(g => g.Key, g => g.Count());
 
@@ -194,7 +204,7 @@ internal sealed class PrupFeat : Feat
                 var already = alreadyPerSym.GetValueOrDefault(sym, 0);
                 var nextTier = already + 1;
                 var lastSpin = ctx.Done
-                    .Where(f => f.Id == "PRIZE_UPGRADE" && f.PrupSym == sym)
+                    .Where(f => f.Id == FeatureId && f.PrupSym == sym)
                     .Select(f => f.Spin)
                     .DefaultIfEmpty(0)
                     .Max();
@@ -221,14 +231,14 @@ internal sealed class PrupFeat : Feat
 
         if (candidate != null)
         {
-            return new PlacedFeat { Id="PRIZE_UPGRADE", Spin=ctx.Spin, Col=ctx.Col,
+            return new PlacedFeat { Id=FeatureId, Spin=ctx.Spin, Col=ctx.Col,
                                      PrupSym=candidate.Sym, PrupTier=candidate.NextTier };
         }
 
         return null;   // every declared symbol has already reached its target tier
     }
 
-    internal override void Fire(FireCtx _) { }  // intentional no-op
+    internal override void Fire(FireCtx ctx) { }  // intentional no-op
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────

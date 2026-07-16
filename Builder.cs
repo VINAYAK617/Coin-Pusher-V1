@@ -24,10 +24,8 @@ namespace CoinPusherEngine;
 /// </summary>
 internal sealed class Builder
 {
-    private readonly IReadOnlyDictionary<int, int> _targets;
     private readonly IReadOnlyList<WLock>          _locks;
     private readonly List<PlacedFeat>              _placed;
-    private readonly int[]                         _fills;
     private readonly List<string>                  _log;
     private readonly Random                        _rng;
     private readonly FillTracker                   _fillTracker;
@@ -45,7 +43,7 @@ internal sealed class Builder
                      List<PlacedFeat> placed, int[] fills, List<string> log, Random rng,
                      FillTracker fillTracker, Dictionary<int, int>? decorBudget = null)
     {
-        _targets=targets; _locks=locks; _placed=placed; _fills=fills; _log=log; _rng=rng;
+        _locks=locks; _placed=placed; _log=log; _rng=rng;
         _fillTracker=fillTracker;
         _decorBudget = decorBudget != null ? new Dictionary<int, int>(decorBudget) : new Dictionary<int, int>();
     }
@@ -113,9 +111,13 @@ internal sealed class Builder
             }
             if (!placed)
             {
-                foreach (var pos in zoneSet.Where(p => !reserved.Contains(p))
-                                           .OrderByDescending(p => p.c))
-                { reserved.Add(pos); break; }
+                var fallback = zoneSet
+                    .Where(p => !reserved.Contains(p))
+                    .OrderByDescending(p => p.c)
+                    .Cast<(int r, int c)?>()
+                    .FirstOrDefault();
+                if (fallback.HasValue)
+                    reserved.Add(fallback.Value);
             }
         }
         return reserved;
@@ -132,7 +134,10 @@ internal sealed class Builder
         for (int col = 0; col < K.COLS; col++)
         {
             if (flush[col])
-                for (int r = 0; r < K.ROWS; r++) board[r, col] = null;
+            {
+                for (int r = 0; r < K.ROWS; r++)
+                    board[r, col] = null;
+            }
             else
             {
                 int p = push[col];
@@ -143,8 +148,8 @@ internal sealed class Builder
 
         var zoneSet = Grid.ZoneSet(push, flush);
         IsolateWheelSyms(board, spinNum, zoneSet);
-        FillZone(board, spinNum, push, flush, zoneSet, alloc, tokenReserved);
-        FillRest(board, zoneSet);
+        FillZone(board, spinNum, push, flush, alloc, tokenReserved);
+        FillRest(board);
         return board;
     }
 
@@ -156,28 +161,31 @@ internal sealed class Builder
             if (lk.FireSpin == spinNum)
             {
                 for (int r = 0; r < K.ROWS; r++)
-                for (int c = 0; c < K.COLS; c++)
                 {
-                    var cell = board[r, c];
-                    if (cell != null && !cell.IsFeat && cell.Sym == sym && zoneSet.Contains((r, c)))
-                        board[r, c] = null;
+                    for (int c = 0; c < K.COLS; c++)
+                    {
+                        var cell = board[r, c];
+                        if (cell != null && !cell.IsFeat && cell.Sym == sym && zoneSet.Contains((r, c)))
+                            board[r, c] = null;
+                    }
                 }
             }
             else if (lk.FireSpin + 1 == spinNum)
             {
                 for (int r = 0; r < K.ROWS; r++)
-                for (int c = 0; c < K.COLS; c++)
                 {
-                    var cell = board[r, c];
-                    if (cell != null && !cell.IsFeat && cell.Sym == sym && !zoneSet.Contains((r, c)))
-                        board[r, c] = null;
+                    for (int c = 0; c < K.COLS; c++)
+                    {
+                        var cell = board[r, c];
+                        if (cell != null && !cell.IsFeat && cell.Sym == sym && !zoneSet.Contains((r, c)))
+                            board[r, c] = null;
+                    }
                 }
             }
         }
     }
 
     private void FillZone(Cell?[,] board, int spinNum, int[] push, bool[] flush,
-                           HashSet<(int, int)> zoneSet,
                            IReadOnlyDictionary<int, int> alloc,
                            HashSet<(int, int)> tokenReserved)
     {
@@ -334,12 +342,16 @@ internal sealed class Builder
     /// position isn't collected this spin, so it can't safely carry a decorative win
     /// symbol — see FillZone for where decoration actually happens.
     /// </summary>
-    private void FillRest(Cell?[,] board, HashSet<(int, int)> curZoneSet)
+    private void FillRest(Cell?[,] board)
     {
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
-            if (board[r, c] == null)
-                board[r, c] = Grid.Norm(_fillTracker.Next());
+        {
+            for (int c = 0; c < K.COLS; c++)
+            {
+                if (board[r, c] == null)
+                    board[r, c] = Grid.Norm(_fillTracker.Next());
+            }
+        }
     }
 
     // ── Pusher calculation ─────────────────────────────────────────────────

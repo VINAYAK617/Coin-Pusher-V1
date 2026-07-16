@@ -1,3 +1,4 @@
+#pragma warning disable S2245 // Ladder selection randomness is intentionally seedable for reproducible math review.
 namespace CoinPusherEngine;
 
 /// <summary>
@@ -101,6 +102,10 @@ public sealed class LadderCombinator
     }
 
     /// <summary>All amounts that have at least one candidate, sorted ascending.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Performance",
+        "S2365:Properties should not make collection copies",
+        Justification = "Public inspection API; returns a defensive sorted snapshot.")]
     public IReadOnlyList<decimal> KnownAmounts => _lookup.Keys.OrderBy(a => a).ToList();
 
     /// <summary>Every (symbol, tier) candidate that reaches the requested amount, unfiltered.</summary>
@@ -254,21 +259,6 @@ public sealed class LadderCombinator
         };
     }
 
-    /// <summary>
-    /// Try every candidate in the given pool, in order, returning the first brand-new
-    /// symbol. A requested prize amount must consume a distinct symbol/tier entry; we
-    /// never silently share an already-used symbol/tier for a second prize.
-    /// </summary>
-    private static LadderCandidate? TryPick(Dictionary<int, BundleEntry> bySym, List<LadderCandidate> pool)
-    {
-        foreach (var candidate in pool)
-        {
-            if (!bySym.ContainsKey(candidate.Sym))
-                return candidate;
-        }
-        return null;
-    }
-
     private LadderCandidate? TryPickFeasible(Dictionary<int, BundleEntry> bySym, List<LadderCandidate> pool)
     {
         foreach (var candidate in pool)
@@ -328,23 +318,27 @@ public sealed class LadderCombinator
         var maxExtras = K.MAX_SPINS - K.BASE_SPINS;
 
         for (var wheels = 0; wheels <= maxWheels; wheels++)
-        for (var flushes = 0; flushes <= maxFlushes; flushes++)
-        for (var extras = 0; extras <= maxExtras; extras++)
         {
-            var totalSpins = K.BASE_SPINS + extras;
-            var wheelFireSpins = Math.Min(wheels, Math.Max(0, totalSpins - 2));
-            var physWins = CapacityAnalyzer.PhysicalWins(targets, wheels);
-            var tokenLoad = wheels + extras + requiredPrizeUpgrades;
-
-            if (CapacityAnalyzer.IsFeasible(
-                    physWins,
-                    totalSpins,
-                    fillSymbols,
-                    tokenLoad,
-                    flushes,
-                    wheelFireSpins))
+            for (var flushes = 0; flushes <= maxFlushes; flushes++)
             {
-                return true;
+                for (var extras = 0; extras <= maxExtras; extras++)
+                {
+                    var totalSpins = K.BASE_SPINS + extras;
+                    var wheelFireSpins = Math.Min(wheels, Math.Max(0, totalSpins - 2));
+                    var physWins = CapacityAnalyzer.PhysicalWins(targets, wheels);
+                    var tokenLoad = wheels + extras + requiredPrizeUpgrades;
+
+                    if (CapacityAnalyzer.IsFeasible(
+                            physWins,
+                            totalSpins,
+                            fillSymbols,
+                            tokenLoad,
+                            flushes,
+                            wheelFireSpins))
+                    {
+                        return true;
+                    }
+                }
             }
         }
 
@@ -531,10 +525,21 @@ public sealed class LadderCombinator
     /// EXTRA_SPIN feature (decided later, in Planner.ResolveFeatures, alongside
     /// WHEEL/FLUSH), not from this method.
     /// </summary>
-    private static int SpinsFor(int target, int tier) => K.BASE_SPINS;
+    private static int SpinsFor(int target, int tier)
+    {
+        _ = target;
+        _ = tier;
+        return K.BASE_SPINS;
+    }
 
     /// <summary>Same fixed baseline for bundled multi-symbol tickets.</summary>
-    private static int SpinsForBundle(int physWins, int tier, int fillSymCount) => K.BASE_SPINS;
+    private static int SpinsForBundle(int physWins, int tier, int fillSymCount)
+    {
+        _ = physWins;
+        _ = tier;
+        _ = fillSymCount;
+        return K.BASE_SPINS;
+    }
 
     private int SymbolPoolSizeFor(int targetCount) =>
         Math.Max(_rows.Count, targetCount + 2);

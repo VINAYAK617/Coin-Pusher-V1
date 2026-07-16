@@ -1,3 +1,4 @@
+#pragma warning disable S2245 // Planner randomness is intentionally seedable for reproducible tickets/tests.
 namespace CoinPusherEngine;
 
 /// <summary>

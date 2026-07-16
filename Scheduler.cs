@@ -180,7 +180,12 @@ internal sealed class Scheduler
     }
 
     private static void Add(Dictionary<int, int> d, int k, int v)
-    { if (v <= 0) return; d.TryGetValue(k, out int ex); d[k] = ex + v; }
+    {
+        if (v <= 0) return;
+
+        d.TryGetValue(k, out int ex);
+        d[k] = ex + v;
+    }
 
     private bool ShouldUseLateCompletion(int sym, int target, int totalSpins)
     {

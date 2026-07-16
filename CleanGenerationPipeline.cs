@@ -70,7 +70,6 @@ internal sealed class ObjectiveStage
     {
         var input = request.Input;
         var winSymbols = input.Targets.Keys.OrderBy(x => x).ToArray();
-        var topPrizeSym = TopPrizeSymbol(input);
         var fillSymbols = Enumerable.Range(1, input.MaxSym)
             .Except(winSymbols)
             .ToArray();
@@ -421,7 +420,6 @@ internal sealed class FeaturePlanStage
                 if (rng.NextDouble() >= K.P_WHEEL_OPTIONAL) continue;
                 if (!IsFeatureShapeFeasible(
                         input,
-                        fillCount,
                         plannedFillerLoad,
                         fixedTokenLoad,
                         wheels + 1,
@@ -444,7 +442,6 @@ internal sealed class FeaturePlanStage
                 if (rng.NextDouble() >= K.P_NONWIN_WHEEL) continue;
                 if (!IsFeatureShapeFeasible(
                         input,
-                        fillCount,
                         plannedFillerLoad,
                         fixedTokenLoad,
                         wheels + 1,
@@ -467,7 +464,6 @@ internal sealed class FeaturePlanStage
                 if (rng.NextDouble() >= K.P_FLUSH_OPTIONAL) break;
                 if (!IsFeatureShapeFeasible(
                         input,
-                        fillCount,
                         plannedFillerLoad,
                         fixedTokenLoad,
                         wheels,
@@ -503,44 +499,47 @@ internal sealed class FeaturePlanStage
         (int Wheels, int Flushes, int Extras, int Score)? best = null;
 
         for (var wheels = minWheels; wheels <= maxWheels; wheels++)
-        for (var flushes = minFlushes; flushes <= maxFlushes; flushes++)
-        for (var extras = minExtras; extras <= maxExtras; extras++)
         {
-            if (!IsFeatureShapeFeasible(
-                    input,
-                    fillCount,
-                    plannedFillerLoad,
-                    fixedTokenLoad,
-                    wheels,
-                    flushes,
-                    extras))
+            for (var flushes = minFlushes; flushes <= maxFlushes; flushes++)
             {
-                continue;
+                for (var extras = minExtras; extras <= maxExtras; extras++)
+                {
+                    if (!IsFeatureShapeFeasible(
+                            input,
+                            plannedFillerLoad,
+                            fixedTokenLoad,
+                            wheels,
+                            flushes,
+                            extras))
+                    {
+                        continue;
+                    }
+
+                    var physWins = CapacityAnalyzer.PhysicalWins(input.Targets, wheels);
+                    var plannedLoad = physWins + plannedFillerLoad;
+                    var tokenLoad = fixedTokenLoad + wheels + extras;
+                    var fillerBudget = CapacityAnalyzer.FillerBudget(plannedLoad, K.BASE_SPINS + extras, tokenLoad, flushes, wheels);
+                    var maxFiller = input.MaxSym > 0
+                        ? Enumerable.Range(1, input.MaxSym)
+                            .Except(input.Targets.Keys)
+                            .Sum(sym => K.SymbolFillCap(sym) - 2)
+                        : fillCount * (K.FILL_CAP - 2);
+                    var lowHeadroomPenalty = Math.Max(0, fillCount - fillerBudget) * 10;
+                    var highHeadroomPenalty = Math.Max(0, fillerBudget - maxFiller + fillCount) * 10;
+                    var totalSpins = K.BASE_SPINS + extras;
+                    var comfortablePushCapacity = totalSpins * K.COLS * 2;
+                    var pushPressurePenalty = Math.Max(0, plannedLoad + tokenLoad - comfortablePushCapacity) * 500;
+                    var score = extras * 100
+                        + wheels * 100
+                        + flushes * 20
+                        + pushPressurePenalty
+                        + lowHeadroomPenalty
+                        + highHeadroomPenalty;
+
+                    if (best == null || score < best.Value.Score)
+                        best = (wheels, flushes, extras, score);
+                }
             }
-
-            var physWins = CapacityAnalyzer.PhysicalWins(input.Targets, wheels);
-            var plannedLoad = physWins + plannedFillerLoad;
-            var tokenLoad = fixedTokenLoad + wheels + extras;
-            var fillerBudget = CapacityAnalyzer.FillerBudget(plannedLoad, K.BASE_SPINS + extras, tokenLoad, flushes, wheels);
-            var maxFiller = input.MaxSym > 0
-                ? Enumerable.Range(1, input.MaxSym)
-                    .Except(input.Targets.Keys)
-                    .Sum(sym => K.SymbolFillCap(sym) - 2)
-                : fillCount * (K.FILL_CAP - 2);
-            var lowHeadroomPenalty = Math.Max(0, fillCount - fillerBudget) * 10;
-            var highHeadroomPenalty = Math.Max(0, fillerBudget - maxFiller + fillCount) * 10;
-            var totalSpins = K.BASE_SPINS + extras;
-            var comfortablePushCapacity = totalSpins * K.COLS * 2;
-            var pushPressurePenalty = Math.Max(0, plannedLoad + tokenLoad - comfortablePushCapacity) * 500;
-            var score = extras * 100
-                + wheels * 100
-                + flushes * 20
-                + pushPressurePenalty
-                + lowHeadroomPenalty
-                + highHeadroomPenalty;
-
-            if (best == null || score < best.Value.Score)
-                best = (wheels, flushes, extras, score);
         }
 
         if (best == null)
@@ -586,7 +585,6 @@ internal sealed class FeaturePlanStage
 
     private static bool IsFeatureShapeFeasible(
         MathInput input,
-        int fillCount,
         int plannedFillerLoad,
         int fixedTokenLoad,
         int wheels,

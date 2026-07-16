@@ -5,7 +5,6 @@ internal sealed class Placer
     private readonly MathInput    _inp;
     private readonly Random       _rng;
     private readonly List<string> _log;
-    private const    int          Tries = 400;
 
     internal Placer(MathInput inp, Random rng, List<string> log)
     { _inp = inp; _rng = rng; _log = log; }
@@ -26,10 +25,8 @@ internal sealed class Placer
 
         foreach (var id in FeatReg.Ordered)
         {
-            var (_, maxInst, minS, maxS, _) = FeatReg.Cfg[id];
+            var (_, _, minS, maxS, _) = FeatReg.Cfg[id];
             int req     = _inp.Required.GetValueOrDefault(id, 0);
-            int limit   = req > 0 ? req : maxInst;
-            double prob = FeatReg.Cfg[id].P;
             // maxS is an exclusive upper bound throughout this class and in
             // Feat.TryPlace implementations. WHEEL and EXTRA_SPIN must not appear on
             // the final spin. PRIZE_UPGRADE may, and is biased toward late spins.
@@ -247,25 +244,5 @@ internal sealed class Placer
         }
 
         return done.Any(f => f.Spin == spin && f.Id == "WHEEL");
-    }
-
-    private PlacedFeat? TryPlace(string id, int minS, int maxS,
-                                  List<PlacedFeat> done, HashSet<(int, int)> used)
-    {
-        if (minS >= maxS) return null;
-        var feat = FeatReg.Get(id);
-        for (int a = 0; a < Tries; a++)
-        {
-            int spin = _rng.Next(minS, maxS);
-            int col  = _rng.Next(0, K.COLS);
-            if (ConflictsWithWheelSpin(feat, spin, done)) continue;
-            var r    = feat.TryPlace(new PlaceCtx
-            {
-                Spin=spin, Col=col, Done=done, Rng=_rng,
-                Input=_inp, MaxSpin=maxS, MinSpin=minS, Used=used,
-            });
-            if (r != null) return r;
-        }
-        return null;
     }
 }

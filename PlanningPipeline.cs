@@ -1,3 +1,4 @@
+#pragma warning disable S2245 // Realization attempts are intentionally seeded for reproducible verification.
 namespace CoinPusherEngine;
 
 /// <summary>

@@ -10,6 +10,9 @@
 **/TestResults/
 /coverage/
 /CoinPusherEngine.Tests/coverage/
+/.sonar_cache/
+/.sonarqube/
+/.tools/
 /tests/CoinPusher.Engine.Tests/bin/Debug/net8.0
 /tests/CoinPusher.Engine.Tests/obj/Debug/net8.0
 /src

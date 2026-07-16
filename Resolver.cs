@@ -21,14 +21,13 @@ internal sealed class Resolver
     private readonly HashSet<int> _winSyms;
     private readonly HashSet<int> _nonWinSyms;
     private readonly int[]        _endBoardSyms;
-    private readonly List<string> _log;
     private readonly Random       _rng;
     private readonly FillTracker  _fillTracker;
 
     internal Resolver(int[] fills, HashSet<int> winSyms, List<string> log, Random rng,
                        FillTracker fillTracker, IEnumerable<int>? nonWinSyms = null)
     {
-        _fills=fills; _winSyms=winSyms; _log=log; _rng=rng; _fillTracker=fillTracker;
+        _fills=fills; _winSyms=winSyms; _rng=rng; _fillTracker=fillTracker;
         _nonWinSyms = nonWinSyms != null ? new HashSet<int>(nonWinSyms) : new HashSet<int>();
         _endBoardSyms = _fills.Concat(_winSyms).Distinct().OrderBy(sym => sym).ToArray();
     }
@@ -36,7 +35,10 @@ internal sealed class Resolver
     internal void Resolve(List<SpinPlan> plans)
     {
         for (int i = 0; i < plans.Count - 1; i++)
+        {
             DoSpin(plans[i], plans[i + 1]);
+        }
+
         DoLast(plans[^1]);
     }
 
@@ -51,26 +53,28 @@ internal sealed class Resolver
         var sim = Simulate(cur);
 
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
         {
-            var plan = next.Board[r, c];
-            if (plan == null) continue;
-
-            var sv = sim[r, c];
-
-            bool needSpawn = sv == null
-                          || sv.IsFeat != plan.IsFeat
-                          || sv.Sym    != plan.Sym
-                          || sv.Stack  != plan.Stack;
-
-            if (needSpawn && sv != null)
+            for (int c = 0; c < K.COLS; c++)
             {
-                next.Board[r, c] = sv.Clone();
-                continue;
-            }
+                var plan = next.Board[r, c];
+                if (plan == null) continue;
 
-            if (needSpawn)
-                cur.Spawns[(r, c)] = plan.Clone();
+                var sv = sim[r, c];
+
+                bool needSpawn = sv == null
+                              || sv.IsFeat != plan.IsFeat
+                              || sv.Sym    != plan.Sym
+                              || sv.Stack  != plan.Stack;
+
+                if (needSpawn && sv != null)
+                {
+                    next.Board[r, c] = sv.Clone();
+                    continue;
+                }
+
+                if (needSpawn)
+                    cur.Spawns[(r, c)] = plan.Clone();
+            }
         }
 
         PlaceTokens(cur, next);
@@ -95,9 +99,13 @@ internal sealed class Resolver
         }
 
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
-            if (sim[r, c] == null)
-                last.Spawns[(r, c)] = Grid.Norm(EndBoardSym());
+        {
+            for (int c = 0; c < K.COLS; c++)
+            {
+                if (sim[r, c] == null)
+                    last.Spawns[(r, c)] = Grid.Norm(EndBoardSym());
+            }
+        }
     }
 
     private static (int r, int c) FindLastSpinSlot(
@@ -113,11 +121,13 @@ internal sealed class Resolver
         }
 
         for (int r = K.ROWS - 1; r >= 0; r--)
-        for (int c = K.COLS - 1; c >= 0; c--)
         {
-            var pos = (r, c);
-            if (sim[r, c] == null && !spawns.ContainsKey(pos))
-                return pos;
+            for (int c = K.COLS - 1; c >= 0; c--)
+            {
+                var pos = (r, c);
+                if (sim[r, c] == null && !spawns.ContainsKey(pos))
+                    return pos;
+            }
         }
 
         return (-1, -1);
@@ -286,12 +296,14 @@ internal sealed class Resolver
     private static void FlattenFeats(Cell?[,] b)
     {
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
         {
-            var cell = b[r, c];
-            if (cell?.IsFeat != true) continue;
-            b[r, c] = Grid.Norm(cell.CvtSym > 0 && !K.IsFeat(cell.CvtSym)
-                                 ? cell.CvtSym : K.F_COIN);
+            for (int c = 0; c < K.COLS; c++)
+            {
+                var cell = b[r, c];
+                if (cell?.IsFeat != true) continue;
+                b[r, c] = Grid.Norm(cell.CvtSym > 0 && !K.IsFeat(cell.CvtSym)
+                                     ? cell.CvtSym : K.F_COIN);
+            }
         }
     }
 }

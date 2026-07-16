@@ -363,8 +363,12 @@ public static class TicketChecker
         var board  = new ReplayCell?[K.ROWS, K.COLS];
 
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
-            board[r, c] = new ReplayCell { Sym = t.StartingBoard[r][c].Id };
+        {
+            for (int c = 0; c < K.COLS; c++)
+            {
+                board[r, c] = new ReplayCell { Sym = t.StartingBoard[r][c].Id };
+            }
+        }
 
         for (int turnIdx = 0; turnIdx < t.Turns.Length; turnIdx++)
         {
@@ -374,9 +378,13 @@ public static class TicketChecker
             // previous turn (shouldn't normally happen, but defensive) reverts
             // to its converted symbol before collection.
             for (int r = 0; r < K.ROWS; r++)
-            for (int c = 0; c < K.COLS; c++)
-                if (board[r, c]?.IsFeat == true)
-                    board[r, c] = new ReplayCell { Sym = ResolveConvert(board[r, c]!) };
+            {
+                for (int c = 0; c < K.COLS; c++)
+                {
+                    if (board[r, c]?.IsFeat == true)
+                        board[r, c] = new ReplayCell { Sym = ResolveConvert(board[r, c]!) };
+                }
+            }
 
             // Phase 2: Collect
             for (int c = 0; c < K.COLS; c++)
@@ -429,8 +437,12 @@ public static class TicketChecker
             // Check: no cell left null after spawns
             bool anyMissing = false;
             for (int r = 0; r < K.ROWS; r++)
-            for (int c = 0; c < K.COLS; c++)
-                if (board[r, c] == null) anyMissing = true;
+            {
+                for (int c = 0; c < K.COLS; c++)
+                {
+                    if (board[r, c] == null) anyMissing = true;
+                }
+            }
             if (anyMissing) result.MissingCellTurns.Add(turnIdx + 1);
 
             // Phase 5: FireAll — repeatedly resolve feature cells until none remain.
@@ -439,10 +451,11 @@ public static class TicketChecker
             {
                 any = false;
                 for (int r = 0; r < K.ROWS; r++)
-                for (int c = 0; c < K.COLS; c++)
                 {
-                    var fc = board[r, c];
-                    if (fc?.IsFeat != true) continue;
+                    for (int c = 0; c < K.COLS; c++)
+                    {
+                        var fc = board[r, c];
+                        if (fc?.IsFeat != true) continue;
 
                     if (fc.FeatureId == K.F_WHEEL && fc.WheelStackValue + 1 > 1)
                     {
@@ -499,8 +512,9 @@ public static class TicketChecker
                     // their effect (extra spin count, tier) is read from the spawn
                     // schema directly, not from replaying a board-level action.
 
-                    board[r, c] = new ReplayCell { Sym = ResolveConvert(fc) };
-                    any = true;
+                        board[r, c] = new ReplayCell { Sym = ResolveConvert(fc) };
+                        any = true;
+                    }
                 }
             }
             while (any && BoardHasFeatureCell(board));
@@ -529,8 +543,12 @@ public static class TicketChecker
     private static bool BoardHasFeatureCell(ReplayCell?[,] board)
     {
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
-            if (board[r, c]?.IsFeat == true) return true;
+        {
+            for (int c = 0; c < K.COLS; c++)
+            {
+                if (board[r, c]?.IsFeat == true) return true;
+            }
+        }
         return false;
     }
 
@@ -545,8 +563,12 @@ public static class TicketChecker
     {
         var r = new ReplayCell?[K.ROWS, K.COLS];
         for (int row = 0; row < K.ROWS; row++)
-        for (int col = 0; col < K.COLS; col++)
-            r[col, K.ROWS - 1 - row] = b[row, col];
+        {
+            for (int col = 0; col < K.COLS; col++)
+            {
+                r[col, K.ROWS - 1 - row] = b[row, col];
+            }
+        }
         return r;
     }
 
@@ -558,10 +580,12 @@ public static class TicketChecker
     {
         int count = 0;
         foreach (var turn in t.Turns)
-        foreach (var sp in turn.Spawns ?? Array.Empty<SpawnDto>())
         {
-            if (sp.Feature == null) continue;
-            count += CountFeatureId(sp.Feature, K.F_XSPIN);
+            foreach (var sp in turn.Spawns ?? Array.Empty<SpawnDto>())
+            {
+                if (sp.Feature == null) continue;
+                count += CountFeatureId(sp.Feature, K.F_XSPIN);
+            }
         }
         return count;
     }

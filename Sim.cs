@@ -48,8 +48,11 @@ internal static class Sim
             {
                 int push = sp.Push[col];
                 for (int r = K.ROWS - push; r < K.ROWS; r++)
+                {
                     if (board[r, col] != null)
                         Acc(totals, board[r, col]!.Sym, board[r, col]!.Stack);
+                }
+
                 for (int r = K.ROWS - 1; r >= 0; r--)
                 {
                     int src = r - push;
@@ -73,27 +76,29 @@ internal static class Sim
         {
             any = false;
             for (int r = 0; r < K.ROWS; r++)
-            for (int c = 0; c < K.COLS; c++)
             {
-                var fc = board[r, c];
-                if (fc?.IsFeat != true) continue;
+                for (int c = 0; c < K.COLS; c++)
+                {
+                    var fc = board[r, c];
+                    if (fc?.IsFeat != true) continue;
 
-                Feat? feat = fc.FeatId != null && FeatReg.Has(fc.FeatId)
-                             ? FeatReg.Get(fc.FeatId)
-                             : FeatReg.HasSym(fc.Sym) ? FeatReg.GetSym(fc.Sym) : null;
+                    Feat? feat = fc.FeatId != null && FeatReg.Has(fc.FeatId)
+                                 ? FeatReg.Get(fc.FeatId)
+                                 : FeatReg.HasSym(fc.Sym) ? FeatReg.GetSym(fc.Sym) : null;
 
-                var isWheel = feat?.Id == "WHEEL" || fc.Sym == K.F_WHEEL;
-                if (isWheel != wheelPass) continue;
+                    var isWheel = feat?.Id == "WHEEL" || fc.Sym == K.F_WHEEL;
+                    if (isWheel != wheelPass) continue;
 
-                if (feat == null) { board[r, c] = Cvt(fc); any = true; continue; }
+                    if (feat == null) { board[r, c] = Cvt(fc); any = true; continue; }
 
-                feat.Fire(new FireCtx { Board=board, Col=c, Fp=fc.Fp ?? new FP { FeatId=feat.Id } });
+                    feat.Fire(new FireCtx { Board=board, Col=c, Fp=fc.Fp ?? new FP { FeatId=feat.Id } });
 
-                if (feat.Id == "WHEEL" && next != null)
-                    PostWheelIso(board, fc.Fp?.WheelSym ?? 0, next, fallback);
+                    if (feat.Id == "WHEEL" && next != null)
+                        PostWheelIso(board, fc.Fp?.WheelSym ?? 0, next, fallback);
 
-                board[r, c] = Cvt(fc);
-                any = true;
+                    board[r, c] = Cvt(fc);
+                    any = true;
+                }
             }
         }
         while (any && board.Cast<Cell?>().Any(x =>
@@ -115,37 +120,43 @@ internal static class Sim
         var nextZone = Grid.ZoneSet(next.Push, next.Flush);
 
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
         {
-            var cell = board[r, c];
-            if (cell == null || cell.IsFeat || cell.Sym != sym) continue;
+            for (int c = 0; c < K.COLS; c++)
+            {
+                var cell = board[r, c];
+                if (cell == null || cell.IsFeat || cell.Sym != sym) continue;
 
-            var  planned = next.Board[r, c];
-            bool keep    = nextZone.Contains((r, c))
-                        && planned != null
-                        && !planned.IsFeat
-                        && planned.Sym == sym;
+                var  planned = next.Board[r, c];
+                bool keep    = nextZone.Contains((r, c))
+                            && planned != null
+                            && !planned.IsFeat
+                            && planned.Sym == sym;
 
-            if (!keep) board[r, c] = Grid.Norm(fallback);
+                if (!keep) board[r, c] = Grid.Norm(fallback);
+            }
         }
     }
 
     private static void ApplySpawns(Cell?[,] board, SpinPlan sp)
     {
         foreach (var kv in sp.Spawns)
+        {
             board[kv.Key.Item1, kv.Key.Item2] = kv.Value.Clone();
+        }
     }
 
     // ── Phase 1: FlatStale ─────────────────────────────────────────────────
     internal static void FlatStale(Cell?[,] board)
     {
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
         {
-            var cell = board[r, c];
-            if (cell?.IsFeat != true) continue;
-            board[r, c] = Grid.Norm(cell.CvtSym > 0 && !K.IsFeat(cell.CvtSym)
-                                     ? cell.CvtSym : K.F_COIN);
+            for (int c = 0; c < K.COLS; c++)
+            {
+                var cell = board[r, c];
+                if (cell?.IsFeat != true) continue;
+                board[r, c] = Grid.Norm(cell.CvtSym > 0 && !K.IsFeat(cell.CvtSym)
+                                         ? cell.CvtSym : K.F_COIN);
+            }
         }
     }
 

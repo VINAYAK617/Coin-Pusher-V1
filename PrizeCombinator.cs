@@ -1,3 +1,4 @@
+#pragma warning disable S2245 // Prize combination randomness is intentionally seedable for reproducible math review.
 namespace CoinPusherEngine;
 
 /// <summary>
@@ -92,7 +93,7 @@ public sealed class PrizeCombinator
         if (sorted.Count == 0) return new List<PrizeCombo>();
 
         var combos    = new List<PrizeCombo>();
-        var symPool   = BuildSymbolPool(sorted.Count);
+        var symPool   = BuildSymbolPool();
         int symCursor = 0;
 
         for (int i = 0; i < sorted.Count; i++)
@@ -153,7 +154,7 @@ public sealed class PrizeCombinator
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private List<int> BuildSymbolPool(int count)
+    private List<int> BuildSymbolPool()
     {
         var pool = Enumerable.Range(_opt.MinSym, _opt.MaxSym - _opt.MinSym + 1).ToList();
         // Shuffle once so repeated runs with different seeds don't always hand out

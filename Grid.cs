@@ -6,8 +6,12 @@ internal static class Grid
     {
         var d = new Cell?[K.ROWS, K.COLS];
         for (int r = 0; r < K.ROWS; r++)
-        for (int c = 0; c < K.COLS; c++)
-            d[r, c] = src[r, c]?.Clone();
+        {
+            for (int c = 0; c < K.COLS; c++)
+            {
+                d[r, c] = src[r, c]?.Clone();
+            }
+        }
         return d;
     }
 
@@ -16,8 +20,12 @@ internal static class Grid
     {
         var r = new Cell?[K.ROWS, K.COLS];
         for (int row = 0; row < K.ROWS; row++)
-        for (int col = 0; col < K.COLS; col++)
-            r[col, K.ROWS - 1 - row] = b[row, col]?.Clone();
+        {
+            for (int col = 0; col < K.COLS; col++)
+            {
+                r[col, K.ROWS - 1 - row] = b[row, col]?.Clone();
+            }
+        }
         return r;
     }
 
@@ -26,8 +34,12 @@ internal static class Grid
     {
         var r = new Cell?[K.ROWS, K.COLS];
         for (int row = 0; row < K.ROWS; row++)
-        for (int col = 0; col < K.COLS; col++)
-            r[row, col] = b[col, K.ROWS - 1 - row]?.Clone();
+        {
+            for (int col = 0; col < K.COLS; col++)
+            {
+                r[row, col] = b[col, K.ROWS - 1 - row]?.Clone();
+            }
+        }
         return r;
     }
 
