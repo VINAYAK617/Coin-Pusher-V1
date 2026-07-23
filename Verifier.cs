@@ -6,6 +6,25 @@ internal static class Verifier
     {
         var got = Sim.Run(plan);
 
+        foreach (var spin in plan.Spins)
+        {
+            for (var col = 0; col < K.COLS; col++)
+            {
+                var push = spin.Push[col];
+                if (spin.Flush[col])
+                {
+                    if (push != K.ROWS)
+                        throw new InvalidOperationException(
+                            $"VERIFY FAIL spin={spin.Spin} col={col} FLUSH push={push} want={K.ROWS}");
+                }
+                else if (push < K.MIN_PUSH || push > K.MAX_PUSH)
+                {
+                    throw new InvalidOperationException(
+                        $"VERIFY FAIL spin={spin.Spin} col={col} push={push} outside {K.MIN_PUSH}..{K.MAX_PUSH}");
+                }
+            }
+        }
+
         foreach (var (sym, target) in plan.Targets)
         {
             got.TryGetValue(sym, out int g);

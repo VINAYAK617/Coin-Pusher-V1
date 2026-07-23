@@ -10,7 +10,7 @@ internal static class WMath
         foreach (var value in ValidStackValues(target))
         {
             int stack = StackFromValue(value);
-            int zone  = Zone(target, stack);
+            int zone  = CollectibleZone(target, stack);
             int post = zone * stack;
             if (post > bestPost || (post == bestPost && zone > bestZone))
             {
@@ -30,7 +30,7 @@ internal static class WMath
         for (int value = K.MIN_WHEEL_STACK_VALUE; value <= maxValue; value++)
         {
             int stack = StackFromValue(value);
-            int zone = Zone(target, stack);
+            int zone = CollectibleZone(target, stack);
             int post = zone * stack;
             if (zone >= 1 && post <= target)
             {
@@ -44,11 +44,14 @@ internal static class WMath
     internal static int Zone(int target, int stack) =>
         Math.Min(target / stack, K.COLS - 1);
 
+    internal static int CollectibleZone(int target, int stack) =>
+        Math.Max(0, Zone(target, stack) - 1);
+
     internal static WLock MakeLock(int sym, int target, int fireSpin, int n)
     {
         int stack = StackFromValue(n);
         int zone  = Zone(target, stack);
-        int post  = zone * stack;
+        int post  = CollectibleZone(target, stack) * stack;
         return new WLock { Sym=sym, FireSpin=fireSpin, Stack=stack,
                            Zone=zone, Pre=Math.Max(0, target-post), Post=post };
     }
@@ -59,9 +62,11 @@ internal static class WMath
         int t2 = total - t1;
         int s1=StackFromValue(n1), z1=Zone(t1,s1);
         int s2=StackFromValue(n2), z2=Zone(t2,s2);
+        int p1=CollectibleZone(t1,s1)*s1;
+        int p2=CollectibleZone(t2,s2)*s2;
         var lk1 = new WLock { Sym=sym, FireSpin=spin1, Stack=s1, Zone=z1,
-                               Pre=Math.Max(0,t1-z1*s1), Post=z1*s1 };
-        var lk2 = new WLock { Sym=sym, FireSpin=spin2, Stack=s2, Zone=z2, Pre=0, Post=z2*s2 };
+                               Pre=Math.Max(0,t1-p1), Post=p1 };
+        var lk2 = new WLock { Sym=sym, FireSpin=spin2, Stack=s2, Zone=z2, Pre=0, Post=p2 };
         return (lk1, lk2);
     }
 
@@ -82,17 +87,22 @@ internal static class WMath
             wSpins.Add(f.Spin);
             int t   = targets.GetValueOrDefault(f.WSym, 0);
             int st  = StackFromValue(f.WN);
-            int z   = Zone(t, st);
+            int z   = CollectibleZone(t, st);
             int pre = Math.Max(0, t - z * st);
             if (pre > 0) tasks.Add((pre, f.Spin - 1));
         }
+
+        if (tasks.Any(t => t.demand > 0 && t.deadline <= 0))
+            return false;
 
         tasks.Sort((a, b) => a.deadline.CompareTo(b.deadline));
         int cap=0, dem=0, ti=0;
         int maxDl = tasks.Count > 0 ? tasks.Max(x => x.deadline) : 0;
         for (int d = 1; d <= maxDl; d++)
         {
-            cap += K.COLS * (wSpins.Contains(d) ? K.MIN_PUSH : K.MAX_PUSH);
+            cap += wSpins.Contains(d)
+                ? K.COLS * K.MIN_PUSH
+                : K.MixedPushCapacity(K.COLS);
             while (ti < tasks.Count && tasks[ti].deadline <= d) dem += tasks[ti++].demand;
             if (dem > cap) return false;
         }

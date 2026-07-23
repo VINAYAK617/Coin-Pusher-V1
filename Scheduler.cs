@@ -4,13 +4,9 @@ namespace CoinPusherEngine;
 /// Distributes per-symbol win counts across spins using Earliest-Deadline-First (EDF).
 ///
 /// ZONE CAPACITY — the key invariant:
-/// Cap() allocates at most `maxZone = freeCols*MAX_PUSH + flushCols*ROWS - reserved` wins
-/// to any spin. Builder.MakePushers computes:
-///   needed = clamp(alloc_total, freeCols*MIN_PUSH, freeCols*MAX_PUSH)
-/// Since alloc_total <= maxZone (by construction here), the clamp can never truncate below
-/// alloc_total, so the actual zone the Builder creates is always >= alloc_total.
-/// Zone overflow is therefore structurally impossible — this is the central correctness
-/// guarantee of the whole pipeline.
+/// Cap() allocates at most mixed free-column capacity plus FLUSH capacity, minus reserved
+/// token cells. Builder.MakePushers uses the same ceiling when creating varied 1/2/3
+/// pusher values, so the scheduled allocation and realized board geometry stay aligned.
 ///
 /// TOKEN RESERVATION:
 /// A token firing at spin F needs one filler slot in spin F's Spawns dict, covering
@@ -40,15 +36,14 @@ internal sealed class Scheduler
         var tokenReserve = new Dictionary<int, int>();
         foreach (var f in _placed.Where(f => FeatReg.Has(f.Id) && FeatReg.Get(f.Id).HasToken))
             tokenReserve[f.Spin] = tokenReserve.GetValueOrDefault(f.Spin, 0) + 1;
-        var wheelZoneCells = ResolveWheelZoneCells(totalSpins, tokenReserve);
+        ResolveWheelCarrySlots(totalSpins, tokenReserve);
 
         var slots = Enumerable.Range(0, totalSpins).Select(_ => new Dictionary<int, int>()).ToList();
 
-        // Place WHEEL zone cells into slot[FireSpin], reduced by token reservation
         foreach (var lk in _locks)
         {
-            if (lk.FireSpin >= totalSpins) continue;
-            Add(slots[lk.FireSpin], lk.Sym, wheelZoneCells.GetValueOrDefault(lk));
+            foreach (var (slot, cells) in lk.CarrySlots)
+                Add(slots[slot], lk.Sym, cells);
         }
 
         // EDF: distribute remaining wins, respecting exact zone capacity ceiling
@@ -59,13 +54,13 @@ internal sealed class Scheduler
             int effectivePost = myLocks.Sum(lk =>
             {
                 if (lk.FireSpin >= totalSpins) return 0;
-                return wheelZoneCells.GetValueOrDefault(lk) * lk.Stack;
+                return lk.CarrySlots.Values.Sum() * lk.Stack;
             });
 
             int remaining = Math.Max(0, target - effectivePost);
             int lastFireSpin = myLocks.Count > 0 ? myLocks[^1].FireSpin : 0;
             int deadline      = myLocks.Count > 0 ? myLocks[0].FireSpin - 1 : totalSpins;
-            var lateSlots = ShouldUseLateCompletion(sym, target, totalSpins)
+            var lateSlots = myLocks.Count == 0 && ShouldUseLateCompletion(sym, target, totalSpins)
                 ? LateSlots(totalSpins, lastFireSpin).ToHashSet()
                 : new HashSet<int>();
 
@@ -108,11 +103,17 @@ internal sealed class Scheduler
         return slots;
     }
 
-    private Dictionary<WLock, int> ResolveWheelZoneCells(
+    private void ResolveWheelCarrySlots(
         int totalSpins,
         IReadOnlyDictionary<int, int> tokenReserve)
     {
-        var result = _locks.ToDictionary(lk => lk, lk => lk.FireSpin < totalSpins ? lk.Zone : 0);
+        foreach (var lk in _locks)
+        {
+            lk.CarrySlots.Clear();
+            lk.PermanentResidue = 0;
+        }
+
+        var immediate = _locks.ToDictionary(lk => lk, lk => lk.FireSpin < totalSpins ? lk.Zone : 0);
 
         foreach (var group in _locks.Where(lk => lk.FireSpin < totalSpins).GroupBy(lk => lk.FireSpin))
         {
@@ -124,37 +125,76 @@ internal sealed class Scheduler
             foreach (var lk in group.OrderBy(lk => lk.Zone).ThenByDescending(lk => lk.Sym))
             {
                 if (reserveLeft <= 0) break;
-                var take = Math.Min(result[lk], reserveLeft);
-                result[lk] -= take;
+                var take = Math.Min(immediate[lk], reserveLeft);
+                immediate[lk] -= take;
                 reserveLeft -= take;
             }
         }
 
-        return result;
+        var used = new Dictionary<int, int>();
+        foreach (var lk in _locks.Where(lk => lk.FireSpin < totalSpins)
+                                 .OrderBy(lk => lk.FireSpin)
+                                 .ThenBy(lk => lk.Sym))
+        {
+            var cellsLeft = immediate.GetValueOrDefault(lk);
+            if (cellsLeft <= 0) continue;
+
+            cellsLeft = AddWheelCarry(lk, lk.FireSpin, cellsLeft, cellsLeft, used, tokenReserve, totalSpins);
+
+            lk.PermanentResidue = lk.FireSpin + 1 < totalSpins ? Math.Min(2, Math.Max(1, lk.Zone / 2)) : 0;
+        }
+    }
+
+    private int AddWheelCarry(
+        WLock lk,
+        int slot,
+        int wanted,
+        int left,
+        Dictionary<int, int> used,
+        IReadOnlyDictionary<int, int> tokenReserve,
+        int totalSpins)
+    {
+        if (wanted <= 0 || left <= 0 || slot < 0 || slot >= totalSpins) return left;
+
+        var room = Math.Max(0, CapacityCeiling(slot, tokenReserve) - used.GetValueOrDefault(slot));
+        var take = Math.Min(Math.Min(wanted, left), room);
+        if (take <= 0) return left;
+
+        lk.CarrySlots[slot] = lk.CarrySlots.GetValueOrDefault(slot) + take;
+        used[slot] = used.GetValueOrDefault(slot) + take;
+        return left - take;
     }
 
     /// <summary>
     /// Hard ceiling for slot s (= spin s+1's alloc):
-    ///   maxZone = freeCols*MAX_PUSH + flushCols*ROWS - reserved
+    ///   maxZone = mixed free-column capacity + flushCols*ROWS - reserved
     ///   cap     = maxZone - already
-    /// WHEEL spins use the MIN_PUSH ceiling instead, since Builder pins WHEEL spins to
-    /// MIN_PUSH unconditionally (to keep zone rows free for cells the WHEEL will stack).
+    /// WHEEL value is handled by PhysicalWins/stack compression, not by allowing
+    /// flat 15-cell raw push screens.
     /// </summary>
     private int Cap(int s, List<Dictionary<int, int>> slots, Dictionary<int, int> tokenReserve)
     {
         int spinNum   = s + 1;
         int flushCols = _placed.Count(f => f.Id == "FLUSH" && f.Spin == spinNum);
-        bool isWheel  = _locks.Any(lk => lk.FireSpin == spinNum);
         int freeCols  = K.COLS - flushCols;
         int flushCap  = flushCols * K.ROWS;
         int reserved  = tokenReserve.GetValueOrDefault(s, 0);
         int already   = slots[s].Values.Sum();
 
-        int ceiling = isWheel
-            ? freeCols * K.MIN_PUSH + flushCap - reserved
-            : freeCols * K.MAX_PUSH + flushCap - reserved;
+        int ceiling = CapacityCeiling(s, tokenReserve);
 
         return Math.Max(0, ceiling - already);
+    }
+
+    private int CapacityCeiling(int s, IReadOnlyDictionary<int, int> tokenReserve)
+    {
+        int spinNum = s + 1;
+        int flushCols = _placed.Count(f => f.Id == "FLUSH" && f.Spin == spinNum);
+        int freeCols = K.COLS - flushCols;
+        int flushCap = flushCols * K.ROWS;
+        int reserved = tokenReserve.GetValueOrDefault(s, 0);
+
+        return K.MixedPushCapacity(freeCols) + flushCap - reserved;
     }
 
     private int FillAcrossSlots(int sym, int remaining, IEnumerable<int> candidates,

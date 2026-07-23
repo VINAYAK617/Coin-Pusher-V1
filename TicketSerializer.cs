@@ -15,11 +15,10 @@ namespace CoinPusherEngine;
 ///   EXTRA_SPIN    -> { FeatureId, ConvertToId, ReTrigger: [...] }
 ///   PRIZE_UPGRADE -> { FeatureId, ConvertToId, UpgradeSymbolId, UpgradePrizeValue }
 ///
-/// ReTrigger chaining: with configurable probability, one no-board-effect
-/// feature token (EXTRA_SPIN or PRIZE_UPGRADE) may be folded into another
-/// no-board-effect feature token's ReTrigger array. WHEEL always stays physical
-/// because its fire timing affects stacks. ReTrigger depth is intentionally capped
-/// at one nested feature.
+/// ReTrigger chaining: with configurable probability, a cosmetic no-board-effect
+/// PRIZE_UPGRADE token may be folded into another feature token's ReTrigger array.
+/// EXTRA_SPIN and WHEEL always stay physical because TotalSpins and WHEEL stack timing
+/// are load-bearing. ReTrigger depth is intentionally capped at one nested feature.
 ///
 /// Pos field: every spawn carries "Pos": row*5+col (flat index), per the established schema.
 /// </summary>
@@ -200,7 +199,7 @@ public static class TicketSerializer
         if (featureTokens.Count == 0) return FeatureChainPlan.Empty;
 
         var chainable = featureTokens
-            .Where(token => IsNoBoardEffectFeature(token.Cell))
+            .Where(token => IsReTriggerChainParticipant(token.Cell))
             .ToList();
         if (chainable.Count == 0) return FeatureChainPlan.Empty;
 
@@ -215,6 +214,7 @@ public static class TicketSerializer
         var start = ordered[DeterministicIndex(plan, ordered.Count, salt: 97)];
         var payloadCandidates = ordered
             .Where(token => token.Spin != start.Spin || token.Pos != start.Pos)
+            .Where(token => IsTimingSafeReTriggerPayload(start, token))
             .ToList();
         if (payloadCandidates.Count == 0) return FeatureChainPlan.Empty;
 
@@ -228,6 +228,22 @@ public static class TicketSerializer
 
     private static bool IsNoBoardEffectFeature(Cell cell) =>
         cell.Sym is K.F_XSPIN or K.F_PRUP;
+
+    private static bool IsReTriggerChainParticipant(Cell cell) =>
+        IsNoBoardEffectFeature(cell) || cell.Sym == K.F_WHEEL;
+
+    private static bool IsTimingSafeReTriggerPayload(
+        (int Spin, (int, int) Pos, Cell Cell) start,
+        (int Spin, (int, int) Pos, Cell Cell) payload)
+    {
+        if (payload.Cell.Sym is K.F_WHEEL or K.F_XSPIN)
+            return false;
+
+        if (start.Cell.Sym == K.F_WHEEL)
+            return payload.Spin == start.Spin && payload.Cell.Sym == K.F_PRUP;
+
+        return payload.Cell.Sym == K.F_PRUP && payload.Spin <= start.Spin;
+    }
 
     private static int FeatureChainConvertId(Cell cell, int depth, GamePlan plan)
     {

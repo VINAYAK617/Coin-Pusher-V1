@@ -38,9 +38,9 @@ public sealed class GameLogicCoverageTests
 
         Assert.AreEqual(3, ticket.WinInfo.WinSymbols.Length);
         Assert.IsTrue(ticket.Turns.Any(turn => turn.Pushers.Any(p => p.FeatureId == 14)));
-        Assert.IsTrue(ticket.Turns.SelectMany(t => t.Spawns).Any(s => s.Feature?.FeatureId == 11));
-        Assert.IsTrue(ticket.Turns.SelectMany(t => t.Spawns).Any(s => s.Feature?.FeatureId == 12));
-        Assert.IsTrue(ticket.Turns.SelectMany(t => t.Spawns).Any(s => s.Feature?.FeatureId == 13));
+        Assert.IsTrue(HasFeature(ticket, 11));
+        Assert.IsTrue(HasFeature(ticket, 12));
+        Assert.IsTrue(HasFeature(ticket, 13));
         AssertValid(ticket);
     }
 
@@ -61,6 +61,28 @@ public sealed class GameLogicCoverageTests
             Assert.IsTrue(symbol.MinTarget >= 10 && symbol.MinTarget < symbol.MaxThreshold);
             Assert.IsTrue(symbol.Id >= 1);
         }
+        AssertValid(ticket);
+    }
+
+    [DataTestMethod]
+    [DataRow(9001)]
+    [DataRow(9002)]
+    public void WinningTicketsWithoutRequiredFeaturesRemainValid(int seed)
+    {
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int>
+            {
+                [2] = 14,
+                [4] = 16,
+            },
+            BaseSpins = 5,
+            Required = new Dictionary<string, int>(),
+            MaxSym = 6,
+        };
+
+        var ticket = PlanTicket(input, seed);
+
         AssertValid(ticket);
     }
 
@@ -116,9 +138,37 @@ public sealed class GameLogicCoverageTests
         var ticket = PlanTicket(input, seed);
 
         Assert.IsTrue(ticket.WinInfo.TotalSpins > 5);
+        Assert.AreEqual(ticket.WinInfo.TotalSpins - 5, PhysicalFeatureCount(ticket, 12));
         var lastTurn = ticket.Turns[^1];
         Assert.IsFalse(lastTurn.Spawns.Any(spawn => spawn.Feature?.FeatureId == 12));
         Assert.IsFalse(lastTurn.Spawns.Any(spawn => spawn.Feature?.FeatureId == 11));
+        AssertValid(ticket);
+    }
+
+    [DataTestMethod]
+    [DataRow(7001)]
+    [DataRow(7002)]
+    [DataRow(7003)]
+    public void SerializedExtraSpinCountMatchesTotalTurnsWithPhysicalSymbols(int seed)
+    {
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int>
+            {
+                [1] = 20,
+                [2] = 20,
+                [3] = 20,
+                [4] = 25,
+            },
+            BaseSpins = 5,
+            Required = new Dictionary<string, int> { ["EXTRA_SPIN"] = 3 },
+            MaxSym = 7,
+        };
+
+        var ticket = PlanTicket(input, seed);
+
+        Assert.IsTrue(ticket.WinInfo.TotalSpins >= 8);
+        Assert.AreEqual(ticket.WinInfo.TotalSpins - 5, PhysicalFeatureCount(ticket, 12));
         AssertValid(ticket);
     }
 
@@ -184,6 +234,23 @@ public sealed class GameLogicCoverageTests
             report.Checks
                 .Where(c => c.Result == TicketChecker.Status.Fail)
                 .Select(c => $"{c.Category}/{c.Name}: {c.Detail}")));
+    }
+
+    private static bool HasFeature(TicketSerializer.TicketDto ticket, int featureId) =>
+        ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .Any(spawn => ContainsFeature(spawn.Feature, featureId));
+
+    private static int PhysicalFeatureCount(TicketSerializer.TicketDto ticket, int featureId) =>
+        ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .Count(spawn => spawn.Feature?.FeatureId == featureId);
+
+    private static bool ContainsFeature(TicketSerializer.FeatureDto? feature, int featureId)
+    {
+        if (feature == null) return false;
+        if (feature.FeatureId == featureId) return true;
+        return feature.ReTrigger.Any(child => ContainsFeature(child, featureId));
     }
 
     private static IReadOnlyList<PrizeLadderRow> StandardRows() =>

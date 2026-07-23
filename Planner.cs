@@ -93,7 +93,7 @@ public sealed class Planner
 
         if (input.Targets.Count >= 4 || targetSum >= 80 || featureTokenLoad >= 4)
             return 2;
-        if (input.Targets.Count >= 3 || targetSum >= 45 || featureTokenLoad > 0)
+        if (input.Targets.Count >= 3 || featureTokenLoad > 0)
             return 1;
         return 0;
     }

@@ -53,8 +53,8 @@ public sealed class PrizeCombo
 ///     cheaper and picked at random among eligible candidates. When a prize is an upgrade,
 ///     it inherits the SOURCE prize's target — its own Target field, if supplied, is not
 ///     used, since an upgrade is by definition the same combo as its source.
-///   • BaseSpins: derived from the target count using the same heuristic the rest of the
-///     engine's example tickets use (roughly target/3, clamped to a sane spin-count range).
+///   • BaseSpins: fixed to the engine baseline. Extra capacity is added later only through
+///     planned EXTRA_SPIN features.
 /// </summary>
 public sealed class PrizeCombinatorOptions
 {
@@ -167,12 +167,12 @@ public sealed class PrizeCombinator
         return pool;
     }
 
-    /// <summary>
-    /// BaseSpins heuristic: roughly target/3, clamped to [4, 18] — matches the spin-count
-    /// range used across the engine's other example tickets so generated MathInputs behave
-    /// like the realistic tiers already validated against the stress suite.
-    /// </summary>
-    private static int SpinsFor(int target) => Math.Clamp((int)Math.Round(target / 3.0), 4, 18);
+    /// <summary>BaseSpins is fixed by the engine contract; feature planning adds extras.</summary>
+    private static int SpinsFor(int target)
+    {
+        _ = target;
+        return K.BASE_SPINS;
+    }
 
     private MathInput BuildInput(int sym, int target, string? extraRequired,
                                   Dictionary<int, int>? prizeTiers)
@@ -186,6 +186,7 @@ public sealed class PrizeCombinator
             BaseSpins  = SpinsFor(target),
             Required   = required,
             PrizeTiers = prizeTiers,
+            MaxSym     = Math.Max(_opt.MaxSym, 2),
         };
     }
 }

@@ -45,7 +45,8 @@ internal sealed class WheelFeat : Feat
             if (spin <= last + 1) return null;
         }
 
-        if (!WMath.EdfOk(Math.Max(0, tgt - zone * stack), spin, ctx.Done, ctx.Input.Targets, isMulti))
+        int collectibleZone = WMath.CollectibleZone(tgt, stack);
+        if (!WMath.EdfOk(Math.Max(0, tgt - collectibleZone * stack), spin, ctx.Done, ctx.Input.Targets, isMulti))
             return null;
 
         // Don't overflow a spin's zone with multiple WHEELs
@@ -101,8 +102,32 @@ internal sealed class WheelFeat : Feat
     {
         var candidates = WMath.ValidStackValues(target).ToArray();
         if (candidates.Length == 0) return WMath.BestN(target);
-        return candidates[rng.Next(candidates.Length)];
+
+        var weighted = candidates
+            .Select(value => (Value: value, Weight: StackValueWeight(value)))
+            .Where(item => item.Weight > 0)
+            .ToArray();
+        if (weighted.Length == 0) return candidates[rng.Next(candidates.Length)];
+
+        var total = weighted.Sum(item => item.Weight);
+        var roll = rng.NextDouble() * total;
+        var acc = 0.0;
+        foreach (var item in weighted)
+        {
+            acc += item.Weight;
+            if (roll <= acc) return item.Value;
+        }
+
+        return weighted[^1].Value;
     }
+
+    private static double StackValueWeight(int value) =>
+        value switch
+        {
+            1 => K.P_WHEEL_STACK_VALUE_1,
+            2 => K.P_WHEEL_STACK_VALUE_2,
+            _ => Math.Max(0.0, 1.0 - K.P_WHEEL_STACK_VALUE_1 - K.P_WHEEL_STACK_VALUE_2),
+        };
 }
 
 // ── FLUSH ─────────────────────────────────────────────────────────────────────

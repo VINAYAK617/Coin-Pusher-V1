@@ -12,6 +12,16 @@ internal static class K
     internal const int MAX_PUSH   = 3;    // maximum rows collected per column per spin
     internal const int FILL_CAP   = 20;   // conservative default filler threshold
 
+    internal static int MixedPushCapacity(int freeCols)
+    {
+        if (freeCols <= 0) return 0;
+        if (freeCols >= 3)
+            return (MAX_PUSH * (freeCols - 2)) + MIN_PUSH + (MIN_PUSH + 1);
+        if (freeCols == 2)
+            return MAX_PUSH + MIN_PUSH;
+        return MAX_PUSH;
+    }
+
     // Every ticket's baseline spin count is fixed at 5 — this is never computed or
     // clamped by capacity math. The only way to exceed it is to plan for and award
     // the EXTRA_SPIN feature, which can add up to 7 more spins, for a hard ceiling
@@ -83,8 +93,8 @@ internal static class K
     /// max symbols. The zero-target row means no near-miss on that ticket.</summary>
     internal static readonly (double P, int Min, int Max, int MaxSymbols)[] NONWIN_TARGET_PROFILES =
     {
-        (0.10, 0,  0,  0),
-        (0.90, 10, 19, 5),
+        (0.05, 0,  0,  0),
+        (0.95, 10, 19, 5),
     };
 
     internal static readonly double[] NONWIN_COUNT_WEIGHTS =

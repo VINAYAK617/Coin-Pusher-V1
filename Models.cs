@@ -53,6 +53,8 @@ internal sealed class WLock
     internal int Zone     { get; set; }
     internal int Pre      { get; set; }
     internal int Post     { get; set; }
+    internal Dictionary<int, int> CarrySlots { get; } = new();
+    internal int PermanentResidue { get; set; }
 }
 
 internal sealed class PlacedFeat

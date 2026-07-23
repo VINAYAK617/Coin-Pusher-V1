@@ -37,20 +37,10 @@ using static TicketSerializer;
 ///    independently verifies the public ticket still matches the declared
 ///    tier data.
 ///
-/// 3. WHEEL/PostWheelIso reconciliation (a genuine LIMITATION of auditing from
-///    the public schema alone, not a bug in either the engine or this checker):
-///    Sim.cs's PostWheelIso decides whether a cell a WHEEL just stacked survives
-///    by comparing it against the engine's INTERNAL planned board for the next
-///    spin — data that is never serialized, because the ticket schema encodes
-///    one evolving board via spawns, not a separate "what was originally
-///    planned" reference. Confirmed directly: a real ticket had a WHEEL-stacked
-///    cell land on a position the internal plan reserved for a different
-///    symbol, with no spawn anywhere to reveal that from outside — Sim.Run
-///    (trusted) reported the exact, correct total; this checker's independent
-///    replay overcounted. A win-count mismatch for a symbol that had a WHEEL
-///    fire is reported as a WARNING rather than a FAIL or a silent PASS, since
-///    asserting confidence either way would be dishonest given what's actually
-///    knowable from the ticket alone.
+/// 3. WHEEL replay:
+///    The engine now serializes enough evolving-board information for this checker
+///    to replay WHEEL stack residue as normal board state. Count mismatches are hard
+///    failures, not warnings.
 /// </summary>
 public static class TicketChecker
 {
@@ -173,56 +163,26 @@ public static class TicketChecker
             Add("Replay", "Every turn fully populated after spawns", Status.Pass, "ok");
 
         // ── 6. WIN-SYMBOL EXACT-COUNT VERIFICATION ─────────────────────────
-        // A WHEEL fire's exact aftermath (Sim.cs's PostWheelIso) decides whether a
-        // stacked cell survives by comparing against the engine's INTERNAL planned
-        // board for the next spin — information that is not, and cannot be,
-        // reconstructed from the public ticket schema alone (the schema encodes one
-        // evolving board via spawns, never a separate "what the plan originally
-        // intended" reference). Confirmed directly: a real ticket's WHEEL-adjacent
-        // cell mapped to a position the internal plan reserved for a DIFFERENT
-        // symbol, with no spawn entry anywhere to reveal that — Sim.Run (trusted)
-        // reported the correct, exact total; this checker's independent replay
-        // overcounted by exactly the ambiguous cells. Rather than assert false
-        // confidence in either direction, a win-count mismatch involving a symbol
-        // that had a WHEEL fire earlier in the ticket is reported as a WARNING, not
-        // a FAIL — flagging the genuine external-auditing limitation honestly
-        // instead of silently passing OR incorrectly failing a ticket that may well
-        // be exactly correct.
-        var symbolsWithWheelFire = replay.WheelFireEvents.Select(w => w.WheelSymbolId).ToHashSet();
+        // Serialized spawns now carry the evolving board state closely enough that
+        // WHEEL-related count mismatches are treated as real failures.
         foreach (var w in t.WinInfo.WinSymbols ?? Array.Empty<WinSymbolDto>())
         {
             int got = replay.Totals.GetValueOrDefault(w.Id);
             if (got != w.Target)
-            {
-                if (symbolsWithWheelFire.Contains(w.Id))
-                    Add("Payout", $"Win symbol {w.Id} exact count", Status.Warning,
-                        $"target={w.Target} actual(replayed)={got} — symbol had a WHEEL fire; this " +
-                        "checker cannot perfectly reconstruct PostWheelIso's reconciliation against the " +
-                        "engine's internal plan from the public schema alone, so this is NOT a confirmed " +
-                        "defect — verify against Sim.Run/Verifier directly if certainty is required");
-                else
-                    Add("Payout", $"Win symbol {w.Id} exact count", Status.Fail,
-                        $"target={w.Target} actual(replayed)={got}");
-            }
+                Add("Payout", $"Win symbol {w.Id} exact count", Status.Fail,
+                    $"target={w.Target} actual(replayed)={got}");
             else
                 Add("Payout", $"Win symbol {w.Id} exact count", Status.Pass, $"{got}/{w.Target}");
         }
 
         // ── 7. NEAR-MISS BOUND VERIFICATION ────────────────────────────────
-        // Same WHEEL/PostWheelIso limitation as the win-symbol check above (#6) —
-        // see the class-level doc comment's point 3. A near-miss symbol with a
-        // WHEEL lock is subject to the identical external-auditing blind spot.
+        // Near-miss symbols are checked with the same hard replay standard as wins.
         foreach (var nw in t.WinInfo.NonWinSymbols ?? Array.Empty<NonWinSymbolDto>())
         {
             int got = replay.Totals.GetValueOrDefault(nw.Id);
             bool ok = got >= nw.MinTarget && got < nw.MaxThreshold;
-            if (!ok && symbolsWithWheelFire.Contains(nw.Id))
-                Add("Payout", $"Near-miss symbol {nw.Id} within bounds", Status.Warning,
-                    $"got={got} want [{nw.MinTarget}..{nw.MaxThreshold}) — symbol had a WHEEL fire; " +
-                    "not a confirmed defect, see the WHEEL/PostWheelIso limitation noted on the win-count check");
-            else
-                Add("Payout", $"Near-miss symbol {nw.Id} within bounds", ok ? Status.Pass : Status.Fail,
-                    $"got={got} want [{nw.MinTarget}..{nw.MaxThreshold})");
+            Add("Payout", $"Near-miss symbol {nw.Id} within bounds", ok ? Status.Pass : Status.Fail,
+                $"got={got} want [{nw.MinTarget}..{nw.MaxThreshold})");
         }
 
         // ── 8. ORDINARY FILLER CAP CHECK ────────────────────────────────────
@@ -266,15 +226,15 @@ public static class TicketChecker
         else
             Add("Feature", "ReTrigger depth at most one", Status.Pass, "ok");
 
-        int extraSpinTokenCount = CountExtraSpinChain(t);
+        int extraSpinTokenCount = CountPhysicalFeatureSpawns(t, K.F_XSPIN);
         int expectedExtras = totalSpins - K.BASE_SPINS;
         if (extraSpinTokenCount != expectedExtras)
             Add("Feature", "EXTRA_SPIN token count matches bonus spins", Status.Fail,
                 $"TotalSpins implies {expectedExtras} extra spin(s), but found {extraSpinTokenCount} " +
-                "EXTRA_SPIN token(s) in the spawn/ReTrigger chain");
+                "physical EXTRA_SPIN spawn token(s)");
         else
             Add("Feature", "EXTRA_SPIN token count matches bonus spins", Status.Pass,
-                $"{extraSpinTokenCount} token(s) for {expectedExtras} extra spin(s)");
+                $"{extraSpinTokenCount} physical token(s) for {expectedExtras} extra spin(s)");
 
         var finalTurn = t.Turns[^1];
         var finalWheel = (finalTurn.Spawns ?? Array.Empty<SpawnDto>())
@@ -445,82 +405,65 @@ public static class TicketChecker
             }
             if (anyMissing) result.MissingCellTurns.Add(turnIdx + 1);
 
-            // Phase 5: FireAll — repeatedly resolve feature cells until none remain.
-            bool any;
-            do
-            {
-                any = false;
-                for (int r = 0; r < K.ROWS; r++)
-                {
-                    for (int c = 0; c < K.COLS; c++)
-                    {
-                        var fc = board[r, c];
-                        if (fc?.IsFeat != true) continue;
-
-                    if (fc.FeatureId == K.F_WHEEL && fc.WheelStackValue + 1 > 1)
-                    {
-                        int multiplier = fc.WheelStackValue + 1;
-                        int sym        = fc.WheelSymbolId;
-                        for (int rr = 0; rr < K.ROWS; rr++)
-                        for (int cc = 0; cc < K.COLS; cc++)
-                        {
-                            var cell = board[rr, cc];
-                            if (cell != null && !cell.IsFeat && cell.Sym == sym)
-                                cell.Stack = multiplier;
-                        }
-                        result.WheelFireEvents.Add(new WheelFireEvent
-                        {
-                            Turn = turnIdx + 1, WheelSymbolId = sym,
-                            WheelStackValue = fc.WheelStackValue, ActualMultiplier = multiplier
-                        });
-
-                        // PostWheelIso equivalent: the real engine (Sim.cs) reverts
-                        // any stacked cell that ISN'T inside the very next turn's
-                        // collection zone — otherwise a stray stacked cell could
-                        // wander past the WHEEL's intended scope and get counted
-                        // again later, multiplied, with no upper bound. The public
-                        // ticket schema doesn't expose a separate "planned next
-                        // board" the way the internal SpinPlan does, so the
-                        // equivalent here is purely geometric: is this position
-                        // inside next turn's zone (derived from its own declared
-                        // Pushers)? If there's no next turn (this was the last
-                        // turn), nothing more will ever collect it, so no
-                        // reversion is needed.
-                        if (turnIdx + 1 < t.Turns.Length)
-                        {
-                            var nextPushers = t.Turns[turnIdx + 1].Pushers;
-                            for (int rr = 0; rr < K.ROWS; rr++)
-                            for (int cc = 0; cc < K.COLS; cc++)
-                            {
-                                var cell = board[rr, cc];
-                                if (cell == null || cell.IsFeat || cell.Sym != sym) continue;
-
-                                var np = nextPushers[cc];
-                                bool inNextZone = np.FeatureId == K.F_FLUSH_ID
-                                    || rr >= K.ROWS - np.PushValue;
-                                // Matches Sim.cs's PostWheelIso: a stray cell that
-                                // won't be collected next turn is converted away
-                                // entirely (not just un-stacked) — otherwise it
-                                // would still get counted once, un-multiplied,
-                                // whenever it eventually IS collected.
-                                if (!inNextZone) board[rr, cc] = new ReplayCell { Sym = FallbackSymbol(t, sym) };
-                            }
-                        }
-                    }
-
-                    // EXTRA_SPIN/PRIZE_UPGRADE fire as no-ops on the board itself —
-                    // their effect (extra spin count, tier) is read from the spawn
-                    // schema directly, not from replaying a board-level action.
-
-                        board[r, c] = new ReplayCell { Sym = ResolveConvert(fc) };
-                        any = true;
-                    }
-                }
-            }
-            while (any && BoardHasFeatureCell(board));
+            // Phase 5: FireAll — mirror Sim.FireAll exactly: no-board effects first,
+            // then WHEEL. This matters if a ticket has multiple feature cells visible
+            // in the same turn.
+            FireFeaturePass(board, result, turnIdx + 1, wheelPass: false);
+            FireFeaturePass(board, result, turnIdx + 1, wheelPass: true);
         }
 
         return result;
+    }
+
+    private static void FireFeaturePass(
+        ReplayCell?[,] board,
+        ReplayResult result,
+        int turn,
+        bool wheelPass)
+    {
+        bool any;
+        do
+        {
+            any = false;
+            for (int r = 0; r < K.ROWS; r++)
+            {
+                for (int c = 0; c < K.COLS; c++)
+                {
+                    var fc = board[r, c];
+                    if (fc?.IsFeat != true) continue;
+
+                    var isWheel = fc.FeatureId == K.F_WHEEL;
+                    if (isWheel != wheelPass) continue;
+
+                    if (isWheel && fc.WheelStackValue + 1 > 1)
+                    {
+                        int multiplier = fc.WheelStackValue + 1;
+                        int sym = fc.WheelSymbolId;
+                        for (int rr = 0; rr < K.ROWS; rr++)
+                        {
+                            for (int cc = 0; cc < K.COLS; cc++)
+                            {
+                                var cell = board[rr, cc];
+                                if (cell != null && !cell.IsFeat && cell.Sym == sym)
+                                    cell.Stack = multiplier;
+                            }
+                        }
+
+                        result.WheelFireEvents.Add(new WheelFireEvent
+                        {
+                            Turn = turn,
+                            WheelSymbolId = sym,
+                            WheelStackValue = fc.WheelStackValue,
+                            ActualMultiplier = multiplier,
+                        });
+                    }
+
+                    board[r, c] = new ReplayCell { Sym = ResolveConvert(fc) };
+                    any = true;
+                }
+            }
+        }
+        while (any && BoardHasFeatureCell(board, wheelPass));
     }
 
     /// <summary>
@@ -540,13 +483,15 @@ public static class TicketChecker
         return fc.ConvertToId > 0 ? fc.ConvertToId : K.F_COIN;
     }
 
-    private static bool BoardHasFeatureCell(ReplayCell?[,] board)
+    private static bool BoardHasFeatureCell(ReplayCell?[,] board, bool wheelPass)
     {
         for (int r = 0; r < K.ROWS; r++)
         {
             for (int c = 0; c < K.COLS; c++)
             {
-                if (board[r, c]?.IsFeat == true) return true;
+                var cell = board[r, c];
+                if (cell?.IsFeat == true && (cell.FeatureId == K.F_WHEEL) == wheelPass)
+                    return true;
             }
         }
         return false;
@@ -572,31 +517,10 @@ public static class TicketChecker
         return r;
     }
 
-    /// <summary>
-    /// Counts every EXTRA_SPIN token across the whole ticket, walking nested
-    /// ReTrigger arrays no matter which feature started the chain.
-    /// </summary>
-    private static int CountExtraSpinChain(TicketDto t)
-    {
-        int count = 0;
-        foreach (var turn in t.Turns)
-        {
-            foreach (var sp in turn.Spawns ?? Array.Empty<SpawnDto>())
-            {
-                if (sp.Feature == null) continue;
-                count += CountFeatureId(sp.Feature, K.F_XSPIN);
-            }
-        }
-        return count;
-    }
-
-    private static int CountFeatureId(FeatureDto feature, int featureId)
-    {
-        var count = feature.FeatureId == featureId ? 1 : 0;
-        foreach (var nested in feature.ReTrigger ?? Array.Empty<FeatureDto>())
-            count += CountFeatureId(nested, featureId);
-        return count;
-    }
+    private static int CountPhysicalFeatureSpawns(TicketDto t, int featureId) =>
+        t.Turns
+            .SelectMany(turn => turn.Spawns ?? Array.Empty<SpawnDto>())
+            .Count(spawn => spawn.Feature?.FeatureId == featureId);
 
     private static int MaxReTriggerDepth(FeatureDto feature)
     {
@@ -620,29 +544,4 @@ public static class TicketChecker
             AccumulatePrizeUpgradeTokens(nested, result);
     }
 
-    private static int FallbackSymbol(TicketDto ticket, int avoidSym)
-    {
-        var winSyms = (ticket.WinInfo.WinSymbols ?? Array.Empty<WinSymbolDto>())
-            .Select(w => w.Id)
-            .ToHashSet();
-        var nonWinSyms = (ticket.WinInfo.NonWinSymbols ?? Array.Empty<NonWinSymbolDto>())
-            .Select(w => w.Id)
-            .ToHashSet();
-
-        // Match engine behavior as closely as the public ticket allows: WHEEL
-        // isolation converts stray stacked cells to ordinary filler, not to a
-        // declared near-miss symbol whose count is itself under test.
-        for (var id = 1; id <= 10; id++)
-        {
-            if (id != avoidSym && !winSyms.Contains(id) && !nonWinSyms.Contains(id) && !K.IsFeat(id))
-            {
-                return id;
-            }
-        }
-
-        var declaredNonWin = nonWinSyms.FirstOrDefault(id => id != avoidSym && !K.IsFeat(id) && !winSyms.Contains(id));
-        if (declaredNonWin > 0) return declaredNonWin;
-
-        return avoidSym;
-    }
 }

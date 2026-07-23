@@ -551,32 +551,22 @@ internal sealed class FeaturePlanStage
 
     private static List<int> BuildMandatoryWheelOrder(ObjectivePlan objectives, int wheels)
     {
-        var reliable = objectives.WinSymbols
-            .Where(sym => objectives.SourceInput.Targets[sym] < 45)
-            .OrderBy(_ => objectives.Rng.Next())
-            .ToArray();
-        var fallback = objectives.WinSymbols
-            .Where(sym => objectives.SourceInput.Targets[sym] >= 45)
-            .OrderBy(_ => objectives.Rng.Next())
+        var ordered = objectives.WinSymbols
+            .OrderByDescending(sym => objectives.SourceInput.Targets[sym])
+            .ThenBy(_ => objectives.Rng.Next())
             .ToArray();
         var order = new List<int>();
 
-        foreach (var sym in reliable)
-        {
-            if (order.Count >= wheels) return order;
-            order.Add(sym);
-        }
-
-        foreach (var sym in fallback)
+        foreach (var sym in ordered)
         {
             if (order.Count >= wheels) return order;
             order.Add(sym);
         }
 
         var repeatIndex = 0;
-        while (order.Count < wheels && reliable.Length > 0)
+        while (order.Count < wheels && ordered.Length > 0)
         {
-            order.Add(reliable[repeatIndex % reliable.Length]);
+            order.Add(ordered[repeatIndex % ordered.Length]);
             repeatIndex++;
         }
 
@@ -730,8 +720,7 @@ internal sealed class AllocationStage
             && FeatReg.Has(f.Id)
             && FeatReg.Get(f.Id).HasToken);
         var freeCols = K.COLS - flushCols;
-        var push = wheelSpin ? K.MIN_PUSH : K.MAX_PUSH;
-        return Math.Max(0, freeCols * push + flushCols * K.ROWS - reserved);
+        return Math.Max(0, K.MixedPushCapacity(freeCols) + flushCols * K.ROWS - reserved);
     }
 }
 

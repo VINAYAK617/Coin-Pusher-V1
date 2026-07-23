@@ -234,7 +234,7 @@ internal sealed class Resolver
 
         foreach (bool allowNearMiss in new[] { false, true })
         {
-            var primary = (origCol, K.COLS - 1);
+            var primary = (K.ROWS - 1, origCol);
             if (Eligible(primary, allowNearMiss)) return primary;
 
             for (int r = K.ROWS - 1; r >= 0; r--)
@@ -273,12 +273,12 @@ internal sealed class Resolver
 
         foreach (bool allowNearMiss in new[] { false, true })
         {
-            var primary = (origCol, K.COLS - 1);
+            var primary = (K.ROWS - 1, origCol);
             if (Eligible(primary, allowNearMiss)) return primary;
 
             var byRow = spawns.Keys
-                .Where(k => k.Item1 == origCol && Eligible(k, allowNearMiss))
-                .OrderByDescending(k => k.Item2)
+                .Where(k => k.Item2 == origCol && Eligible(k, allowNearMiss))
+                .OrderByDescending(k => k.Item1)
                 .FirstOrDefault();
             if (byRow != default) return byRow;
 

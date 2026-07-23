@@ -12,15 +12,10 @@ namespace CoinPusherEngine;
 /// replaces it with the token. The Scheduler already reduced spin (F+1)'s alloc by 1.
 ///
 /// Zone Capacity — exact match with Scheduler.Cap:
-/// Scheduler.Cap allocates at most `maxZone = freeCols*MAX_PUSH + flushCols*ROWS - reserved`
-/// wins into any given spin. Since alloc_total is therefore GUARANTEED to never exceed
-/// maxZone, Builder can safely set:
-///   needed = clamp(alloc_total, freeCols*MIN_PUSH, freeCols*MAX_PUSH)
-/// This is always >= alloc_total (because alloc_total <= freeCols*MAX_PUSH by construction),
-/// so zone overflow is structurally impossible. When alloc_total is small or zero, needed
-/// collapses to the MIN_PUSH floor, avoiding wasteful filler churn in spins with few/no wins.
-/// WHEEL spins are always pinned to MIN_PUSH regardless of alloc, to keep zone rows
-/// available for cells that will be stacked by the WHEEL fire.
+/// Scheduler.Cap allocates at most mixed free-column capacity plus FLUSH capacity,
+/// minus reserved feature-token cells. Builder then creates varied 1/2/3 push values
+/// with the same mixed-cap ceiling, so zone overflow is structurally impossible while
+/// still avoiding rigged-looking flat push screens.
 /// </summary>
 internal sealed class Builder
 {
@@ -67,7 +62,7 @@ internal sealed class Builder
 
             var (push, flush) = MakePushers(s, sf, alloc, reservedCount);
             var tokenReserved = TokenReservedPositions(s - 1, push, flush);
-            var board = BuildBoard(nextBoard, s, push, flush, alloc, tokenReserved);
+            var board = BuildBoard(nextBoard, plans, s, totalSpins, push, flush, alloc, tokenReserved);
 
             var plan = new SpinPlan
             {
@@ -98,7 +93,7 @@ internal sealed class Builder
                                           && FeatReg.Has(p.Id)
                                           && FeatReg.Get(p.Id).HasToken))
         {
-            var preferred = (f.Col, K.COLS - 1);
+            var preferred = (K.ROWS - 1, f.Col);
             if (zoneSet.Contains(preferred) && !reserved.Contains(preferred))
             { reserved.Add(preferred); continue; }
 
@@ -124,7 +119,8 @@ internal sealed class Builder
     }
 
     // ── Board construction ─────────────────────────────────────────────────
-    private Cell?[,] BuildBoard(Cell?[,] next, int spinNum,
+    private Cell?[,] BuildBoard(Cell?[,] next, IReadOnlyList<SpinPlan> futurePlans,
+                                 int spinNum, int totalSpins,
                                  int[] push, bool[] flush,
                                  IReadOnlyDictionary<int, int> alloc,
                                  HashSet<(int, int)> tokenReserved)
@@ -147,13 +143,15 @@ internal sealed class Builder
         }
 
         var zoneSet = Grid.ZoneSet(push, flush);
-        IsolateWheelSyms(board, spinNum, zoneSet);
-        FillZone(board, spinNum, push, flush, alloc, tokenReserved);
+        IsolateWheelSyms(board, spinNum, totalSpins, zoneSet);
+        var carryStarts = PlanWheelCarryStarts(futurePlans, spinNum, totalSpins, push, flush);
+        FillZone(board, spinNum, push, flush, alloc, tokenReserved, carryStarts.DelayedBySymbol);
+        PlaceWheelCarryStarts(board, carryStarts);
         FillRest(board);
         return board;
     }
 
-    private void IsolateWheelSyms(Cell?[,] board, int spinNum, HashSet<(int, int)> zoneSet)
+    private void IsolateWheelSyms(Cell?[,] board, int spinNum, int totalSpins, HashSet<(int, int)> zoneSet)
     {
         foreach (var lk in _locks)
         {
@@ -170,14 +168,17 @@ internal sealed class Builder
                     }
                 }
             }
-            else if (lk.FireSpin + 1 == spinNum)
+            else if (lk.FireSpin + 1 == spinNum && spinNum < totalSpins)
             {
+                var protectedPositions = WheelCarryStartPositions(spinNum, lk);
                 for (int r = 0; r < K.ROWS; r++)
                 {
                     for (int c = 0; c < K.COLS; c++)
                     {
                         var cell = board[r, c];
-                        if (cell != null && !cell.IsFeat && cell.Sym == sym && !zoneSet.Contains((r, c)))
+                        if (cell != null && !cell.IsFeat && cell.Sym == sym
+                            && !zoneSet.Contains((r, c))
+                            && !protectedPositions.Contains((r, c)))
                             board[r, c] = null;
                     }
                 }
@@ -185,9 +186,179 @@ internal sealed class Builder
         }
     }
 
+    private sealed class WheelCarryStartPlan
+    {
+        internal Dictionary<int, int> DelayedBySymbol { get; } = new();
+        internal List<((int r, int c) Pos, int Sym)> Cells { get; } = new();
+    }
+
+    private WheelCarryStartPlan PlanWheelCarryStarts(IReadOnlyList<SpinPlan> futurePlans,
+                                                     int spinNum, int totalSpins,
+                                                     int[] push, bool[] flush)
+    {
+        var result = new WheelCarryStartPlan();
+        var locks = _locks.Where(lk => lk.FireSpin + 1 == spinNum).OrderBy(_ => _rng.Next()).ToList();
+        if (locks.Count == 0) return result;
+
+        var occupied = new HashSet<(int, int)>();
+        foreach (var lk in locks)
+        {
+            var immediate = lk.CarrySlots.GetValueOrDefault(lk.FireSpin);
+            var delayedWanted = immediate > 1 ? 1 : 0;
+            foreach (var pos in DelayedCarryCandidates(spinNum, totalSpins, push, flush, futurePlans, occupied)
+                         .Take(delayedWanted))
+            {
+                result.Cells.Add((pos, lk.Sym));
+                result.DelayedBySymbol[lk.Sym] = result.DelayedBySymbol.GetValueOrDefault(lk.Sym) + 1;
+                occupied.Add(pos);
+            }
+
+            foreach (var pos in PermanentResidueCandidates(spinNum, totalSpins, push, flush, futurePlans, occupied)
+                         .Take(lk.PermanentResidue))
+            {
+                result.Cells.Add((pos, lk.Sym));
+                occupied.Add(pos);
+            }
+        }
+
+        return result;
+    }
+
+    private static void PlaceWheelCarryStarts(Cell?[,] board, WheelCarryStartPlan plan)
+    {
+        foreach (var (pos, sym) in plan.Cells)
+            board[pos.r, pos.c] = Grid.Norm(sym);
+    }
+
+    private HashSet<(int r, int c)> WheelCarryStartPositions(int spinNum, WLock lk)
+    {
+        if (lk.FireSpin + 1 != spinNum) return new HashSet<(int, int)>();
+
+        // Dynamic carry starts are selected later in BuildBoard. Existing back-propagated
+        // cells should not be cleared if they are already outside the next collection zone.
+        return Enumerable.Range(0, K.ROWS)
+            .SelectMany(r => Enumerable.Range(0, K.COLS).Select(c => (r, c)))
+            .ToHashSet();
+    }
+
+    private IEnumerable<(int r, int c)> CarryStartCandidates(
+        int startSpin,
+        int collectSpin,
+        int[] push,
+        bool[] flush,
+        IReadOnlyList<SpinPlan> futurePlans,
+        HashSet<(int, int)> occupied)
+    {
+        return Enumerable.Range(0, K.ROWS)
+            .SelectMany(r => Enumerable.Range(0, K.COLS).Select(c => (r, c)))
+            .Where(pos => !occupied.Contains(pos))
+            .Where(pos => CollectsExactlyAt(pos, startSpin, collectSpin, push, flush, futurePlans))
+            .OrderBy(_ => _rng.Next());
+    }
+
+    private IEnumerable<(int r, int c)> DelayedCarryCandidates(
+        int startSpin,
+        int totalSpins,
+        int[] push,
+        bool[] flush,
+        IReadOnlyList<SpinPlan> futurePlans,
+        HashSet<(int, int)> occupied)
+    {
+        var positions = Enumerable.Range(0, K.ROWS)
+            .SelectMany(r => Enumerable.Range(0, K.COLS).Select(c => (r, c)))
+            .Where(pos => !occupied.Contains(pos))
+            .OrderBy(_ => _rng.Next())
+            .ToList();
+
+        for (var collectSpin = startSpin + 1; collectSpin <= totalSpins; collectSpin++)
+        {
+            foreach (var pos in positions)
+                if (CollectsExactlyAt(pos, startSpin, collectSpin, push, flush, futurePlans))
+                    yield return pos;
+        }
+    }
+
+    private IEnumerable<(int r, int c)> PermanentResidueCandidates(
+        int startSpin,
+        int totalSpins,
+        int[] push,
+        bool[] flush,
+        IReadOnlyList<SpinPlan> futurePlans,
+        HashSet<(int, int)> occupied)
+    {
+        return Enumerable.Range(0, K.ROWS)
+            .SelectMany(r => Enumerable.Range(0, K.COLS).Select(c => (r, c)))
+            .Where(pos => !occupied.Contains(pos))
+            .Where(pos => !CollectsByEnd(pos, startSpin, totalSpins, push, flush, futurePlans))
+            .OrderBy(_ => _rng.Next());
+    }
+
+    private static bool CollectsExactlyAt(
+        (int r, int c) start,
+        int startSpin,
+        int collectSpin,
+        int[] push,
+        bool[] flush,
+        IReadOnlyList<SpinPlan> futurePlans)
+    {
+        var pos = start;
+        for (var spin = startSpin; spin <= collectSpin; spin++)
+        {
+            var (p, f) = spin == startSpin
+                ? (push, flush)
+                : PlanGeometry(futurePlans, spin);
+
+            var inZone = f[pos.c] || pos.r >= K.ROWS - p[pos.c];
+            if (spin == collectSpin) return inZone;
+            if (inZone) return false;
+
+            pos = AdvancePosition(pos, p[pos.c]);
+            if (pos.r < 0) return false;
+        }
+
+        return false;
+    }
+
+    private static bool CollectsByEnd(
+        (int r, int c) start,
+        int startSpin,
+        int totalSpins,
+        int[] push,
+        bool[] flush,
+        IReadOnlyList<SpinPlan> futurePlans)
+    {
+        var pos = start;
+        for (var spin = startSpin; spin <= totalSpins; spin++)
+        {
+            var (p, f) = spin == startSpin
+                ? (push, flush)
+                : PlanGeometry(futurePlans, spin);
+
+            if (f[pos.c] || pos.r >= K.ROWS - p[pos.c]) return true;
+            pos = AdvancePosition(pos, p[pos.c]);
+            if (pos.r < 0) return false;
+        }
+
+        return false;
+    }
+
+    private static (int[] Push, bool[] Flush) PlanGeometry(IReadOnlyList<SpinPlan> plans, int spin)
+    {
+        var plan = plans.First(p => p.Spin == spin);
+        return (plan.Push, plan.Flush);
+    }
+
+    private static (int r, int c) AdvancePosition((int r, int c) pos, int push)
+    {
+        var shiftedRow = pos.r + push;
+        if (shiftedRow >= K.ROWS) return (-1, -1);
+        return (pos.c, K.ROWS - 1 - shiftedRow);
+    }
+
     private void FillZone(Cell?[,] board, int spinNum, int[] push, bool[] flush,
                            IReadOnlyDictionary<int, int> alloc,
-                           HashSet<(int, int)> tokenReserved)
+                           HashSet<(int, int)> tokenReserved,
+                           IReadOnlyDictionary<int, int> delayedWheelCounts)
     {
         var safe  = new List<(int r, int c)>();
         var spawn = new List<(int r, int c)>();
@@ -209,7 +380,10 @@ internal sealed class Builder
         foreach (var (r, c) in positions) board[r, c] = null;
         foreach (var pos in tokenReserved) board[pos.Item1, pos.Item2] = null;
 
-        foreach (var (r, c) in PlaceAllocatedSymbols(board, positions, alloc))
+        var effectiveAlloc = alloc.Where(kv => kv.Value > 0).ToDictionary(kv => kv.Key, kv => kv.Value);
+        RemoveDelayedWheelCarryAlloc(effectiveAlloc, delayedWheelCounts);
+
+        foreach (var (r, c) in PlaceAllocatedSymbols(board, positions, effectiveAlloc))
         {
             // Leftover zone capacity after the real, scheduled wins are placed — this
             // position is GUARANTEED collected THIS spin (it's inside the zone), so it's
@@ -354,13 +528,24 @@ internal sealed class Builder
         }
     }
 
+    private static void RemoveDelayedWheelCarryAlloc(
+        Dictionary<int, int> alloc,
+        IReadOnlyDictionary<int, int> delayedWheelCounts)
+    {
+        foreach (var (sym, count) in delayedWheelCounts)
+        {
+            if (!alloc.TryGetValue(sym, out var existing)) continue;
+            var next = Math.Max(0, existing - count);
+            if (next == 0) alloc.Remove(sym);
+            else alloc[sym] = next;
+        }
+    }
+
     // ── Pusher calculation ─────────────────────────────────────────────────
     /// <summary>
-    /// needed = clamp(alloc_total, freeCols*MIN_PUSH, freeCols*MAX_PUSH)  [non-WHEEL]
-    /// needed = freeCols*MIN_PUSH                                         [WHEEL]
-    /// Since Scheduler.Cap never allocates more than freeCols*MAX_PUSH + flushCap - reserved
-    /// to any spin, alloc_total can never exceed the MAX_PUSH ceiling, so this clamp can
-    /// never truncate below alloc_total — zone overflow is structurally impossible.
+    /// Builds mixed 1/2/3 pusher values. The target capacity is clamped to the same
+    /// mixed-push ceiling used by Scheduler, plus any FLUSH capacity, so this stage
+    /// cannot silently create a 4-row push or rely on flat 3/3/3/3/3 screens.
     /// </summary>
     private (int[] push, bool[] flush) MakePushers(int spinNum, List<PlacedFeat> sf,
                                                     IReadOnlyDictionary<int, int> alloc,
@@ -372,11 +557,9 @@ internal sealed class Builder
         // Zone must hold both the allocated wins AND the reserved token slot(s)
         int total     = alloc.Values.Sum() + reserved;
 
-        int needed = isWheel
-            ? freeCols * K.MIN_PUSH
-            : Math.Clamp(total - flushCols.Count * K.ROWS, freeCols * K.MIN_PUSH, freeCols * K.MAX_PUSH);
+        int needed = Math.Clamp(total - flushCols.Count * K.ROWS, freeCols * K.MIN_PUSH, freeCols * K.MAX_PUSH);
 
-        int[] pv = MakeVariedPushValues(freeCols, needed);
+        int[] pv = MakeVariedPushValues(freeCols, needed, allowVisualLift: true);
 
         var push  = new int[K.COLS];
         var flush = new bool[K.COLS];
@@ -389,42 +572,74 @@ internal sealed class Builder
         return (push, flush);
     }
 
-    private int[] MakeVariedPushValues(int freeCols, int needed)
+    private int[] MakeVariedPushValues(int freeCols, int needed, bool allowVisualLift)
     {
         if (freeCols <= 0) return Array.Empty<int>();
 
         int minTotal = freeCols * K.MIN_PUSH;
-        int maxTotal = freeCols * K.MAX_PUSH;
+        int maxTotal = allowVisualLift
+            ? K.MixedPushCapacity(freeCols)
+            : freeCols * K.MAX_PUSH;
         int targetTotal = Math.Clamp(needed, minTotal, maxTotal);
 
-        var pv = Enumerable.Repeat(K.MIN_PUSH, freeCols).ToArray();
-        int left = targetTotal - minTotal;
-        while (left > 0)
+        if (allowVisualLift)
         {
-            bool placed = false;
-            foreach (int idx in Enumerable.Range(0, freeCols).OrderBy(_ => _rng.Next()))
+            targetTotal = Math.Max(targetTotal, MinimumMixedPushTotal(freeCols));
+        }
+
+        var best = BuildRandomPushComposition(freeCols, targetTotal);
+        for (var attempt = 0; attempt < 64; attempt++)
+        {
+            var candidate = BuildRandomPushComposition(freeCols, targetTotal);
+            if (PushShapeScore(candidate) > PushShapeScore(best))
             {
-                if (left == 0) break;
-                if (pv[idx] >= K.MAX_PUSH) continue;
-                pv[idx]++;
-                left--;
-                placed = true;
+                best = candidate;
             }
-            if (!placed) break;
         }
 
-        // Same total, better shape: turn [2,2,2,2,2] into something like
-        // [3,2,2,2,1] when possible. This keeps capacity unchanged.
-        if (pv.Distinct().Count() == 1 && pv[0] > K.MIN_PUSH && pv[0] < K.MAX_PUSH)
+        return RandomizePushOrder(best);
+    }
+
+    private static int MinimumMixedPushTotal(int freeCols)
+    {
+        if (freeCols >= 3)
         {
-            int hi = _rng.Next(freeCols);
-            int lo;
-            do { lo = _rng.Next(freeCols); } while (lo == hi);
-            pv[hi]++;
-            pv[lo]--;
+            return K.MIN_PUSH * freeCols + 3;
         }
 
-        return RandomizePushOrder(pv);
+        return freeCols == 2
+            ? K.MIN_PUSH * freeCols + 1
+            : K.MIN_PUSH * freeCols;
+    }
+
+    private int[] BuildRandomPushComposition(int freeCols, int targetTotal)
+    {
+        var values = Enumerable.Repeat(K.MIN_PUSH, freeCols).ToArray();
+        var remaining = targetTotal - values.Sum();
+
+        while (remaining > 0)
+        {
+            var candidates = Enumerable.Range(0, freeCols)
+                .Where(i => values[i] < K.MAX_PUSH)
+                .ToArray();
+            if (candidates.Length == 0) break;
+
+            var idx = candidates[_rng.Next(candidates.Length)];
+            values[idx]++;
+            remaining--;
+        }
+
+        return values;
+    }
+
+    private static int PushShapeScore(int[] values)
+    {
+        var distinct = values.Distinct().Count();
+        var maxFrequency = values.GroupBy(v => v).Max(g => g.Count());
+        var highPushes = values.Count(v => v == K.MAX_PUSH);
+        var score = distinct * 100 + highPushes * 12 - maxFrequency * 10;
+        if (IsMonotonic(values)) score -= 50;
+        return score;
     }
 
     private int[] RandomizePushOrder(int[] values)

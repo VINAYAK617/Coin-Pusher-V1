@@ -4,10 +4,12 @@ internal static class CapacityAnalyzer
 {
     internal static int TotalCapacity(int totalSpins, int flushTokens, int wheelFireSpins)
     {
-        var baseCapacity = totalSpins * K.COLS * K.MAX_PUSH;
-        var flushBonus = flushTokens * (K.ROWS - K.MAX_PUSH);
-        var wheelPenalty = wheelFireSpins * K.COLS * (K.MAX_PUSH - K.MIN_PUSH);
-        return baseCapacity + flushBonus - wheelPenalty;
+        _ = wheelFireSpins;
+        var normalSpinCapacity = K.MixedPushCapacity(K.COLS);
+        var baseCapacity = totalSpins * normalSpinCapacity;
+        var flushSpinCapacity = K.ROWS + K.MixedPushCapacity(K.COLS - 1);
+        var flushBonus = flushTokens * (flushSpinCapacity - normalSpinCapacity);
+        return baseCapacity + flushBonus;
     }
 
     internal static int FillerBudget(
@@ -79,7 +81,7 @@ internal static class CapacityAnalyzer
             if (i < wheelCount)
             {
                 var stack = WMath.StackFromValue(WMath.BestN(target));
-                var zone = WMath.Zone(target, stack);
+                var zone = WMath.CollectibleZone(target, stack);
                 total += zone + Math.Max(0, target - zone * stack);
             }
             else

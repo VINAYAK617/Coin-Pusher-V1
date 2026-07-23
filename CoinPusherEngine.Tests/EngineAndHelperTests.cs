@@ -66,8 +66,28 @@ public sealed class EngineAndHelperTests
         Assert.AreEqual(3, combos.Count);
         Assert.IsFalse(combos[0].IsUpgrade);
         Assert.IsTrue(combos.Skip(1).All(c => c.IsUpgrade));
+        Assert.IsTrue(combos.All(c => c.Input.BaseSpins == 5));
+        Assert.IsTrue(combos.All(c => c.Input.MaxSym == 3));
         Assert.AreEqual("PRIZE_UPGRADE", combos[1].Input.Required.Single().Key);
         Assert.IsTrue(combos[1].Input.PrizeTiers!.Values.Single() > 0);
+    }
+
+    [TestMethod]
+    public void VerifierRejectsIllegalNormalPushValues()
+    {
+        var plan = new Planner(new MathInput
+        {
+            Targets = new Dictionary<int, int> { [2] = 12 },
+            BaseSpins = 5,
+            MaxSym = 6,
+        }, seed: 1701).Plan();
+
+        var firstNormalCol = Enumerable.Range(0, K.COLS)
+            .First(col => !plan.Spins[0].Flush[col]);
+        plan.Spins[0].Push[firstNormalCol] = K.MAX_PUSH + 1;
+
+        var ex = Assert.ThrowsException<InvalidOperationException>(() => Verifier.Check(plan));
+        StringAssert.Contains(ex.Message, "push=");
     }
 
     [TestMethod]
@@ -82,10 +102,10 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CapacityAnalyzerCalculatesCapacityAndFeasibility()
     {
-        Assert.AreEqual(75, CapacityAnalyzer.TotalCapacity(5, 0, 0));
-        Assert.AreEqual(79, CapacityAnalyzer.TotalCapacity(5, 2, 0));
-        Assert.AreEqual(69, CapacityAnalyzer.TotalCapacity(5, 2, 1));
-        Assert.AreEqual(49, CapacityAnalyzer.FillerBudget(20, 5, 0, 2, 1));
+        Assert.AreEqual(60, CapacityAnalyzer.TotalCapacity(5, 0, 0));
+        Assert.AreEqual(64, CapacityAnalyzer.TotalCapacity(5, 2, 0));
+        Assert.AreEqual(64, CapacityAnalyzer.TotalCapacity(5, 2, 1));
+        Assert.AreEqual(44, CapacityAnalyzer.FillerBudget(20, 5, 0, 2, 1));
         Assert.IsTrue(CapacityAnalyzer.IsFeasible(20, 5, 4, tokenLoad: 0, flushTokens: 2, wheelFireSpins: 1));
         Assert.IsTrue(CapacityAnalyzer.IsFeasible(20, 5, new[] { 1, 5, 6 }, tokenLoad: 0, flushTokens: 2, wheelFireSpins: 1));
         Assert.AreEqual(0, CapacityAnalyzer.MinExtraSpins(20, 4));
@@ -106,11 +126,14 @@ public sealed class EngineAndHelperTests
 
         Assert.AreEqual(4, WMath.StackFromValue(3));
         Assert.AreEqual(4, WMath.Zone(20, 4));
+        Assert.AreEqual(3, WMath.CollectibleZone(20, 4));
+        Assert.IsFalse(WMath.EdfOk(8, 1, Array.Empty<PlacedFeat>(),
+            new Dictionary<int, int> { [2] = 20 }, isMulti: false));
 
         var single = WMath.MakeLock(2, 20, fireSpin: 3, n: 3);
         Assert.AreEqual(2, single.Sym);
-        Assert.AreEqual(16, single.Post);
-        Assert.AreEqual(4, single.Pre);
+        Assert.AreEqual(12, single.Post);
+        Assert.AreEqual(8, single.Pre);
 
         var multi = WMath.MakeMultiLock(2, total: 20, spin1: 3, n1: 2, spin2: 5, n2: 1, t1: 12);
         Assert.AreEqual(2, multi.lk1.Sym);
@@ -181,5 +204,144 @@ public sealed class EngineAndHelperTests
         var trace = writer.ToString();
         StringAssert.Contains(trace, "GAME TRACE");
         StringAssert.Contains(trace, "FINAL TOTALS");
+    }
+
+    [TestMethod]
+    public void WheelResidueSurvivesOutsideImmediateCollectionZone()
+    {
+        var board = new Cell?[K.ROWS, K.COLS];
+        board[0, 0] = Grid.Feat(K.F_WHEEL, 1, new FP
+        {
+            FeatId = "WHEEL",
+            WheelSym = 2,
+            WheelStack = 3,
+        });
+        board[0, 1] = Grid.Norm(2);
+
+        var next = new SpinPlan
+        {
+            Push = new[] { 1, 1, 1, 1, 1 },
+            Flush = new[] { false, false, false, false, false },
+        };
+
+        Sim.FireAll(board, new SpinPlan(), next, fallback: 1);
+
+        Assert.AreEqual(2, board[0, 1]!.Sym);
+        Assert.AreEqual(3, board[0, 1]!.Stack);
+    }
+
+    [TestMethod]
+    public void WheelPlanningSupportsImmediateDelayedAndPermanentResidueBuckets()
+    {
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int> { [2] = 24 },
+            BaseSpins = 5,
+            Required = new Dictionary<string, int> { ["WHEEL"] = 1 },
+            WheelSymOrder = new[] { 2 },
+            MaxSym = 6,
+        };
+
+        var plan = new Planner(input, seed: 4242).Plan();
+        var audit = AuditWheelResidue(plan, wheelSym: 2);
+
+        Assert.IsTrue(audit.ImmediateStacked > 0);
+        Assert.IsTrue(audit.DelayedCollected || audit.PermanentResidue > 0);
+        Assert.AreEqual(24, Sim.Run(plan)[2]);
+    }
+
+    private static (int ImmediateStacked, bool DelayedCollected, int PermanentResidue) AuditWheelResidue(
+        GamePlan plan,
+        int wheelSym)
+    {
+        var board = Grid.Clone(plan.Spins[0].Board);
+        var totals = new Dictionary<int, int>();
+        var wheelIndex = plan.Spins.FindIndex(spin =>
+            spin.Spawns.Values.Any(cell => cell.IsFeat && cell.Sym == K.F_WHEEL && cell.Fp?.WheelSym == wheelSym));
+        var immediateStacked = 0;
+        var delayedCollected = false;
+
+        for (var i = 0; i < plan.Spins.Count; i++)
+        {
+            var sp = plan.Spins[i];
+            Sim.FlatStale(board);
+            CollectForAudit(board, sp, totals, wheelSym, i > wheelIndex + 1, ref delayedCollected);
+            board = Grid.RotCW(board);
+            foreach (var kv in sp.Spawns)
+                board[kv.Key.Item1, kv.Key.Item2] = kv.Value.Clone();
+            var next = i + 1 < plan.Spins.Count ? plan.Spins[i + 1] : null;
+            Sim.FireAll(board, sp, next, plan.FillSyms.Count > 0 ? plan.FillSyms[0] : K.F_COIN);
+
+            if (i == wheelIndex && next != null)
+            {
+                var zone = Grid.ZoneSet(next.Push, next.Flush);
+                immediateStacked = CountStackedInZone(board, wheelSym, zone);
+            }
+        }
+
+        var permanentResidue = board.Cast<Cell?>()
+            .Count(cell => cell != null && !cell.IsFeat && cell.Sym == wheelSym && cell.Stack > 1);
+
+        return (immediateStacked, delayedCollected, permanentResidue);
+    }
+
+    private static int CountStackedInZone(Cell?[,] board, int sym, HashSet<(int, int)> zone)
+    {
+        var count = 0;
+        for (var r = 0; r < K.ROWS; r++)
+        {
+            for (var c = 0; c < K.COLS; c++)
+            {
+                var cell = board[r, c];
+                if (cell != null && !cell.IsFeat && cell.Sym == sym && cell.Stack > 1 && zone.Contains((r, c)))
+                    count++;
+            }
+        }
+        return count;
+    }
+
+    private static void CollectForAudit(
+        Cell?[,] board,
+        SpinPlan sp,
+        Dictionary<int, int> totals,
+        int wheelSym,
+        bool afterImmediateTurn,
+        ref bool delayedCollected)
+    {
+        for (var col = 0; col < K.COLS; col++)
+        {
+            if (sp.Flush[col])
+            {
+                for (var r = 0; r < K.ROWS; r++)
+                    CollectCell(board, r, col, totals, wheelSym, afterImmediateTurn, ref delayedCollected);
+                continue;
+            }
+
+            var push = sp.Push[col];
+            for (var r = K.ROWS - push; r < K.ROWS; r++)
+                CollectCell(board, r, col, totals, wheelSym, afterImmediateTurn, ref delayedCollected);
+
+            for (var r = K.ROWS - 1; r >= 0; r--)
+            {
+                var src = r - push;
+                board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;
+            }
+        }
+    }
+
+    private static void CollectCell(
+        Cell?[,] board,
+        int row,
+        int col,
+        Dictionary<int, int> totals,
+        int wheelSym,
+        bool afterImmediateTurn,
+        ref bool delayedCollected)
+    {
+        var cell = board[row, col];
+        if (cell == null || K.IsFeat(cell.Sym)) return;
+        totals[cell.Sym] = totals.GetValueOrDefault(cell.Sym) + cell.Stack;
+        if (afterImmediateTurn && cell.Sym == wheelSym && cell.Stack > 1)
+            delayedCollected = true;
     }
 }

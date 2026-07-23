@@ -9,7 +9,7 @@ namespace CoinPusherEngine;
 ///   2. Collect    — push cells off the board; accumulate win/filler totals
 ///   3. RotateCW   — 90-degree clockwise board rotation
 ///   4. ApplySpawns — write planned cells onto the rotated board
-///   5. FireAll    — fire feature tokens; run PostWheelIso after WHEEL
+///   5. FireAll    — fire feature tokens
 /// </summary>
 internal static class Sim
 {
@@ -93,9 +93,6 @@ internal static class Sim
 
                     feat.Fire(new FireCtx { Board=board, Col=c, Fp=fc.Fp ?? new FP { FeatId=feat.Id } });
 
-                    if (feat.Id == "WHEEL" && next != null)
-                        PostWheelIso(board, fc.Fp?.WheelSym ?? 0, next, fallback);
-
                     board[r, c] = Cvt(fc);
                     any = true;
                 }
@@ -107,34 +104,6 @@ internal static class Sim
             var isWheel = x.Sym == K.F_WHEEL || x.FeatId == "WHEEL";
             return isWheel == wheelPass;
         }));
-    }
-
-    /// <summary>
-    /// After WHEEL fires: remove stacked win cells that are NOT in next spin's
-    /// planned zone, or that don't match the planned cell at that position.
-    /// Uses next.Board for exact planned-vs-stray comparison.
-    /// </summary>
-    private static void PostWheelIso(Cell?[,] board, int sym, SpinPlan next, int fallback)
-    {
-        if (sym == 0) return;
-        var nextZone = Grid.ZoneSet(next.Push, next.Flush);
-
-        for (int r = 0; r < K.ROWS; r++)
-        {
-            for (int c = 0; c < K.COLS; c++)
-            {
-                var cell = board[r, c];
-                if (cell == null || cell.IsFeat || cell.Sym != sym) continue;
-
-                var  planned = next.Board[r, c];
-                bool keep    = nextZone.Contains((r, c))
-                            && planned != null
-                            && !planned.IsFeat
-                            && planned.Sym == sym;
-
-                if (!keep) board[r, c] = Grid.Norm(fallback);
-            }
-        }
     }
 
     private static void ApplySpawns(Cell?[,] board, SpinPlan sp)
