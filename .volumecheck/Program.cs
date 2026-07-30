@@ -13,8 +13,10 @@ var retriggerPairs = new Dictionary<string, int>();
 var mixedScreens = 0;
 var monotonicScreens = 0;
 var flatScreens = 0;
+var finalAnyFeature = 0;
 var finalWheel = 0;
 var finalExtra = 0;
+var finalPrizeUpgrade = 0;
 var ticketsWithNearMiss = 0;
 var ticketsWithFeature = 0;
 var ticketsWithRetrigger = 0;
@@ -56,8 +58,10 @@ for (var i = 0; i < count; i++)
 
             if (turnIndex == ticket.Turns.Length - 1)
             {
+                if (turn.Spawns.Any(s => s.Feature != null)) finalAnyFeature++;
                 if (turn.Spawns.Any(s => s.Feature?.FeatureId == 11)) finalWheel++;
                 if (turn.Spawns.Any(s => s.Feature?.FeatureId == 12)) finalExtra++;
+                if (turn.Spawns.Any(s => s.Feature?.FeatureId == 13)) finalPrizeUpgrade++;
             }
 
             foreach (var spawn in turn.Spawns)
@@ -107,8 +111,10 @@ Console.WriteLine($"pushCounts={FormatIntMap(pushCounts)}");
 Console.WriteLine($"mixedScreens={mixedScreens}");
 Console.WriteLine($"monotonicScreens={monotonicScreens}");
 Console.WriteLine($"flatScreens={flatScreens}");
+Console.WriteLine($"finalAnyFeature={finalAnyFeature}");
 Console.WriteLine($"finalWheel={finalWheel}");
 Console.WriteLine($"finalExtra={finalExtra}");
+Console.WriteLine($"finalPrizeUpgrade={finalPrizeUpgrade}");
 if (failures.Count > 0)
 {
     Console.WriteLine("firstFailures:");

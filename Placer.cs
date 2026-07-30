@@ -28,9 +28,9 @@ internal sealed class Placer
             var (_, _, minS, maxS, _) = FeatReg.Cfg[id];
             int req     = _inp.Required.GetValueOrDefault(id, 0);
             // maxS is an exclusive upper bound throughout this class and in
-            // Feat.TryPlace implementations. WHEEL and EXTRA_SPIN must not appear on
-            // the final spin. PRIZE_UPGRADE may, and is biased toward late spins.
-            int capSpin = Math.Min(maxS, id is "EXTRA_SPIN" or "WHEEL"
+            // Feat.TryPlace implementations. Any board-token feature must not appear
+            // on the final spin; FLUSH is a pusher flag, not a board token.
+            int capSpin = Math.Min(maxS, FeatReg.Get(id).HasToken
                 ? totalSpinsKnown
                 : totalSpinsKnown + 1);
 

@@ -46,11 +46,10 @@ internal static class Verifier
             && !plan.WinSyms.Any(sym => plan.Spins[^1].Alloc.GetValueOrDefault(sym) > 0))
             throw new InvalidOperationException("VERIFY FAIL last spin has no win alloc");
 
-        if (plan.Spins[^1].Spawns.Values.Any(cell => cell.IsFeat && cell.Sym == K.F_XSPIN))
-            throw new InvalidOperationException("VERIFY FAIL EXTRA_SPIN token in final spin spawns");
-
-        if (plan.Spins[^1].Spawns.Values.Any(cell => cell.IsFeat && cell.Sym == K.F_WHEEL))
-            throw new InvalidOperationException("VERIFY FAIL WHEEL token in final spin spawns");
+        var finalFeature = plan.Spins[^1].Spawns.Values.FirstOrDefault(cell => cell.IsFeat);
+        if (finalFeature != null)
+            throw new InvalidOperationException(
+                $"VERIFY FAIL feature token {finalFeature.Sym} in final spin spawns");
 
         var extraSpinTokens = plan.Spins
             .SelectMany(spin => spin.Spawns.Values)

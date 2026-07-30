@@ -139,9 +139,29 @@ public sealed class GameLogicCoverageTests
 
         Assert.IsTrue(ticket.WinInfo.TotalSpins > 5);
         Assert.AreEqual(ticket.WinInfo.TotalSpins - 5, PhysicalFeatureCount(ticket, 12));
-        var lastTurn = ticket.Turns[^1];
-        Assert.IsFalse(lastTurn.Spawns.Any(spawn => spawn.Feature?.FeatureId == 12));
-        Assert.IsFalse(lastTurn.Spawns.Any(spawn => spawn.Feature?.FeatureId == 11));
+        AssertNoFinalBoardFeatures(ticket);
+        AssertValid(ticket);
+    }
+
+    [DataTestMethod]
+    [DataRow(8181)]
+    [DataRow(8282)]
+    public void PrizeUpgradeDoesNotAppearOnFinalSpin(int seed)
+    {
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int> { [2] = 20, [4] = 20 },
+            BaseSpins = 5,
+            Required = new Dictionary<string, int> { ["PRIZE_UPGRADE"] = 2 },
+            PrizeTiers = new Dictionary<int, int> { [2] = 1, [4] = 1 },
+            PrizeValues = PrizeValues(6, tiers: 3),
+            MaxSym = 6,
+        };
+
+        var ticket = PlanTicket(input, seed);
+
+        Assert.IsTrue(PhysicalFeatureCount(ticket, 13) >= 2);
+        AssertNoFinalBoardFeatures(ticket);
         AssertValid(ticket);
     }
 
@@ -169,6 +189,7 @@ public sealed class GameLogicCoverageTests
 
         Assert.IsTrue(ticket.WinInfo.TotalSpins >= 8);
         Assert.AreEqual(ticket.WinInfo.TotalSpins - 5, PhysicalFeatureCount(ticket, 12));
+        AssertNoFinalBoardFeatures(ticket);
         AssertValid(ticket);
     }
 
@@ -245,6 +266,9 @@ public sealed class GameLogicCoverageTests
         ticket.Turns
             .SelectMany(turn => turn.Spawns)
             .Count(spawn => spawn.Feature?.FeatureId == featureId);
+
+    private static void AssertNoFinalBoardFeatures(TicketSerializer.TicketDto ticket) =>
+        Assert.IsFalse(ticket.Turns[^1].Spawns.Any(spawn => spawn.Feature != null));
 
     private static bool ContainsFeature(TicketSerializer.FeatureDto? feature, int featureId)
     {

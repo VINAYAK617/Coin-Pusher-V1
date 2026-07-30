@@ -237,13 +237,13 @@ public static class TicketChecker
                 $"{extraSpinTokenCount} physical token(s) for {expectedExtras} extra spin(s)");
 
         var finalTurn = t.Turns[^1];
-        var finalWheel = (finalTurn.Spawns ?? Array.Empty<SpawnDto>())
-            .FirstOrDefault(spawn => spawn.Feature?.FeatureId == K.F_WHEEL);
-        if (finalWheel != null)
-            Add("Feature", "WHEEL not on final spin", Status.Fail,
-                $"final turn contains WHEEL spawn at Pos={finalWheel.Pos}");
+        var finalFeature = (finalTurn.Spawns ?? Array.Empty<SpawnDto>())
+            .FirstOrDefault(spawn => spawn.Feature != null);
+        if (finalFeature != null)
+            Add("Feature", "No board feature on final spin", Status.Fail,
+                $"final turn contains feature {finalFeature.Feature!.FeatureId} at Pos={finalFeature.Pos}");
         else
-            Add("Feature", "WHEEL not on final spin", Status.Pass, "ok");
+            Add("Feature", "No board feature on final spin", Status.Pass, "ok");
 
         // ── 11. PRIZE_UPGRADE TIER CONSISTENCY ──────────────────────────────
         // Declared tiers can come from EITHER WinInfo.PrizeTiers (winning
