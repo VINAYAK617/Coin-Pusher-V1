@@ -34,7 +34,7 @@ internal sealed class WheelFeat : Feat
         if (sym == 0) return null;
         if (!ctx.Input.Targets.TryGetValue(sym, out int tgt) || tgt <= 0) return null;
 
-        int n = PickStackValue(tgt, ctx.Rng);
+        int n = PickStackValue(tgt, ctx.Rng, ctx.ExperienceProfile);
         int stack = WMath.StackFromValue(n), zone = Math.Max(1, WMath.Zone(tgt, stack));
 
         bool isMulti = ctx.Done.Any(f => f.Id == FeatureId && f.WSym == sym);
@@ -98,13 +98,13 @@ internal sealed class WheelFeat : Feat
         return 0;
     }
 
-    private static int PickStackValue(int target, Random rng)
+    private static int PickStackValue(int target, Random rng, TicketExperienceProfile profile)
     {
         var candidates = WMath.ValidStackValues(target).ToArray();
         if (candidates.Length == 0) return WMath.BestN(target);
 
         var weighted = candidates
-            .Select(value => (Value: value, Weight: StackValueWeight(value)))
+            .Select(value => (Value: value, Weight: StackValueWeight(value, profile)))
             .Where(item => item.Weight > 0)
             .ToArray();
         if (weighted.Length == 0) return candidates[rng.Next(candidates.Length)];
@@ -121,13 +121,24 @@ internal sealed class WheelFeat : Feat
         return weighted[^1].Value;
     }
 
-    private static double StackValueWeight(int value) =>
-        value switch
+    private static double StackValueWeight(int value, TicketExperienceProfile profile)
+    {
+        var baseWeight = value switch
         {
             1 => K.P_WHEEL_STACK_VALUE_1,
             2 => K.P_WHEEL_STACK_VALUE_2,
             _ => Math.Max(0.0, 1.0 - K.P_WHEEL_STACK_VALUE_1 - K.P_WHEEL_STACK_VALUE_2),
         };
+
+        return profile switch
+        {
+            TicketExperienceProfile.StackDrama when value == 3 => baseWeight * 1.80,
+            TicketExperienceProfile.StackDrama when value == 1 => baseWeight * 0.75,
+            TicketExperienceProfile.NearMissHeavy when value == 1 => baseWeight * 1.25,
+            TicketExperienceProfile.FeatureRich when value == 2 => baseWeight * 1.20,
+            _ => baseWeight,
+        };
+    }
 }
 
 // ── FLUSH ─────────────────────────────────────────────────────────────────────

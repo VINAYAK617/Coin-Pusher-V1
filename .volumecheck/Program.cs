@@ -1,6 +1,38 @@
 using CoinPusherEngine;
 using Newtonsoft.Json;
 
+if (args.Length > 0 && args[0].Equals("prupcase", StringComparison.OrdinalIgnoreCase))
+{
+    var diagSeed = args.Length > 1 && int.TryParse(args[1], out var parsedSeed) ? parsedSeed : 8181;
+    var input = new MathInput
+    {
+        Targets = new Dictionary<int, int> { [2] = 20, [4] = 20 },
+        BaseSpins = 5,
+        Required = new Dictionary<string, int> { ["PRIZE_UPGRADE"] = 2 },
+        PrizeTiers = new Dictionary<int, int> { [2] = 1, [4] = 1 },
+        PrizeValues = PrizeValues(6, 3),
+        MaxSym = 6,
+    };
+    var plan = new Planner(input, diagSeed).Plan();
+    var json = TicketSerializer.ToJson(plan);
+    var ticket = JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(json)
+        ?? throw new InvalidOperationException("serializer returned null ticket");
+    var report = TicketChecker.CheckTicket(ticket);
+    Console.WriteLine($"seed={diagSeed}");
+    Console.WriteLine($"verified={plan.Verified}");
+    Console.WriteLine($"valid={report.IsValid}");
+    foreach (var check in report.Checks.Where(c => c.Result == TicketChecker.Status.Fail))
+        Console.WriteLine($"{check.Category}/{check.Name}: {check.Detail}");
+    for (var i = 0; i < ticket.Turns.Length; i++)
+    {
+        var features = ticket.Turns[i].Spawns
+            .Where(spawn => spawn.Feature != null)
+            .Select(spawn => $"{spawn.Pos}:{Name(spawn.Feature!.FeatureId)}->{string.Join("+", spawn.Feature.ReTrigger.Select(child => Name(child.FeatureId)))}");
+        Console.WriteLine($"turn{i + 1}: {string.Join(",", features)}");
+    }
+    return;
+}
+
 var count = args.Length > 0 && int.TryParse(args[0], out var parsed) ? parsed : 1000;
 var baseSeed = args.Length > 1 && int.TryParse(args[1], out var seed) ? seed : 20260717;
 
@@ -9,8 +41,10 @@ var totalSpins = new Dictionary<int, int>();
 var nearMissCounts = new Dictionary<int, int>();
 var pushCounts = new Dictionary<int, int>();
 var featureCounts = new Dictionary<int, int>();
+var wheelStackValues = new Dictionary<int, int>();
 var retriggerPairs = new Dictionary<string, int>();
 var mixedScreens = 0;
+var all123Screens = 0;
 var monotonicScreens = 0;
 var flatScreens = 0;
 var finalAnyFeature = 0;
@@ -20,6 +54,7 @@ var finalPrizeUpgrade = 0;
 var ticketsWithNearMiss = 0;
 var ticketsWithFeature = 0;
 var ticketsWithRetrigger = 0;
+var ticketsWithRepeatedWheelSymbol = 0;
 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
 for (var i = 0; i < count; i++)
@@ -47,12 +82,14 @@ for (var i = 0; i < count; i++)
 
         var hasFeature = false;
         var hasRetrigger = false;
+        var wheelSymbolsThisTicket = new Dictionary<int, int>();
         for (var turnIndex = 0; turnIndex < ticket.Turns.Length; turnIndex++)
         {
             var turn = ticket.Turns[turnIndex];
             var normalPushes = turn.Pushers.Where(p => p.FeatureId == null).Select(p => p.PushValue).ToArray();
             foreach (var push in normalPushes) Add(pushCounts, push);
             if (normalPushes.Distinct().Count() > 1) mixedScreens++;
+            if (normalPushes.Contains(1) && normalPushes.Contains(2) && normalPushes.Contains(3)) all123Screens++;
             if (normalPushes.Length > 1 && IsMonotonic(normalPushes)) monotonicScreens++;
             if (normalPushes.Length > 1 && normalPushes.Distinct().Count() == 1) flatScreens++;
 
@@ -68,12 +105,20 @@ for (var i = 0; i < count; i++)
             {
                 if (spawn.Feature == null) continue;
                 hasFeature = true;
+                if (spawn.Feature.FeatureId == 11)
+                {
+                    Add(wheelStackValues, spawn.Feature.WheelStackValue ?? 0);
+                    var wheelSym = spawn.Feature.WheelSymbolId ?? 0;
+                    if (wheelSym > 0)
+                        wheelSymbolsThisTicket[wheelSym] = wheelSymbolsThisTicket.GetValueOrDefault(wheelSym) + 1;
+                }
                 WalkFeature(spawn.Feature, parent: null);
             }
         }
 
         if (hasFeature) ticketsWithFeature++;
         if (hasRetrigger) ticketsWithRetrigger++;
+        if (wheelSymbolsThisTicket.Values.Any(value => value > 1)) ticketsWithRepeatedWheelSymbol++;
 
         void WalkFeature(TicketSerializer.FeatureDto feature, int? parent)
         {
@@ -105,10 +150,13 @@ Console.WriteLine($"nearMissTickets={ticketsWithNearMiss}/{count} ({Percent(tick
 Console.WriteLine($"nearMissCounts={FormatIntMap(nearMissCounts)}");
 Console.WriteLine($"featureTickets={ticketsWithFeature}/{count} ({Percent(ticketsWithFeature, count)})");
 Console.WriteLine($"featureCounts={FormatNamedIntMap(featureCounts, Name)}");
+Console.WriteLine($"wheelStackValues={FormatIntMap(wheelStackValues)}");
+Console.WriteLine($"repeatedWheelSymbolTickets={ticketsWithRepeatedWheelSymbol}/{count} ({Percent(ticketsWithRepeatedWheelSymbol, count)})");
 Console.WriteLine($"retriggerTickets={ticketsWithRetrigger}/{count} ({Percent(ticketsWithRetrigger, count)})");
 Console.WriteLine($"retriggerPairs={FormatStringMap(retriggerPairs)}");
 Console.WriteLine($"pushCounts={FormatIntMap(pushCounts)}");
 Console.WriteLine($"mixedScreens={mixedScreens}");
+Console.WriteLine($"all123Screens={all123Screens}");
 Console.WriteLine($"monotonicScreens={monotonicScreens}");
 Console.WriteLine($"flatScreens={flatScreens}");
 Console.WriteLine($"finalAnyFeature={finalAnyFeature}");
@@ -144,8 +192,10 @@ static MathInput BuildInput(int index, int ticketSeed)
         },
         2 => new MathInput
         {
-            Targets = new Dictionary<int, int> { [3] = 24 },
+            Targets = new Dictionary<int, int> { [3] = 30 },
             BaseSpins = 5,
+            Required = new Dictionary<string, int> { ["WHEEL"] = 2 },
+            WheelSymOrder = new[] { 3, 3 },
             PrizeValues = prizeValues,
             MaxSym = 6,
         },

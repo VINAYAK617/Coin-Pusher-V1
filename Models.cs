@@ -1,5 +1,14 @@
 namespace CoinPusherEngine;
 
+internal enum TicketExperienceProfile
+{
+    Balanced,
+    NearMissHeavy,
+    FeatureRich,
+    StackDrama,
+    LateWin,
+}
+
 // ── Public input ──────────────────────────────────────────────────────────────
 
 public sealed class MathInput
@@ -78,6 +87,7 @@ internal sealed class PlaceCtx
     internal int                       MaxSpin { get; init; }
     internal int                       MinSpin { get; init; }
     internal HashSet<(int, int)>       Used    { get; init; } = new();
+    internal TicketExperienceProfile   ExperienceProfile { get; init; } = TicketExperienceProfile.Balanced;
 }
 
 internal sealed class FireCtx

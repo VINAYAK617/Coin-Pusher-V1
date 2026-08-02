@@ -160,7 +160,7 @@ public sealed class GameLogicCoverageTests
 
         var ticket = PlanTicket(input, seed);
 
-        Assert.IsTrue(PhysicalFeatureCount(ticket, 13) >= 2);
+        Assert.IsTrue(LogicalFeatureCount(ticket, 13) >= 2);
         AssertNoFinalBoardFeatures(ticket);
         AssertValid(ticket);
     }
@@ -266,6 +266,16 @@ public sealed class GameLogicCoverageTests
         ticket.Turns
             .SelectMany(turn => turn.Spawns)
             .Count(spawn => spawn.Feature?.FeatureId == featureId);
+
+    private static int LogicalFeatureCount(TicketSerializer.TicketDto ticket, int featureId) =>
+        ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .Where(spawn => spawn.Feature != null)
+            .Sum(spawn => CountFeatureTree(spawn.Feature!, featureId));
+
+    private static int CountFeatureTree(TicketSerializer.FeatureDto feature, int featureId) =>
+        (feature.FeatureId == featureId ? 1 : 0)
+        + feature.ReTrigger.Sum(child => CountFeatureTree(child, featureId));
 
     private static void AssertNoFinalBoardFeatures(TicketSerializer.TicketDto ticket) =>
         Assert.IsFalse(ticket.Turns[^1].Spawns.Any(spawn => spawn.Feature != null));

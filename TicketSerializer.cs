@@ -199,6 +199,7 @@ public static class TicketSerializer
         if (featureTokens.Count == 0) return FeatureChainPlan.Empty;
 
         var chainable = featureTokens
+            .Where(token => token.Spin < plan.TotalSpins)
             .Where(token => IsReTriggerChainParticipant(token.Cell))
             .ToList();
         if (chainable.Count == 0) return FeatureChainPlan.Empty;

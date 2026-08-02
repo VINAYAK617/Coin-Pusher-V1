@@ -5,9 +5,11 @@ internal sealed class Placer
     private readonly MathInput    _inp;
     private readonly Random       _rng;
     private readonly List<string> _log;
+    private readonly TicketExperienceProfile _experienceProfile;
 
-    internal Placer(MathInput inp, Random rng, List<string> log)
-    { _inp = inp; _rng = rng; _log = log; }
+    internal Placer(MathInput inp, Random rng, List<string> log,
+                    TicketExperienceProfile experienceProfile = TicketExperienceProfile.Balanced)
+    { _inp = inp; _rng = rng; _log = log; _experienceProfile = experienceProfile; }
 
     internal List<PlacedFeat> Place()
     {
@@ -147,6 +149,7 @@ internal sealed class Placer
                         MaxSpin = maxS,
                         MinSpin = minS,
                         Used = used,
+                        ExperienceProfile = _experienceProfile,
                     });
                     if (r != null) break;
                 }
@@ -168,7 +171,13 @@ internal sealed class Placer
     {
         var all = Enumerable.Range(minS, Math.Max(0, maxS - minS)).ToArray();
         if (all.Length == 0) return all;
-        if (_rng.NextDouble() >= 0.80) return all;
+        var lateProbability = _experienceProfile switch
+        {
+            TicketExperienceProfile.LateWin => 0.95,
+            TicketExperienceProfile.FeatureRich => 0.75,
+            _ => 0.80,
+        };
+        if (_rng.NextDouble() >= lateProbability) return all;
 
         var lateStart = Math.Max(minS, maxS - Math.Max(2, K.WIN_LATE_TAIL_SPINS + 1));
         var late = all.Where(spin => spin >= lateStart).ToArray();
@@ -222,6 +231,7 @@ internal sealed class Placer
                     {
                         Spin=spin, Col=col, Done=done, Rng=_rng,
                         Input=_inp, MaxSpin=maxS, MinSpin=minS, Used=used,
+                        ExperienceProfile = _experienceProfile,
                     });
                     if (r != null) return r;
                 }

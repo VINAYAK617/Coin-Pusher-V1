@@ -24,6 +24,7 @@ internal sealed class Builder
     private readonly List<string>                  _log;
     private readonly Random                        _rng;
     private readonly FillTracker                   _fillTracker;
+    private readonly TicketExperienceProfile       _experienceProfile;
 
     // Decorative budget: how many extra (non-scheduled) occurrences of each win symbol
     // may additionally appear as ordinary board filler. Consumed directly from leftover
@@ -36,10 +37,12 @@ internal sealed class Builder
 
     internal Builder(IReadOnlyDictionary<int, int> targets, IReadOnlyList<WLock> locks,
                      List<PlacedFeat> placed, int[] fills, List<string> log, Random rng,
-                     FillTracker fillTracker, Dictionary<int, int>? decorBudget = null)
+                     FillTracker fillTracker, Dictionary<int, int>? decorBudget = null,
+                     TicketExperienceProfile experienceProfile = TicketExperienceProfile.Balanced)
     {
         _locks=locks; _placed=placed; _log=log; _rng=rng;
         _fillTracker=fillTracker;
+        _experienceProfile = experienceProfile;
         _decorBudget = decorBudget != null ? new Dictionary<int, int>(decorBudget) : new Dictionary<int, int>();
     }
 
@@ -204,7 +207,7 @@ internal sealed class Builder
         foreach (var lk in locks)
         {
             var immediate = lk.CarrySlots.GetValueOrDefault(lk.FireSpin);
-            var delayedWanted = immediate > 1 ? 1 : 0;
+            var delayedWanted = DelayedWheelCarryCount(lk, immediate);
             foreach (var pos in DelayedCarryCandidates(spinNum, totalSpins, push, flush, futurePlans, occupied)
                          .Take(delayedWanted))
             {
@@ -222,6 +225,14 @@ internal sealed class Builder
         }
 
         return result;
+    }
+
+    private int DelayedWheelCarryCount(WLock lk, int immediate)
+    {
+        if (_locks.Count(other => other.Sym == lk.Sym) > 1)
+            return 0;
+
+        return immediate > 1 ? 1 : 0;
     }
 
     private static void PlaceWheelCarryStarts(Cell?[,] board, WheelCarryStartPlan plan)
@@ -585,6 +596,7 @@ internal sealed class Builder
         if (allowVisualLift)
         {
             targetTotal = Math.Max(targetTotal, MinimumMixedPushTotal(freeCols));
+            targetTotal = Math.Min(maxTotal, targetTotal + ProfilePushLift(maxTotal - targetTotal));
         }
 
         var best = BuildRandomPushComposition(freeCols, targetTotal);
@@ -598,6 +610,20 @@ internal sealed class Builder
         }
 
         return RandomizePushOrder(best);
+    }
+
+    private int ProfilePushLift(int headroom)
+    {
+        if (headroom <= 0) return 0;
+
+        return _experienceProfile switch
+        {
+            TicketExperienceProfile.FeatureRich or TicketExperienceProfile.StackDrama =>
+                _rng.Next(0, Math.Min(2, headroom) + 1),
+            TicketExperienceProfile.NearMissHeavy when _rng.NextDouble() < 0.35 => 1,
+            TicketExperienceProfile.LateWin when _rng.NextDouble() < 0.20 => 1,
+            _ => 0,
+        };
     }
 
     private static int MinimumMixedPushTotal(int freeCols)

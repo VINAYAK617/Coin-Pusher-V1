@@ -22,6 +22,7 @@ internal sealed record PlanAssemblyRequest(
     int TotalSpins,
     int BaseSpins,
     IReadOnlyDictionary<int, int> DecorBudget,
+    TicketExperienceProfile ExperienceProfile,
     int Seed,
     List<string> Log);
 
@@ -142,7 +143,8 @@ internal sealed class BackwardSpinPlanBuildStage : ISpinPlanBuildStage
             request.Log,
             rng,
             fillTracker,
-            request.DecorBudget.ToDictionary(kv => kv.Key, kv => kv.Value));
+            request.DecorBudget.ToDictionary(kv => kv.Key, kv => kv.Value),
+            request.ExperienceProfile);
 
         return builder.BuildAll(
             request.PlacedFeatures.ToList(),

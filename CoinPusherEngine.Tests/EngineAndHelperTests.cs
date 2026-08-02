@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Newtonsoft.Json;
 
 namespace CoinPusherEngine.Tests;
 
@@ -250,6 +251,38 @@ public sealed class EngineAndHelperTests
         Assert.AreEqual(24, Sim.Run(plan)[2]);
     }
 
+    [TestMethod]
+    public void RepeatedWheelSymbolsCanStackAndStillVerifyExactly()
+    {
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int> { [2] = 30 },
+            BaseSpins = 5,
+            Required = new Dictionary<string, int> { ["WHEEL"] = 2 },
+            WheelSymOrder = new[] { 2, 2 },
+            MaxSym = 6,
+        };
+
+        var plan = new Planner(input, seed: 9191).Plan();
+        var wheelTokens = plan.Spins
+            .SelectMany(spin => spin.Spawns.Values)
+            .Where(cell => cell.IsFeat && cell.Sym == K.F_WHEEL && cell.Fp?.WheelSym == 2)
+            .ToArray();
+        var maxStackSeen = MaxStackSeenDuringReplay(plan, 2);
+
+        Assert.AreEqual(2, wheelTokens.Length);
+        Assert.IsTrue(maxStackSeen > 1);
+        Assert.IsTrue(maxStackSeen <= K.MAX_COIN_STACK);
+        Assert.AreEqual(30, Sim.Run(plan)[2]);
+
+        var ticket = JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(TicketSerializer.ToJson(plan))!;
+        var report = TicketChecker.CheckTicket(ticket);
+        Assert.IsTrue(report.IsValid, string.Join(Environment.NewLine,
+            report.Checks
+                .Where(c => c.Result == TicketChecker.Status.Fail)
+                .Select(c => $"{c.Category}/{c.Name}: {c.Detail}")));
+    }
+
     private static (int ImmediateStacked, bool DelayedCollected, int PermanentResidue) AuditWheelResidue(
         GamePlan plan,
         int wheelSym)
@@ -343,5 +376,46 @@ public sealed class EngineAndHelperTests
         totals[cell.Sym] = totals.GetValueOrDefault(cell.Sym) + cell.Stack;
         if (afterImmediateTurn && cell.Sym == wheelSym && cell.Stack > 1)
             delayedCollected = true;
+    }
+
+    private static int MaxStackSeenDuringReplay(GamePlan plan, int sym)
+    {
+        var board = Grid.Clone(plan.Spins[0].Board);
+        var maxStack = 1;
+
+        for (var i = 0; i < plan.Spins.Count; i++)
+        {
+            var sp = plan.Spins[i];
+            Sim.FlatStale(board);
+            for (var col = 0; col < K.COLS; col++)
+            {
+                if (sp.Flush[col])
+                {
+                    for (var r = 0; r < K.ROWS; r++) board[r, col] = null;
+                    continue;
+                }
+
+                var push = sp.Push[col];
+                for (var r = K.ROWS - 1; r >= 0; r--)
+                {
+                    var src = r - push;
+                    board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;
+                }
+            }
+
+            board = Grid.RotCW(board);
+            foreach (var kv in sp.Spawns)
+                board[kv.Key.Item1, kv.Key.Item2] = kv.Value.Clone();
+
+            var next = i + 1 < plan.Spins.Count ? plan.Spins[i + 1] : null;
+            Sim.FireAll(board, sp, next, plan.FillSyms.Count > 0 ? plan.FillSyms[0] : K.F_COIN);
+            maxStack = Math.Max(maxStack, board.Cast<Cell?>()
+                .Where(cell => cell != null && !cell.IsFeat && cell.Sym == sym)
+                .Select(cell => cell!.Stack)
+                .DefaultIfEmpty(1)
+                .Max());
+        }
+
+        return maxStack;
     }
 }

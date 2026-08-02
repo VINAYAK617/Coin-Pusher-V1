@@ -42,6 +42,7 @@ internal sealed record ObjectivePlan(
     IReadOnlyDictionary<int, int> WinTargets,
     IReadOnlyDictionary<int, int> NonWinTargets,
     IReadOnlyDictionary<int, int> NonWinPrizeTiers,
+    TicketExperienceProfile ExperienceProfile,
     int PlanningPressure,
     int Seed,
     Random Rng,
@@ -74,11 +75,12 @@ internal sealed class ObjectiveStage
             .Except(winSymbols)
             .ToArray();
         var nearMissCandidates = fillSymbols;
+        var experienceProfile = PickExperienceProfile(request.Rng);
 
-        var nonWinTargets = ResolveNonWinTargets(input, nearMissCandidates, request.Rng, request.PlanningPressure);
-        var nonWinPrizeTiers = ResolveNonWinPrizeTiers(input, nonWinTargets, request.Rng, request.PlanningPressure);
+        var nonWinTargets = ResolveNonWinTargets(input, nearMissCandidates, request.Rng, request.PlanningPressure, experienceProfile);
+        var nonWinPrizeTiers = ResolveNonWinPrizeTiers(input, nonWinTargets, request.Rng, request.PlanningPressure, experienceProfile);
 
-        request.Log.Add($"wins=[{string.Join(",", winSymbols)}] fills=[{string.Join(",", fillSymbols)}]");
+        request.Log.Add($"experience={experienceProfile} wins=[{string.Join(",", winSymbols)}] fills=[{string.Join(",", fillSymbols)}]");
         if (nonWinTargets.Count > 0)
         {
             request.Log.Add("nonWins=[" + string.Join(",",
@@ -97,6 +99,7 @@ internal sealed class ObjectiveStage
             input.Targets.ToDictionary(kv => kv.Key, kv => kv.Value),
             nonWinTargets,
             nonWinPrizeTiers,
+            experienceProfile,
             request.PlanningPressure,
             request.Seed,
             request.Rng,
@@ -107,7 +110,8 @@ internal sealed class ObjectiveStage
         MathInput input,
         IReadOnlyList<int> fillSymbols,
         Random rng,
-        int planningPressure)
+        int planningPressure,
+        TicketExperienceProfile experienceProfile)
     {
         if (input.NonWinTargets != null)
             return input.NonWinTargets.ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -120,8 +124,8 @@ internal sealed class ObjectiveStage
         if (profile.MaxSymbols <= 0 || profile.Max <= 0)
             return new Dictionary<int, int>();
 
-        var maxSymbols = Math.Min(profile.MaxSymbols, NearMissSymbolCap(input, fillSymbols.Count, planningPressure));
-        var count = PickNearMissCount(input, maxSymbols, fillSymbols.Count, planningPressure, rng);
+        var maxSymbols = Math.Min(profile.MaxSymbols, NearMissSymbolCap(input, fillSymbols.Count, planningPressure, experienceProfile));
+        var count = PickNearMissCount(input, maxSymbols, fillSymbols.Count, planningPressure, rng, experienceProfile);
         var minTarget = Math.Max(profile.Min, K.NONWIN_MIN_TARGET);
 
         return PickNearMissSymbols(fillSymbols, count, rng)
@@ -212,7 +216,11 @@ internal sealed class ObjectiveStage
             _ => K.W_NONWIN_HIGH,
         };
 
-    private static int NearMissSymbolCap(MathInput input, int fillSymbolCount, int planningPressure)
+    private static int NearMissSymbolCap(
+        MathInput input,
+        int fillSymbolCount,
+        int planningPressure,
+        TicketExperienceProfile experienceProfile)
     {
         if (fillSymbolCount <= 0) return 0;
         if (planningPressure >= 2 || IsHighPressureTicket(input))
@@ -230,6 +238,9 @@ internal sealed class ObjectiveStage
         if (planningPressure >= 1)
             byWinCount = Math.Min(byWinCount, 2);
 
+        if (experienceProfile == TicketExperienceProfile.NearMissHeavy && planningPressure == 0)
+            byWinCount++;
+
         return Math.Min(byWinCount, fillSymbolCount);
     }
 
@@ -238,7 +249,8 @@ internal sealed class ObjectiveStage
         int maxSymbols,
         int fillSymbolCount,
         int planningPressure,
-        Random rng)
+        Random rng,
+        TicketExperienceProfile experienceProfile)
     {
         var capped = Math.Min(maxSymbols, fillSymbolCount);
         if (capped <= 1) return capped;
@@ -255,6 +267,11 @@ internal sealed class ObjectiveStage
             3 when capped >= 3 => 2,
             _ => 1,
         };
+
+        if (experienceProfile == TicketExperienceProfile.NearMissHeavy && planningPressure == 0)
+            min = Math.Min(capped, min + 1);
+        if (experienceProfile == TicketExperienceProfile.FeatureRich && input.Targets.Count > 0)
+            min = Math.Max(1, min - 1);
 
         var allowedMin = Math.Min(min, capped);
         var weights = K.NONWIN_COUNT_WEIGHTS
@@ -296,7 +313,8 @@ internal sealed class ObjectiveStage
         MathInput input,
         IReadOnlyDictionary<int, int> nonWinTargets,
         Random rng,
-        int planningPressure)
+        int planningPressure,
+        TicketExperienceProfile experienceProfile)
     {
         if (input.NonWinPrizeTiers != null)
             return input.NonWinPrizeTiers.ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -310,7 +328,8 @@ internal sealed class ObjectiveStage
             .OrderBy(_ => rng.Next())
             .ToArray();
 
-        if (eligible.Length == 0 || rng.NextDouble() >= K.P_NONWIN_PRIZE_UPGRADE)
+        if (eligible.Length == 0
+            || rng.NextDouble() >= ProfiledProbability(K.P_NONWIN_PRIZE_UPGRADE, experienceProfile, nearMiss: true))
             return new Dictionary<int, int>();
 
         return new Dictionary<int, int> { [eligible[0]] = 1 };
@@ -335,6 +354,53 @@ internal sealed class ObjectiveStage
         input.Targets.Count >= 4
         || input.Targets.Values.Sum() >= 80
         || input.Required.GetValueOrDefault("PRIZE_UPGRADE") >= 4;
+
+    private static TicketExperienceProfile PickExperienceProfile(Random rng)
+    {
+        var weighted = new[]
+        {
+            (Profile: TicketExperienceProfile.Balanced, Weight: K.W_EXP_BALANCED),
+            (Profile: TicketExperienceProfile.NearMissHeavy, Weight: K.W_EXP_NEARMISS),
+            (Profile: TicketExperienceProfile.FeatureRich, Weight: K.W_EXP_FEATURE),
+            (Profile: TicketExperienceProfile.StackDrama, Weight: K.W_EXP_STACK),
+            (Profile: TicketExperienceProfile.LateWin, Weight: K.W_EXP_LATEWIN),
+        }.Where(item => item.Weight > 0).ToArray();
+        if (weighted.Length == 0) return TicketExperienceProfile.Balanced;
+
+        var total = weighted.Sum(item => item.Weight);
+        var roll = rng.NextDouble() * total;
+        var acc = 0.0;
+        foreach (var item in weighted)
+        {
+            acc += item.Weight;
+            if (roll <= acc) return item.Profile;
+        }
+
+        return weighted[^1].Profile;
+    }
+
+    internal static double ProfiledProbability(
+        double baseProbability,
+        TicketExperienceProfile profile,
+        bool wheel = false,
+        bool repeatWheel = false,
+        bool flush = false,
+        bool nearMiss = false)
+    {
+        var multiplier = profile switch
+        {
+            TicketExperienceProfile.FeatureRich when wheel || flush => 1.65,
+            TicketExperienceProfile.FeatureRich => 1.35,
+            TicketExperienceProfile.StackDrama when wheel || repeatWheel => 1.80,
+            TicketExperienceProfile.NearMissHeavy when nearMiss => 1.25,
+            TicketExperienceProfile.NearMissHeavy when wheel => 0.85,
+            TicketExperienceProfile.LateWin when flush => 0.85,
+            TicketExperienceProfile.LateWin => 1.05,
+            _ => 1.0,
+        };
+
+        return Math.Clamp(baseProbability * multiplier, 0.0, 1.0);
+    }
 }
 
 internal sealed class FeaturePlanStage
@@ -417,7 +483,29 @@ internal sealed class FeaturePlanStage
                          .Where(sym => !wheelOrder.Contains(sym) && input.Targets[sym] >= 10))
             {
                 if (wheels >= FeatReg.Cfg["WHEEL"].Max) break;
-                if (rng.NextDouble() >= K.P_WHEEL_OPTIONAL) continue;
+                if (rng.NextDouble() >= ObjectiveStage.ProfiledProbability(K.P_WHEEL_OPTIONAL, objectives.ExperienceProfile, wheel: true)) continue;
+                if (!IsFeatureShapeFeasible(
+                        input,
+                        plannedFillerLoad,
+                        fixedTokenLoad,
+                        wheels + 1,
+                        flushes,
+                        extras))
+                {
+                    continue;
+                }
+
+                wheels++;
+                wheelOrder.Add(sym);
+            }
+        }
+
+        if (objectives.PlanningPressure == 0 && wheels > 0)
+        {
+            foreach (var sym in RepeatWheelCandidates(objectives.SourceInput, wheelOrder))
+            {
+                if (wheels >= FeatReg.Cfg["WHEEL"].Max) break;
+                if (rng.NextDouble() >= ObjectiveStage.ProfiledProbability(K.P_WHEEL_REPEAT_OPTIONAL, objectives.ExperienceProfile, repeatWheel: true)) continue;
                 if (!IsFeatureShapeFeasible(
                         input,
                         plannedFillerLoad,
@@ -439,7 +527,7 @@ internal sealed class FeaturePlanStage
         {
             foreach (var sym in objectives.NonWinTargets.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).Take(1))
             {
-                if (rng.NextDouble() >= K.P_NONWIN_WHEEL) continue;
+                if (rng.NextDouble() >= ObjectiveStage.ProfiledProbability(K.P_NONWIN_WHEEL, objectives.ExperienceProfile, wheel: true, nearMiss: true)) continue;
                 if (!IsFeatureShapeFeasible(
                         input,
                         plannedFillerLoad,
@@ -461,7 +549,7 @@ internal sealed class FeaturePlanStage
         {
             while (flushes < K.COLS - 1)
             {
-                if (rng.NextDouble() >= K.P_FLUSH_OPTIONAL) break;
+                if (rng.NextDouble() >= ObjectiveStage.ProfiledProbability(K.P_FLUSH_OPTIONAL, objectives.ExperienceProfile, flush: true)) break;
                 if (!IsFeatureShapeFeasible(
                         input,
                         plannedFillerLoad,
@@ -482,6 +570,25 @@ internal sealed class FeaturePlanStage
         SetRequired(required, "EXTRA_SPIN", extras);
 
         return (required, wheelOrder);
+    }
+
+    private static IEnumerable<int> RepeatWheelCandidates(MathInput input, IReadOnlyList<int> wheelOrder)
+    {
+        if (input.WheelSymOrder == null || input.WheelSymOrder.Count == 0)
+            yield break;
+
+        var plannedCounts = wheelOrder.GroupBy(sym => sym)
+            .ToDictionary(group => group.Key, group => group.Count());
+        foreach (var sym in input.WheelSymOrder.Where(input.Targets.ContainsKey))
+        {
+            var alreadyPlanned = plannedCounts.GetValueOrDefault(sym);
+            var requested = input.WheelSymOrder.Count(candidate => candidate == sym);
+            if (alreadyPlanned < requested)
+            {
+                plannedCounts[sym] = alreadyPlanned + 1;
+                yield return sym;
+            }
+        }
     }
 
     private static (int Wheels, int Flushes, int Extras) ChooseMandatoryFeatureCounts(
@@ -633,7 +740,7 @@ internal sealed class PlacementStage
     internal PlacementPlan Resolve(FeaturePlan features)
     {
         var log = features.Objectives.Log;
-        var placed = new Placer(features.SchedulingInput, features.Objectives.Rng, log).Place();
+        var placed = new Placer(features.SchedulingInput, features.Objectives.Rng, log, features.Objectives.ExperienceProfile).Place();
         var totalSpins = features.SchedulingInput.BaseSpins + placed.Count(f => f.Id == "EXTRA_SPIN");
         var locks = BuildLocks(placed, features.AllocationTargets, features.Objectives);
         return new PlacementPlan(features, placed, locks, totalSpins);
@@ -753,6 +860,7 @@ internal sealed class BoardRealizationStage
             placements.TotalSpins,
             features.SchedulingInput.BaseSpins,
             new Dictionary<int, int>(),
+            objectives.ExperienceProfile,
             objectives.Rng.Next(),
             objectives.Log));
     }

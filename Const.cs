@@ -32,8 +32,20 @@ internal static class K
     internal const int MAX_EXTRA_GO_PER_TURN = MAX_SPINS - BASE_SPINS;
     internal const int MIN_WHEEL_STACK_VALUE = 1;
     internal const int MAX_WHEEL_STACK_VALUE = 3;
-    internal const double P_WHEEL_STACK_VALUE_1 = 0.34;
-    internal const double P_WHEEL_STACK_VALUE_2 = 0.33;
+    internal const double P_WHEEL_STACK_VALUE_1 = 0.45;
+    internal const double P_WHEEL_STACK_VALUE_2 = 0.35;
+    internal const double P_WHEEL_REPEAT_OPTIONAL = 0.35;
+
+    internal static readonly double W_EXP_BALANCED =
+        Weight("COINPUSHER_W_EXP_BALANCED", 0.30);
+    internal static readonly double W_EXP_NEARMISS =
+        Weight("COINPUSHER_W_EXP_NEARMISS", 0.25);
+    internal static readonly double W_EXP_FEATURE =
+        Weight("COINPUSHER_W_EXP_FEATURE", 0.20);
+    internal static readonly double W_EXP_STACK =
+        Weight("COINPUSHER_W_EXP_STACK", 0.15);
+    internal static readonly double W_EXP_LATEWIN =
+        Weight("COINPUSHER_W_EXP_LATEWIN", 0.10);
 
     // ── Optional-feature probability ──────────────────────────────────────
     //

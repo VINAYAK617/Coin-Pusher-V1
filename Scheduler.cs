@@ -141,7 +141,7 @@ internal sealed class Scheduler
 
             cellsLeft = AddWheelCarry(lk, lk.FireSpin, cellsLeft, cellsLeft, used, tokenReserve, totalSpins);
 
-            lk.PermanentResidue = lk.FireSpin + 1 < totalSpins ? Math.Min(2, Math.Max(1, lk.Zone / 2)) : 0;
+            lk.PermanentResidue = lk.FireSpin + 1 < totalSpins ? Math.Min(3, Math.Max(1, lk.Zone)) : 0;
         }
     }
 
