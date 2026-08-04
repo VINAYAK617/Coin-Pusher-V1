@@ -52,9 +52,9 @@ internal sealed class Resolver
     {
         var sim = Simulate(cur);
 
-        for (int r = 0; r < K.ROWS; r++)
+        for (int r = 0; r < Settings.Default.ROWS; r++)
         {
-            for (int c = 0; c < K.COLS; c++)
+            for (int c = 0; c < Settings.Default.COLS; c++)
             {
                 var plan = next.Board[r, c];
                 if (plan == null) continue;
@@ -98,9 +98,9 @@ internal sealed class Resolver
             sim[slot.Item1, slot.Item2] = last.Spawns[slot].Clone();
         }
 
-        for (int r = 0; r < K.ROWS; r++)
+        for (int r = 0; r < Settings.Default.ROWS; r++)
         {
-            for (int c = 0; c < K.COLS; c++)
+            for (int c = 0; c < Settings.Default.COLS; c++)
             {
                 if (sim[r, c] == null)
                     last.Spawns[(r, c)] = Grid.Norm(EndBoardSym());
@@ -113,16 +113,16 @@ internal sealed class Resolver
         Dictionary<(int, int), Cell> spawns,
         int origCol)
     {
-        for (int r = K.ROWS - 1; r >= 0; r--)
+        for (int r = Settings.Default.ROWS - 1; r >= 0; r--)
         {
             var pos = (r, origCol);
             if (sim[r, origCol] == null && !spawns.ContainsKey(pos))
                 return pos;
         }
 
-        for (int r = K.ROWS - 1; r >= 0; r--)
+        for (int r = Settings.Default.ROWS - 1; r >= 0; r--)
         {
-            for (int c = K.COLS - 1; c >= 0; c--)
+            for (int c = Settings.Default.COLS - 1; c >= 0; c--)
             {
                 var pos = (r, c);
                 if (sim[r, c] == null && !spawns.ContainsKey(pos))
@@ -143,14 +143,14 @@ internal sealed class Resolver
         var b = Grid.Clone(sp.Board);
         FlattenFeats(b);
 
-        for (int col = 0; col < K.COLS; col++)
+        for (int col = 0; col < Settings.Default.COLS; col++)
         {
             if (sp.Flush[col])
-                for (int r = 0; r < K.ROWS; r++) b[r, col] = null;
+                for (int r = 0; r < Settings.Default.ROWS; r++) b[r, col] = null;
             else
             {
                 int p = sp.Push[col];
-                for (int r = K.ROWS - 1; r >= 0; r--)
+                for (int r = Settings.Default.ROWS - 1; r >= 0; r--)
                 {
                     int src = r - p;
                     b[r, col] = src >= 0 ? b[src, col]?.Clone() : null;
@@ -234,10 +234,10 @@ internal sealed class Resolver
 
         foreach (bool allowNearMiss in new[] { false, true })
         {
-            var primary = (K.ROWS - 1, origCol);
+            var primary = (Settings.Default.ROWS - 1, origCol);
             if (Eligible(primary, allowNearMiss)) return primary;
 
-            for (int r = K.ROWS - 1; r >= 0; r--)
+            for (int r = Settings.Default.ROWS - 1; r >= 0; r--)
                 if (Eligible((r, origCol), allowNearMiss)) return (r, origCol);
 
             foreach (var pos in zoneSet.OrderByDescending(p => p.Item2).ThenBy(p => p.Item1))
@@ -273,7 +273,7 @@ internal sealed class Resolver
 
         foreach (bool allowNearMiss in new[] { false, true })
         {
-            var primary = (K.ROWS - 1, origCol);
+            var primary = (Settings.Default.ROWS - 1, origCol);
             if (Eligible(primary, allowNearMiss)) return primary;
 
             var byRow = spawns.Keys
@@ -295,14 +295,14 @@ internal sealed class Resolver
 
     private static void FlattenFeats(Cell?[,] b)
     {
-        for (int r = 0; r < K.ROWS; r++)
+        for (int r = 0; r < Settings.Default.ROWS; r++)
         {
-            for (int c = 0; c < K.COLS; c++)
+            for (int c = 0; c < Settings.Default.COLS; c++)
             {
                 var cell = b[r, c];
                 if (cell?.IsFeat != true) continue;
-                b[r, c] = Grid.Norm(cell.CvtSym > 0 && !K.IsFeat(cell.CvtSym)
-                                     ? cell.CvtSym : K.F_COIN);
+                b[r, c] = Grid.Norm(cell.CvtSym > 0 && !Settings.Default.IsFeat(cell.CvtSym)
+                                     ? cell.CvtSym : Settings.Default.F_COIN);
             }
         }
     }

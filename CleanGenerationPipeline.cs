@@ -91,7 +91,7 @@ internal sealed class ObjectiveStage
         if (nonWinTargets.Count > 0)
         {
             request.Log.Add("nonWins=[" + string.Join(",",
-                nonWinTargets.Select(kv => $"sym{kv.Key}>={kv.Value}<cap{K.SymbolFillCap(kv.Key)}")) + "]");
+                nonWinTargets.Select(kv => $"sym{kv.Key}>={kv.Value}<cap{settings.SymbolFillCap(kv.Key)}")) + "]");
         }
         if (nonWinPrizeTiers.Count > 0)
         {
@@ -129,14 +129,14 @@ internal sealed class ObjectiveStage
             return new Dictionary<int, int>();
 
         (double P, int Min, int Max, int MaxSymbols) profile = input.Targets.Count == 0
-            ? (1.0, K.NONWIN_MIN_TARGET, K.FILL_CAP - 1, 5)
+            ? (1.0, settings.NONWIN_MIN_TARGET, settings.FILL_CAP - 1, 5)
             : PickNonWinProfile(rng, settings);
         if (profile.MaxSymbols <= 0 || profile.Max <= 0)
             return new Dictionary<int, int>();
 
         var maxSymbols = Math.Min(profile.MaxSymbols, NearMissSymbolCap(input, fillSymbols.Count, planningPressure, experienceProfile));
         var count = PickNearMissCount(input, maxSymbols, fillSymbols.Count, planningPressure, rng, experienceProfile, settings);
-        var minTarget = Math.Max(profile.Min, K.NONWIN_MIN_TARGET);
+        var minTarget = Math.Max(profile.Min, settings.NONWIN_MIN_TARGET);
 
         return PickNearMissSymbols(fillSymbols, count, rng, settings)
             .Take(count)
@@ -144,7 +144,7 @@ internal sealed class ObjectiveStage
                 sym => sym,
                 sym =>
                 {
-                    var symbolMax = Math.Min(profile.Max, K.SymbolFillCap(sym) - 1);
+                    var symbolMax = Math.Min(profile.Max, settings.SymbolFillCap(sym) - 1);
                     var symbolMin = Math.Min(minTarget, symbolMax);
                     return rng.Next(symbolMin, symbolMax + 1);
                 });
@@ -339,7 +339,7 @@ internal sealed class ObjectiveStage
 
         var eligible = nonWinTargets
             .Where(kv => kv.Key != TopPrizeSymbol(input))
-            .Where(kv => kv.Value >= K.NONWIN_MIN_TARGET && HasUpgradeTier(input, kv.Key, 1))
+            .Where(kv => kv.Value >= settings.NONWIN_MIN_TARGET && HasUpgradeTier(input, kv.Key, 1))
             .Select(kv => kv.Key)
             .OrderBy(_ => rng.Next())
             .ToArray();
@@ -551,7 +551,8 @@ internal sealed class FeaturePlanStage
             fixedTokenLoad,
             minWheels,
             minFlushes,
-            minExtras);
+            minExtras,
+            objectives.Settings);
 
         var wheels = plan.Wheels;
         var flushes = plan.Flushes;
@@ -573,7 +574,8 @@ internal sealed class FeaturePlanStage
                         fixedTokenLoad,
                         wheels + 1,
                         flushes,
-                        extras))
+                        extras,
+                        objectives.Settings))
                 {
                     continue;
                 }
@@ -595,7 +597,8 @@ internal sealed class FeaturePlanStage
                         fixedTokenLoad,
                         wheels + 1,
                         flushes,
-                        extras))
+                        extras,
+                        objectives.Settings))
                 {
                     continue;
                 }
@@ -617,7 +620,8 @@ internal sealed class FeaturePlanStage
                         fixedTokenLoad,
                         wheels + 1,
                         flushes,
-                        extras))
+                        extras,
+                        objectives.Settings))
                 {
                     continue;
                 }
@@ -630,7 +634,7 @@ internal sealed class FeaturePlanStage
 
         if (optionalBudget.AllowFlush)
         {
-            while (flushes < K.COLS - 1)
+            while (flushes < objectives.Settings.COLS - 1)
             {
                 if (rng.NextDouble() >= ObjectiveStage.ProfiledProbability(objectives.Settings.PFlushOptional, objectives.ExperienceProfile, flush: true)) break;
                 if (!IsFeatureShapeFeasible(
@@ -639,7 +643,8 @@ internal sealed class FeaturePlanStage
                         fixedTokenLoad,
                         wheels,
                         flushes + 1,
-                        extras))
+                        extras,
+                        objectives.Settings))
                 {
                     break;
                 }
@@ -673,7 +678,7 @@ internal sealed class FeaturePlanStage
         if (objectives.PlanningPressure > 0) return false;
         if (input.Targets.Count != 0) return false;
         if (input.Required.GetValueOrDefault("EXTRA_SPIN") > 0) return false;
-        if (extras >= K.MAX_SPINS - K.BASE_SPINS) return false;
+        if (extras >= objectives.Settings.MAX_SPINS - objectives.Settings.BASE_SPINS) return false;
 
         var chance = ObjectiveStage.ProfiledProbability(
             objectives.Settings.PNoWinExtraGoOptional,
@@ -687,7 +692,8 @@ internal sealed class FeaturePlanStage
             fixedTokenLoad,
             wheels,
             flushes,
-            extras + 1);
+            extras + 1,
+            objectives.Settings);
     }
 
     private static IEnumerable<int> RepeatWheelCandidates(MathInput input, IReadOnlyList<int> wheelOrder)
@@ -716,11 +722,12 @@ internal sealed class FeaturePlanStage
         int fixedTokenLoad,
         int minWheels,
         int minFlushes,
-        int minExtras)
+        int minExtras,
+        Settings settings)
     {
         var maxWheels = FeatReg.Cfg["WHEEL"].Max;
-        var maxFlushes = Math.Min(FeatReg.Cfg["FLUSH"].Max, K.COLS - 1);
-        var maxExtras = K.MAX_SPINS - K.BASE_SPINS;
+        var maxFlushes = Math.Min(FeatReg.Cfg["FLUSH"].Max, settings.COLS - 1);
+        var maxExtras = settings.MAX_SPINS - settings.BASE_SPINS;
         (int Wheels, int Flushes, int Extras, int Score)? best = null;
 
         for (var wheels = minWheels; wheels <= maxWheels; wheels++)
@@ -735,7 +742,8 @@ internal sealed class FeaturePlanStage
                             fixedTokenLoad,
                             wheels,
                             flushes,
-                            extras))
+                            extras,
+                            settings))
                     {
                         continue;
                     }
@@ -743,16 +751,16 @@ internal sealed class FeaturePlanStage
                     var physWins = CapacityAnalyzer.PhysicalWins(input.Targets, wheels);
                     var plannedLoad = physWins + plannedFillerLoad;
                     var tokenLoad = fixedTokenLoad + wheels + extras;
-                    var fillerBudget = CapacityAnalyzer.FillerBudget(plannedLoad, K.BASE_SPINS + extras, tokenLoad, flushes, wheels);
+                    var fillerBudget = CapacityAnalyzer.FillerBudget(plannedLoad, settings.BASE_SPINS + extras, tokenLoad, flushes, wheels);
                     var maxFiller = input.MaxSym > 0
                         ? Enumerable.Range(1, input.MaxSym)
                             .Except(input.Targets.Keys)
-                            .Sum(sym => K.SymbolFillCap(sym) - 2)
-                        : fillCount * (K.FILL_CAP - 2);
+                            .Sum(sym => settings.SymbolFillCap(sym) - 2)
+                        : fillCount * (settings.FILL_CAP - 2);
                     var lowHeadroomPenalty = Math.Max(0, fillCount - fillerBudget) * 10;
                     var highHeadroomPenalty = Math.Max(0, fillerBudget - maxFiller + fillCount) * 10;
-                    var totalSpins = K.BASE_SPINS + extras;
-                    var comfortablePushCapacity = totalSpins * K.COLS * 2;
+                    var totalSpins = settings.BASE_SPINS + extras;
+                    var comfortablePushCapacity = totalSpins * settings.COLS * 2;
                     var pushPressurePenalty = Math.Max(0, plannedLoad + tokenLoad - comfortablePushCapacity) * 500;
                     var score = extras * 100
                         + wheels * 100
@@ -804,11 +812,12 @@ internal sealed class FeaturePlanStage
         int fixedTokenLoad,
         int wheels,
         int flushes,
-        int extras)
+        int extras,
+        Settings settings)
     {
         if (wheels > FeatReg.Cfg["WHEEL"].Max) return false;
-        if (flushes > Math.Min(FeatReg.Cfg["FLUSH"].Max, K.COLS - 1)) return false;
-        if (extras > K.MAX_SPINS - K.BASE_SPINS) return false;
+        if (flushes > Math.Min(FeatReg.Cfg["FLUSH"].Max, settings.COLS - 1)) return false;
+        if (extras > settings.MAX_SPINS - settings.BASE_SPINS) return false;
 
         var physWins = CapacityAnalyzer.PhysicalWins(input.Targets, wheels);
         var plannedLoad = physWins + plannedFillerLoad;
@@ -818,7 +827,7 @@ internal sealed class FeaturePlanStage
             .ToArray();
         return CapacityAnalyzer.IsFeasible(
             plannedLoad,
-            K.BASE_SPINS + extras,
+            settings.BASE_SPINS + extras,
             fillSymbols,
             tokenLoad,
             flushes,
@@ -944,7 +953,7 @@ internal sealed class AllocationStage
         }
         else if (winSymbols.Any(sym => final.GetValueOrDefault(sym) > 0)) return;
 
-        if (FinalSlotCapacity(placements, finalSlot) - final.Values.Sum() <= 0) return;
+        if (FinalSlotCapacity(placements, finalSlot, placements.Features.Objectives.Settings) - final.Values.Sum() <= 0) return;
 
         var candidates = requiredFinalSym > 0
             ? new[] { requiredFinalSym }
@@ -974,7 +983,7 @@ internal sealed class AllocationStage
             .First().Sym;
     }
 
-    private static int FinalSlotCapacity(PlacementPlan placements, int finalSlot)
+    private static int FinalSlotCapacity(PlacementPlan placements, int finalSlot, Settings settings)
     {
         var spinNum = finalSlot + 1;
         var flushCols = placements.PlacedFeatures.Count(f => f.Id == "FLUSH" && f.Spin == spinNum);
@@ -982,8 +991,8 @@ internal sealed class AllocationStage
         var reserved = placements.PlacedFeatures.Count(f => f.Spin == finalSlot
             && FeatReg.Has(f.Id)
             && FeatReg.Get(f.Id).HasToken);
-        var freeCols = K.COLS - flushCols;
-        return Math.Max(0, K.MixedPushCapacity(freeCols) + flushCols * K.ROWS - reserved);
+        var freeCols = settings.COLS - flushCols;
+        return Math.Max(0, settings.MixedPushCapacity(freeCols) + flushCols * settings.ROWS - reserved);
     }
 }
 

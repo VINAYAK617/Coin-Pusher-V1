@@ -171,7 +171,7 @@ public sealed class PrizeCombinator
     private static int SpinsFor(int target)
     {
         _ = target;
-        return K.BASE_SPINS;
+        return Settings.Default.BASE_SPINS;
     }
 
     private MathInput BuildInput(int sym, int target, string? extraRequired,

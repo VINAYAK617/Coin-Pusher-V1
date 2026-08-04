@@ -14,7 +14,7 @@ public static class BoardPrinter
         Print(plan.Spins[0].Board, "STARTING BOARD (before spin 1)", plan);
 
         var board    = Grid.Clone(plan.Spins[0].Board);
-        int fallback = plan.FillSyms.Count > 0 ? plan.FillSyms[0] : K.F_COIN;
+        int fallback = plan.FillSyms.Count > 0 ? plan.FillSyms[0] : Settings.Default.F_COIN;
         var totals   = new Dictionary<int, int>();
 
         for (int i = 0; i < plan.Spins.Count; i++)
@@ -23,7 +23,7 @@ public static class BoardPrinter
             var next = i + 1 < plan.Spins.Count ? plan.Spins[i + 1] : null;
 
             Console.WriteLine($"\n────────────────────── SPIN {sp.Spin}/{plan.TotalSpins} ──────────────────────");
-            Console.WriteLine($"push=[{string.Join(",", Enumerable.Range(0, K.COLS).Select(c => sp.Flush[c] ? "FLUSH" : sp.Push[c].ToString()))}]"
+            Console.WriteLine($"push=[{string.Join(",", Enumerable.Range(0, Settings.Default.COLS).Select(c => sp.Flush[c] ? "FLUSH" : sp.Push[c].ToString()))}]"
                              + (sp.Tokens.Count > 0 ? $"   tokens firing this spin: [{string.Join(",", sp.Tokens.Select(t => t.Id))}]" : ""));
 
             // Phase 1: FlatStale
@@ -32,14 +32,14 @@ public static class BoardPrinter
 
             // Phase 2: Collect
             var collectedThisSpin = new Dictionary<int, int>();
-            for (int col = 0; col < K.COLS; col++)
+            for (int col = 0; col < Settings.Default.COLS; col++)
             {
                 if (sp.Flush[col])
                 {
                     var ctx = new FireCtx { Board = board, Col = col, Fp = new FP() };
                     foreach (var cell in FeatReg.Get("FLUSH").Collect(ctx))
                     {
-                        if (K.IsFeat(cell.Sym)) continue;
+                        if (Settings.Default.IsFeat(cell.Sym)) continue;
                         Acc(totals, cell.Sym, cell.Stack);
                         Acc(collectedThisSpin, cell.Sym, cell.Stack);
                     }
@@ -47,14 +47,14 @@ public static class BoardPrinter
                 else
                 {
                     int push = sp.Push[col];
-                    for (int r = K.ROWS - push; r < K.ROWS; r++)
+                    for (int r = Settings.Default.ROWS - push; r < Settings.Default.ROWS; r++)
                     {
                         var cell = board[r, col];
-                        if (cell == null || K.IsFeat(cell.Sym)) continue;
+                        if (cell == null || Settings.Default.IsFeat(cell.Sym)) continue;
                         Acc(totals, cell.Sym, cell.Stack);
                         Acc(collectedThisSpin, cell.Sym, cell.Stack);
                     }
-                    for (int r = K.ROWS - 1; r >= 0; r--)
+                    for (int r = Settings.Default.ROWS - 1; r >= 0; r--)
                     {
                         int src = r - push;
                         board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;
@@ -97,13 +97,13 @@ public static class BoardPrinter
         var winSyms = plan?.Targets.Keys.ToHashSet() ?? new HashSet<int>();
 
         Console.Write("       ");
-        for (int c = 0; c < K.COLS; c++) Console.Write($"  C{c}  ");
+        for (int c = 0; c < Settings.Default.COLS; c++) Console.Write($"  C{c}  ");
         Console.WriteLine();
 
-        for (int r = 0; r < K.ROWS; r++)
+        for (int r = 0; r < Settings.Default.ROWS; r++)
         {
             Console.Write($"   R{r}: ");
-            for (int c = 0; c < K.COLS; c++)
+            for (int c = 0; c < Settings.Default.COLS; c++)
                 Console.Write(Cell(board[r, c], winSyms));
             Console.WriteLine();
         }

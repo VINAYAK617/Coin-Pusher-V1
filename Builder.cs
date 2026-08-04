@@ -51,7 +51,7 @@ internal sealed class Builder
                                       int totalSpins, int baseSpins)
     {
         var plans     = new List<SpinPlan>();
-        var nextBoard = new Cell?[K.ROWS, K.COLS];
+        var nextBoard = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
 
         for (int s = totalSpins; s >= 1; s--)
         {
@@ -96,14 +96,14 @@ internal sealed class Builder
                                           && FeatReg.Has(p.Id)
                                           && FeatReg.Get(p.Id).HasToken))
         {
-            var preferred = (K.ROWS - 1, f.Col);
+            var preferred = (Settings.Default.ROWS - 1, f.Col);
             if (zoneSet.Contains(preferred) && !reserved.Contains(preferred))
             { reserved.Add(preferred); continue; }
 
             bool placed = false;
-            for (int r2 = K.ROWS - 1; r2 >= 0 && !placed; r2--)
+            for (int r2 = Settings.Default.ROWS - 1; r2 >= 0 && !placed; r2--)
             {
-                var pos = (r2, K.COLS - 1);
+                var pos = (r2, Settings.Default.COLS - 1);
                 if (zoneSet.Contains(pos) && !reserved.Contains(pos))
                 { reserved.Add(pos); placed = true; }
             }
@@ -130,18 +130,18 @@ internal sealed class Builder
     {
         var board = Grid.RotCCW(next);
 
-        for (int col = 0; col < K.COLS; col++)
+        for (int col = 0; col < Settings.Default.COLS; col++)
         {
             if (flush[col])
             {
-                for (int r = 0; r < K.ROWS; r++)
+                for (int r = 0; r < Settings.Default.ROWS; r++)
                     board[r, col] = null;
             }
             else
             {
                 int p = push[col];
-                for (int r = 0; r < K.ROWS; r++)
-                    board[r, col] = r + p < K.ROWS ? board[r + p, col]?.Clone() : null;
+                for (int r = 0; r < Settings.Default.ROWS; r++)
+                    board[r, col] = r + p < Settings.Default.ROWS ? board[r + p, col]?.Clone() : null;
             }
         }
 
@@ -161,9 +161,9 @@ internal sealed class Builder
             int sym = lk.Sym;
             if (lk.FireSpin == spinNum)
             {
-                for (int r = 0; r < K.ROWS; r++)
+                for (int r = 0; r < Settings.Default.ROWS; r++)
                 {
-                    for (int c = 0; c < K.COLS; c++)
+                    for (int c = 0; c < Settings.Default.COLS; c++)
                     {
                         var cell = board[r, c];
                         if (cell != null && !cell.IsFeat && cell.Sym == sym && zoneSet.Contains((r, c)))
@@ -174,9 +174,9 @@ internal sealed class Builder
             else if (lk.FireSpin + 1 == spinNum && spinNum < totalSpins)
             {
                 var protectedPositions = WheelCarryStartPositions(spinNum, lk);
-                for (int r = 0; r < K.ROWS; r++)
+                for (int r = 0; r < Settings.Default.ROWS; r++)
                 {
-                    for (int c = 0; c < K.COLS; c++)
+                    for (int c = 0; c < Settings.Default.COLS; c++)
                     {
                         var cell = board[r, c];
                         if (cell != null && !cell.IsFeat && cell.Sym == sym
@@ -247,8 +247,8 @@ internal sealed class Builder
 
         // Dynamic carry starts are selected later in BuildBoard. Existing back-propagated
         // cells should not be cleared if they are already outside the next collection zone.
-        return Enumerable.Range(0, K.ROWS)
-            .SelectMany(r => Enumerable.Range(0, K.COLS).Select(c => (r, c)))
+        return Enumerable.Range(0, Settings.Default.ROWS)
+            .SelectMany(r => Enumerable.Range(0, Settings.Default.COLS).Select(c => (r, c)))
             .ToHashSet();
     }
 
@@ -260,8 +260,8 @@ internal sealed class Builder
         IReadOnlyList<SpinPlan> futurePlans,
         HashSet<(int, int)> occupied)
     {
-        return Enumerable.Range(0, K.ROWS)
-            .SelectMany(r => Enumerable.Range(0, K.COLS).Select(c => (r, c)))
+        return Enumerable.Range(0, Settings.Default.ROWS)
+            .SelectMany(r => Enumerable.Range(0, Settings.Default.COLS).Select(c => (r, c)))
             .Where(pos => !occupied.Contains(pos))
             .Where(pos => CollectsExactlyAt(pos, startSpin, collectSpin, push, flush, futurePlans))
             .OrderBy(_ => _rng.Next());
@@ -275,8 +275,8 @@ internal sealed class Builder
         IReadOnlyList<SpinPlan> futurePlans,
         HashSet<(int, int)> occupied)
     {
-        var positions = Enumerable.Range(0, K.ROWS)
-            .SelectMany(r => Enumerable.Range(0, K.COLS).Select(c => (r, c)))
+        var positions = Enumerable.Range(0, Settings.Default.ROWS)
+            .SelectMany(r => Enumerable.Range(0, Settings.Default.COLS).Select(c => (r, c)))
             .Where(pos => !occupied.Contains(pos))
             .OrderBy(_ => _rng.Next())
             .ToList();
@@ -297,8 +297,8 @@ internal sealed class Builder
         IReadOnlyList<SpinPlan> futurePlans,
         HashSet<(int, int)> occupied)
     {
-        return Enumerable.Range(0, K.ROWS)
-            .SelectMany(r => Enumerable.Range(0, K.COLS).Select(c => (r, c)))
+        return Enumerable.Range(0, Settings.Default.ROWS)
+            .SelectMany(r => Enumerable.Range(0, Settings.Default.COLS).Select(c => (r, c)))
             .Where(pos => !occupied.Contains(pos))
             .Where(pos => !CollectsByEnd(pos, startSpin, totalSpins, push, flush, futurePlans))
             .OrderBy(_ => _rng.Next());
@@ -319,7 +319,7 @@ internal sealed class Builder
                 ? (push, flush)
                 : PlanGeometry(futurePlans, spin);
 
-            var inZone = f[pos.c] || pos.r >= K.ROWS - p[pos.c];
+            var inZone = f[pos.c] || pos.r >= Settings.Default.ROWS - p[pos.c];
             if (spin == collectSpin) return inZone;
             if (inZone) return false;
 
@@ -345,7 +345,7 @@ internal sealed class Builder
                 ? (push, flush)
                 : PlanGeometry(futurePlans, spin);
 
-            if (f[pos.c] || pos.r >= K.ROWS - p[pos.c]) return true;
+            if (f[pos.c] || pos.r >= Settings.Default.ROWS - p[pos.c]) return true;
             pos = AdvancePosition(pos, p[pos.c]);
             if (pos.r < 0) return false;
         }
@@ -362,8 +362,8 @@ internal sealed class Builder
     private static (int r, int c) AdvancePosition((int r, int c) pos, int push)
     {
         var shiftedRow = pos.r + push;
-        if (shiftedRow >= K.ROWS) return (-1, -1);
-        return (pos.c, K.ROWS - 1 - shiftedRow);
+        if (shiftedRow >= Settings.Default.ROWS) return (-1, -1);
+        return (pos.c, Settings.Default.ROWS - 1 - shiftedRow);
     }
 
     private void FillZone(Cell?[,] board, int spinNum, int[] push, bool[] flush,
@@ -374,16 +374,16 @@ internal sealed class Builder
         var safe  = new List<(int r, int c)>();
         var spawn = new List<(int r, int c)>();
 
-        for (int col = 0; col < K.COLS; col++)
+        for (int col = 0; col < Settings.Default.COLS; col++)
         {
             IEnumerable<int> rows = flush[col]
-                ? Enumerable.Range(0, K.ROWS)
+                ? Enumerable.Range(0, Settings.Default.ROWS)
                 : Grid.ZoneRows(push[col]);
             foreach (int row in rows)
             {
                 var pos = (row, col);
                 if (tokenReserved.Contains(pos)) continue;
-                (col == K.COLS - 1 ? spawn : safe).Add(pos);
+                (col == Settings.Default.COLS - 1 ? spawn : safe).Add(pos);
             }
         }
         var positions = safe.Concat(spawn).ToList();
@@ -494,15 +494,15 @@ internal sealed class Builder
     }
 
     private static bool SameSymbol(Cell?[,] board, int row, int col, int sym) =>
-        row >= 0 && row < K.ROWS
-        && col >= 0 && col < K.COLS
+        row >= 0 && row < Settings.Default.ROWS
+        && col >= 0 && col < Settings.Default.COLS
         && board[row, col]?.IsFeat != true
         && board[row, col]?.Sym == sym;
 
     private static int CountSymbolInColumn(Cell?[,] board, int col, int sym)
     {
         var count = 0;
-        for (var row = 0; row < K.ROWS; row++)
+        for (var row = 0; row < Settings.Default.ROWS; row++)
         {
             var cell = board[row, col];
             if (cell?.IsFeat != true && cell?.Sym == sym) count++;
@@ -529,9 +529,9 @@ internal sealed class Builder
     /// </summary>
     private void FillRest(Cell?[,] board)
     {
-        for (int r = 0; r < K.ROWS; r++)
+        for (int r = 0; r < Settings.Default.ROWS; r++)
         {
-            for (int c = 0; c < K.COLS; c++)
+            for (int c = 0; c < Settings.Default.COLS; c++)
             {
                 if (board[r, c] == null)
                     board[r, c] = Grid.Norm(_fillTracker.Next());
@@ -564,20 +564,20 @@ internal sealed class Builder
     {
         var flushCols = sf.Where(f => f.Id == "FLUSH").Select(f => f.Col).ToHashSet();
         bool isWheel  = _locks.Any(lk => lk.FireSpin == spinNum);
-        int freeCols  = K.COLS - flushCols.Count;
+        int freeCols  = Settings.Default.COLS - flushCols.Count;
         // Zone must hold both the allocated wins AND the reserved token slot(s)
         int total     = alloc.Values.Sum() + reserved;
 
-        int needed = Math.Clamp(total - flushCols.Count * K.ROWS, freeCols * K.MIN_PUSH, freeCols * K.MAX_PUSH);
+        int needed = Math.Clamp(total - flushCols.Count * Settings.Default.ROWS, freeCols * Settings.Default.MIN_PUSH, freeCols * Settings.Default.MAX_PUSH);
 
         int[] pv = MakeVariedPushValues(freeCols, needed, allowVisualLift: true);
 
-        var push  = new int[K.COLS];
-        var flush = new bool[K.COLS];
+        var push  = new int[Settings.Default.COLS];
+        var flush = new bool[Settings.Default.COLS];
         int fi = 0;
-        for (int col = 0; col < K.COLS; col++)
+        for (int col = 0; col < Settings.Default.COLS; col++)
         {
-            if (flushCols.Contains(col)) { push[col] = K.ROWS; flush[col] = true; }
+            if (flushCols.Contains(col)) { push[col] = Settings.Default.ROWS; flush[col] = true; }
             else push[col] = pv[fi++];
         }
         return (push, flush);
@@ -587,10 +587,10 @@ internal sealed class Builder
     {
         if (freeCols <= 0) return Array.Empty<int>();
 
-        int minTotal = freeCols * K.MIN_PUSH;
+        int minTotal = freeCols * Settings.Default.MIN_PUSH;
         int maxTotal = allowVisualLift
-            ? K.MixedPushCapacity(freeCols)
-            : freeCols * K.MAX_PUSH;
+            ? Settings.Default.MixedPushCapacity(freeCols)
+            : freeCols * Settings.Default.MAX_PUSH;
         int targetTotal = Math.Clamp(needed, minTotal, maxTotal);
 
         if (allowVisualLift)
@@ -621,17 +621,17 @@ internal sealed class Builder
     {
         if (freeCols >= 4)
         {
-            return K.MIN_PUSH * freeCols + 6;
+            return Settings.Default.MIN_PUSH * freeCols + 6;
         }
 
         if (freeCols == 3)
         {
-            return K.MIN_PUSH * freeCols + 3;
+            return Settings.Default.MIN_PUSH * freeCols + 3;
         }
 
         return freeCols == 2
-            ? K.MIN_PUSH * freeCols + 1
-            : K.MIN_PUSH * freeCols;
+            ? Settings.Default.MIN_PUSH * freeCols + 1
+            : Settings.Default.MIN_PUSH * freeCols;
     }
 
     private int[] BuildBalancedPushComposition(int freeCols, int targetTotal)
@@ -664,11 +664,11 @@ internal sealed class Builder
             return;
         }
 
-        for (var value = K.MIN_PUSH; value <= K.MAX_PUSH; value++)
+        for (var value = Settings.Default.MIN_PUSH; value <= Settings.Default.MAX_PUSH; value++)
         {
             var nextRemaining = remaining - value;
-            if (nextRemaining < (left - 1) * K.MIN_PUSH) continue;
-            if (nextRemaining > (left - 1) * K.MAX_PUSH) continue;
+            if (nextRemaining < (left - 1) * Settings.Default.MIN_PUSH) continue;
+            if (nextRemaining > (left - 1) * Settings.Default.MAX_PUSH) continue;
             current[index] = value;
             CollectPushCompositions(index + 1, nextRemaining, current, candidates);
         }
@@ -676,12 +676,12 @@ internal sealed class Builder
 
     private int[] BuildFallbackPushComposition(int freeCols, int targetTotal)
     {
-        var values = Enumerable.Repeat(K.MIN_PUSH, freeCols).ToArray();
+        var values = Enumerable.Repeat(Settings.Default.MIN_PUSH, freeCols).ToArray();
         var remaining = targetTotal - values.Sum();
         var index = 0;
-        while (remaining > 0 && values.Any(value => value < K.MAX_PUSH))
+        while (remaining > 0 && values.Any(value => value < Settings.Default.MAX_PUSH))
         {
-            if (values[index] < K.MAX_PUSH)
+            if (values[index] < Settings.Default.MAX_PUSH)
             {
                 values[index]++;
                 remaining--;
@@ -696,7 +696,7 @@ internal sealed class Builder
     {
         var distinct = values.Distinct().Count();
         var maxFrequency = values.GroupBy(v => v).Max(g => g.Count());
-        var allValues = Enumerable.Range(K.MIN_PUSH, K.MAX_PUSH - K.MIN_PUSH + 1)
+        var allValues = Enumerable.Range(Settings.Default.MIN_PUSH, Settings.Default.MAX_PUSH - Settings.Default.MIN_PUSH + 1)
             .Count(value => values.Contains(value));
         var score = allValues * 500
             + distinct * 120

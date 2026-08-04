@@ -47,7 +47,7 @@ public sealed class Planner
 
     public GamePlan Plan()
     {
-        Validate(_input);
+        Validate(_input, _settings);
 
         Exception? last = null;
         var retryCauses = new Dictionary<string, int>();
@@ -149,10 +149,10 @@ public sealed class Planner
         }
     }
 
-    private static void Validate(MathInput input)
+    private static void Validate(MathInput input, Settings settings)
     {
-        if (input.BaseSpins != K.BASE_SPINS)
-            throw new ArgumentException($"BaseSpins must be exactly {K.BASE_SPINS}");
+        if (input.BaseSpins != settings.BASE_SPINS)
+            throw new ArgumentException($"BaseSpins must be exactly {settings.BASE_SPINS}");
         if (input.Targets.Count == 0 && input.NonWinTargets is { Count: 0 })
             throw new ArgumentException("Targets and NonWinTargets cannot both be empty");
         if (input.MaxSym < 2)
@@ -217,9 +217,9 @@ public sealed class Planner
                     throw new ArgumentException($"NonWinTargets sym {sym} out of range 1..{input.MaxSym}");
                 if (input.Targets.ContainsKey(sym))
                     throw new ArgumentException($"NonWinTargets sym {sym} is already a winning target");
-                var cap = K.SymbolFillCap(sym);
-                if (target < K.NONWIN_MIN_TARGET || target >= cap)
-                    throw new ArgumentException($"NonWinTargets sym {sym} must be in range {K.NONWIN_MIN_TARGET}..{cap - 1}");
+                var cap = settings.SymbolFillCap(sym);
+                if (target < settings.NONWIN_MIN_TARGET || target >= cap)
+                    throw new ArgumentException($"NonWinTargets sym {sym} must be in range {settings.NONWIN_MIN_TARGET}..{cap - 1}");
             }
         }
 

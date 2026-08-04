@@ -92,8 +92,8 @@ public static class TicketSerializer
     public static TicketDto ToTicketObject(GamePlan plan, Settings settings)
     {
         var board = plan.Spins[0].Board;
-        var startingBoard = Enumerable.Range(0, K.ROWS).Select(r =>
-            Enumerable.Range(0, K.COLS).Select(c => new BoardCellDto { Id = board[r, c]?.Sym ?? 0 }).ToArray()
+        var startingBoard = Enumerable.Range(0, settings.ROWS).Select(r =>
+            Enumerable.Range(0, settings.COLS).Select(c => new BoardCellDto { Id = board[r, c]?.Sym ?? 0 }).ToArray()
         ).ToArray();
 
         return new TicketDto
@@ -111,7 +111,7 @@ public static class TicketSerializer
                                      {
                                          Id = kv.Key,
                                          MinTarget = kv.Value,
-                                         MaxThreshold = K.SymbolFillCap(kv.Key),
+                                         MaxThreshold = settings.SymbolFillCap(kv.Key),
                                          PrizeTier = tier > 0 ? tier : null,
                                          PrizeValue = tier > 0 ? PrizeValueFor(plan, kv.Key, tier) : null,
                                      };
@@ -146,7 +146,7 @@ public static class TicketSerializer
                 .Where(kv => kv.Value.IsFeat)
                 .Select(kv => (Spin: sp.Spin, Pos: kv.Key, Cell: kv.Value)))
             .OrderBy(t => t.Spin)
-            .ThenBy(t => t.Pos.Item1 * K.COLS + t.Pos.Item2)
+            .ThenBy(t => t.Pos.Item1 * settings.COLS + t.Pos.Item2)
             .ToList();
         var chainPlan = BuildFeatureChainPlan(plan, allFeatureTokens, settings);
 
@@ -160,22 +160,22 @@ public static class TicketSerializer
         var turns = new List<TurnDto>();
         foreach (var sp in plan.Spins)
         {
-            var pushers = Enumerable.Range(0, K.COLS).Select(c =>
+            var pushers = Enumerable.Range(0, settings.COLS).Select(c =>
                 sp.Flush[c]
-                    ? new PusherDto { PushValue = K.ROWS, FeatureId = K.F_FLUSH_ID }
+                    ? new PusherDto { PushValue = settings.ROWS, FeatureId = settings.F_FLUSH_ID }
                     : new PusherDto { PushValue = sp.Push[c], FeatureId = null }
             ).ToArray();
 
             var spawns = new List<SpawnDto>();
-            foreach (var kv in sp.Spawns.OrderBy(kv => kv.Key.Item1 * K.COLS + kv.Key.Item2))
+            foreach (var kv in sp.Spawns.OrderBy(kv => kv.Key.Item1 * settings.COLS + kv.Key.Item2))
             {
                 var posKey = (sp.Spin, kv.Key);
 
-                int pos = kv.Key.Item1 * K.COLS + kv.Key.Item2;
+                int pos = kv.Key.Item1 * settings.COLS + kv.Key.Item2;
 
                 if (suppressed.Contains(posKey))
                 {
-                    spawns.Add(ConvertedSpawnObj(kv.Value, pos));
+                    spawns.Add(ConvertedSpawnObj(kv.Value, pos, settings));
                     continue;
                 }
 
@@ -209,7 +209,7 @@ public static class TicketSerializer
 
         var chainable = featureTokens
             .Where(token => token.Spin < plan.TotalSpins)
-            .Where(token => IsReTriggerChainParticipant(token.Cell))
+            .Where(token => IsReTriggerChainParticipant(token.Cell, settings))
             .ToList();
         if (chainable.Count == 0) return FeatureChainPlan.Empty;
 
@@ -217,42 +217,43 @@ public static class TicketSerializer
 
         var ordered = chainable
             .OrderBy(token => token.Spin)
-            .ThenBy(token => token.Pos.Item1 * K.COLS + token.Pos.Item2)
+            .ThenBy(token => token.Pos.Item1 * settings.COLS + token.Pos.Item2)
             .ThenBy(token => token.Cell.Sym)
             .ToList();
 
-        var start = ordered[DeterministicIndex(plan, ordered.Count, salt: 97)];
+        var start = ordered[DeterministicIndex(plan, ordered.Count, salt: 97, settings)];
         var payloadCandidates = ordered
             .Where(token => token.Spin != start.Spin || token.Pos != start.Pos)
-            .Where(token => IsTimingSafeReTriggerPayload(start, token))
+            .Where(token => IsTimingSafeReTriggerPayload(start, token, settings))
             .ToList();
         if (payloadCandidates.Count == 0) return FeatureChainPlan.Empty;
 
-        var roll = DeterministicUnitInterval(plan, start.Cell.Sym, start.Spin, start.Pos, payloadCandidates.Count);
+        var roll = DeterministicUnitInterval(plan, start.Cell.Sym, start.Spin, start.Pos, payloadCandidates.Count, settings);
         if (roll >= settings.PFeatureRetriggerChain) return FeatureChainPlan.Empty;
 
-        var payload = payloadCandidates[DeterministicIndex(plan, payloadCandidates.Count, salt: 193)];
+        var payload = payloadCandidates[DeterministicIndex(plan, payloadCandidates.Count, salt: 193, settings)];
         var nested = FeatureObj(payload.Cell, plan, settings, System.Array.Empty<FeatureDto>(), depth: 1);
         return new FeatureChainPlan(start, new[] { payload }, nested);
     }
 
-    private static bool IsNoBoardEffectFeature(Cell cell) =>
-        cell.Sym is K.F_XSPIN or K.F_PRUP;
+    private static bool IsNoBoardEffectFeature(Cell cell, Settings settings) =>
+        cell.Sym == settings.F_XSPIN || cell.Sym == settings.F_PRUP;
 
-    private static bool IsReTriggerChainParticipant(Cell cell) =>
-        IsNoBoardEffectFeature(cell) || cell.Sym == K.F_WHEEL;
+    private static bool IsReTriggerChainParticipant(Cell cell, Settings settings) =>
+        IsNoBoardEffectFeature(cell, settings) || cell.Sym == settings.F_WHEEL;
 
     private static bool IsTimingSafeReTriggerPayload(
         (int Spin, (int, int) Pos, Cell Cell) start,
-        (int Spin, (int, int) Pos, Cell Cell) payload)
+        (int Spin, (int, int) Pos, Cell Cell) payload,
+        Settings settings)
     {
-        if (payload.Cell.Sym is K.F_WHEEL or K.F_XSPIN)
+        if (payload.Cell.Sym == settings.F_WHEEL || payload.Cell.Sym == settings.F_XSPIN)
             return false;
 
-        if (start.Cell.Sym == K.F_WHEEL)
-            return payload.Spin == start.Spin && payload.Cell.Sym == K.F_PRUP;
+        if (start.Cell.Sym == settings.F_WHEEL)
+            return payload.Spin == start.Spin && payload.Cell.Sym == settings.F_PRUP;
 
-        return payload.Cell.Sym == K.F_PRUP && payload.Spin <= start.Spin;
+        return payload.Cell.Sym == settings.F_PRUP && payload.Spin <= start.Spin;
     }
 
     private static int FeatureChainConvertId(Cell cell, int depth, GamePlan plan, Settings settings)
@@ -263,7 +264,7 @@ public static class TicketSerializer
             .Concat(settings.FeatureRetriggerBridgeIds)
             .Distinct()
             .ToArray();
-        if (ids.Length == 0) return K.F_COIN;
+        if (ids.Length == 0) return settings.F_COIN;
 
         var hash = cell.Sym;
         hash = unchecked(hash * 397) ^ cell.CvtSym;
@@ -286,29 +287,30 @@ public static class TicketSerializer
         int featureId,
         int spin,
         (int r, int c) pos,
-        int payloadCount)
+        int payloadCount,
+        Settings settings)
     {
         unchecked
         {
-            uint hash = FeatureChainHash(plan, salt: 131);
+            uint hash = FeatureChainHash(plan, salt: 131, settings);
             hash ^= (uint)featureId * 0x9E3779B9u;
             hash = Mix(hash + (uint)spin * 0x85EBCA6Bu);
-            hash = Mix(hash + (uint)(pos.r * K.COLS + pos.c) * 0xC2B2AE35u);
+            hash = Mix(hash + (uint)(pos.r * settings.COLS + pos.c) * 0xC2B2AE35u);
             hash = Mix(hash + (uint)payloadCount * 0x27D4EB2Fu);
             return (hash & 0x7fffffffu) / (double)0x80000000u;
         }
     }
 
-    private static int DeterministicIndex(GamePlan plan, int count, int salt)
+    private static int DeterministicIndex(GamePlan plan, int count, int salt, Settings settings)
     {
         if (count <= 1) return 0;
         unchecked
         {
-            return (int)(FeatureChainHash(plan, salt) % (uint)count);
+            return (int)(FeatureChainHash(plan, salt, settings) % (uint)count);
         }
     }
 
-    private static uint FeatureChainHash(GamePlan plan, int salt)
+    private static uint FeatureChainHash(GamePlan plan, int salt, Settings settings)
     {
         unchecked
         {
@@ -318,9 +320,9 @@ public static class TicketSerializer
             foreach (var spin in plan.Spins)
             {
                 hash = Mix(hash ^ (uint)(spin.Spin * 9176 + spin.Spawns.Count));
-                foreach (var kv in spin.Spawns.OrderBy(kv => kv.Key.Item1 * K.COLS + kv.Key.Item2))
+                foreach (var kv in spin.Spawns.OrderBy(kv => kv.Key.Item1 * settings.COLS + kv.Key.Item2))
                 {
-                    var pos = kv.Key.Item1 * K.COLS + kv.Key.Item2;
+                    var pos = kv.Key.Item1 * settings.COLS + kv.Key.Item2;
                     var cell = kv.Value;
                     hash = Mix(hash ^ (uint)(pos * 257 + cell.Sym * 17 + cell.CvtSym));
                 }
@@ -349,34 +351,43 @@ public static class TicketSerializer
                 ? new SpawnDto { Pos = pos, Id = c.Sym, Stack = c.Stack }
                 : new SpawnDto { Pos = pos, Id = c.Sym };
 
-        int cvt = c.CvtSym > 0 ? c.CvtSym : K.F_COIN;
-        return c.Sym switch
+        int cvt = c.CvtSym > 0 ? c.CvtSym : settings.F_COIN;
+        if (c.Sym == settings.F_WHEEL)
         {
-            K.F_WHEEL => new SpawnDto
+            return new SpawnDto
             {
                 Pos = pos,
                 Id = c.Sym,
                 Feature = FeatureObj(c, plan, settings)
-            },
-            K.F_XSPIN => new SpawnDto
+            };
+        }
+
+        if (c.Sym == settings.F_XSPIN)
+        {
+            return new SpawnDto
             {
                 Pos = pos,
                 Id = c.Sym,
                 Feature = FeatureObj(c, plan, settings)
-            },
-            K.F_PRUP => new SpawnDto
+            };
+        }
+
+        if (c.Sym == settings.F_PRUP)
+        {
+            return new SpawnDto
             {
                 Pos = pos,
                 Id = c.Sym,
                 Feature = FeatureObj(c, plan, settings)
-            },
-            _ => new SpawnDto
+            };
+        }
+
+        return new SpawnDto
             {
                 Pos = pos,
                 Id = c.Sym,
                 Feature = new FeatureDto { FeatureId = c.Sym, ConvertToId = cvt }
-            }
-        };
+            };
     }
 
     private static FeatureDto FeatureObj(
@@ -389,7 +400,7 @@ public static class TicketSerializer
         var chain = reTrigger ?? System.Array.Empty<FeatureDto>();
         var convertToId = chain.Length > 0 && depth > 0
             ? FeatureChainConvertId(c, depth, plan, settings)
-            : c.CvtSym > 0 && !K.IsFeat(c.CvtSym) ? c.CvtSym : K.F_COIN;
+            : c.CvtSym > 0 && !settings.IsFeat(c.CvtSym) ? c.CvtSym : settings.F_COIN;
 
         var dto = new FeatureDto
         {
@@ -398,17 +409,17 @@ public static class TicketSerializer
             ReTrigger = chain,
         };
 
-        if (c.Sym == K.F_WHEEL)
+        if (c.Sym == settings.F_WHEEL)
         {
             dto.WheelSymbolId = c.Fp?.WheelSym ?? 0;
             // Public JSON uses bonus semantics: N means a collected cell counts
             // as 1 + N. Internally Fp.WheelStack stores the total stack value.
             dto.WheelStackValue = Math.Clamp(
                 Math.Max(0, (c.Fp?.WheelStack ?? 1) - 1),
-                K.MIN_WHEEL_STACK_VALUE,
-                K.MAX_WHEEL_STACK_VALUE);
+                settings.MIN_WHEEL_STACK_VALUE,
+                settings.MAX_WHEEL_STACK_VALUE);
         }
-        else if (c.Sym == K.F_PRUP)
+        else if (c.Sym == settings.F_PRUP)
         {
             dto.UpgradeSymbolId = c.Fp?.PrupSym ?? 0;
             dto.UpgradePrizeValue = PrizeValueFor(plan, c.Fp?.PrupSym ?? 0, c.Fp?.PrupTier ?? 0);
@@ -417,9 +428,9 @@ public static class TicketSerializer
         return dto;
     }
 
-    private static SpawnDto ConvertedSpawnObj(Cell c, int pos)
+    private static SpawnDto ConvertedSpawnObj(Cell c, int pos, Settings settings)
     {
-        int cvt = c.CvtSym > 0 && !K.IsFeat(c.CvtSym) ? c.CvtSym : K.F_COIN;
+        int cvt = c.CvtSym > 0 && !settings.IsFeat(c.CvtSym) ? c.CvtSym : settings.F_COIN;
         return new SpawnDto { Pos = pos, Id = cvt };
     }
 

@@ -83,9 +83,9 @@ public sealed class EngineAndHelperTests
             MaxSym = 6,
         }, seed: 1701).Plan();
 
-        var firstNormalCol = Enumerable.Range(0, K.COLS)
+        var firstNormalCol = Enumerable.Range(0, Settings.Default.COLS)
             .First(col => !plan.Spins[0].Flush[col]);
-        plan.Spins[0].Push[firstNormalCol] = K.MAX_PUSH + 1;
+        plan.Spins[0].Push[firstNormalCol] = Settings.Default.MAX_PUSH + 1;
 
         var ex = Assert.ThrowsException<InvalidOperationException>(() => Verifier.Check(plan));
         StringAssert.Contains(ex.Message, "push=");
@@ -103,9 +103,9 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CapacityAnalyzerCalculatesCapacityAndFeasibility()
     {
-        var normalCapacity = K.BASE_SPINS * K.MixedPushCapacity(K.COLS);
+        var normalCapacity = Settings.Default.BASE_SPINS * Settings.Default.MixedPushCapacity(Settings.Default.COLS);
         var flushCapacity = normalCapacity
-            + 2 * (K.ROWS + K.MixedPushCapacity(K.COLS - 1) - K.MixedPushCapacity(K.COLS));
+            + 2 * (Settings.Default.ROWS + Settings.Default.MixedPushCapacity(Settings.Default.COLS - 1) - Settings.Default.MixedPushCapacity(Settings.Default.COLS));
 
         Assert.AreEqual(normalCapacity, CapacityAnalyzer.TotalCapacity(5, 0, 0));
         Assert.AreEqual(flushCapacity, CapacityAnalyzer.TotalCapacity(5, 2, 0));
@@ -150,10 +150,10 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void GridCloneRotateAndZonesBehavePredictably()
     {
-        var board = new Cell?[K.ROWS, K.COLS];
+        var board = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
         board[0, 0] = Grid.Norm(1);
         board[0, 4] = Grid.Norm(2);
-        board[4, 0] = Grid.Feat(K.F_WHEEL, 1, new FP { FeatId = "WHEEL", WheelSym = 1, WheelStack = 2 });
+        board[4, 0] = Grid.Feat(Settings.Default.F_WHEEL, 1, new FP { FeatId = "WHEEL", WheelSym = 1, WheelStack = 2 });
 
         var clone = Grid.Clone(board);
         clone[0, 0]!.Sym = 9;
@@ -187,7 +187,7 @@ public sealed class EngineAndHelperTests
         var plan = new Planner(input, seed: 707).Plan();
 
         var board = Grid.Clone(plan.Spins[0].Board);
-        board[0, 0] = Grid.Feat(K.F_PRUP, 3, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 2, PrupTier = 1 });
+        board[0, 0] = Grid.Feat(Settings.Default.F_PRUP, 3, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 2, PrupTier = 1 });
 
         Sim.FlatStale(board);
 
@@ -214,8 +214,8 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void WheelResidueSurvivesOutsideImmediateCollectionZone()
     {
-        var board = new Cell?[K.ROWS, K.COLS];
-        board[0, 0] = Grid.Feat(K.F_WHEEL, 1, new FP
+        var board = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
+        board[0, 0] = Grid.Feat(Settings.Default.F_WHEEL, 1, new FP
         {
             FeatId = "WHEEL",
             WheelSym = 2,
@@ -270,13 +270,13 @@ public sealed class EngineAndHelperTests
         var plan = new Planner(input, seed: 9191).Plan();
         var wheelTokens = plan.Spins
             .SelectMany(spin => spin.Spawns.Values)
-            .Where(cell => cell.IsFeat && cell.Sym == K.F_WHEEL && cell.Fp?.WheelSym == 2)
+            .Where(cell => cell.IsFeat && cell.Sym == Settings.Default.F_WHEEL && cell.Fp?.WheelSym == 2)
             .ToArray();
         var maxStackSeen = MaxStackSeenDuringReplay(plan, 2);
 
         Assert.AreEqual(2, wheelTokens.Length);
         Assert.IsTrue(maxStackSeen > 1);
-        Assert.IsTrue(maxStackSeen <= K.MAX_COIN_STACK);
+        Assert.IsTrue(maxStackSeen <= Settings.Default.MAX_COIN_STACK);
         Assert.AreEqual(30, Sim.Run(plan)[2]);
 
         var ticket = JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(TicketSerializer.ToJson(plan))!;
@@ -294,7 +294,7 @@ public sealed class EngineAndHelperTests
         var board = Grid.Clone(plan.Spins[0].Board);
         var totals = new Dictionary<int, int>();
         var wheelIndex = plan.Spins.FindIndex(spin =>
-            spin.Spawns.Values.Any(cell => cell.IsFeat && cell.Sym == K.F_WHEEL && cell.Fp?.WheelSym == wheelSym));
+            spin.Spawns.Values.Any(cell => cell.IsFeat && cell.Sym == Settings.Default.F_WHEEL && cell.Fp?.WheelSym == wheelSym));
         var immediateStacked = 0;
         var delayedCollected = false;
 
@@ -307,7 +307,7 @@ public sealed class EngineAndHelperTests
             foreach (var kv in sp.Spawns)
                 board[kv.Key.Item1, kv.Key.Item2] = kv.Value.Clone();
             var next = i + 1 < plan.Spins.Count ? plan.Spins[i + 1] : null;
-            Sim.FireAll(board, sp, next, plan.FillSyms.Count > 0 ? plan.FillSyms[0] : K.F_COIN);
+            Sim.FireAll(board, sp, next, plan.FillSyms.Count > 0 ? plan.FillSyms[0] : Settings.Default.F_COIN);
 
             if (i == wheelIndex && next != null)
             {
@@ -325,9 +325,9 @@ public sealed class EngineAndHelperTests
     private static int CountStackedInZone(Cell?[,] board, int sym, HashSet<(int, int)> zone)
     {
         var count = 0;
-        for (var r = 0; r < K.ROWS; r++)
+        for (var r = 0; r < Settings.Default.ROWS; r++)
         {
-            for (var c = 0; c < K.COLS; c++)
+            for (var c = 0; c < Settings.Default.COLS; c++)
             {
                 var cell = board[r, c];
                 if (cell != null && !cell.IsFeat && cell.Sym == sym && cell.Stack > 1 && zone.Contains((r, c)))
@@ -345,20 +345,20 @@ public sealed class EngineAndHelperTests
         bool afterImmediateTurn,
         ref bool delayedCollected)
     {
-        for (var col = 0; col < K.COLS; col++)
+        for (var col = 0; col < Settings.Default.COLS; col++)
         {
             if (sp.Flush[col])
             {
-                for (var r = 0; r < K.ROWS; r++)
+                for (var r = 0; r < Settings.Default.ROWS; r++)
                     CollectCell(board, r, col, totals, wheelSym, afterImmediateTurn, ref delayedCollected);
                 continue;
             }
 
             var push = sp.Push[col];
-            for (var r = K.ROWS - push; r < K.ROWS; r++)
+            for (var r = Settings.Default.ROWS - push; r < Settings.Default.ROWS; r++)
                 CollectCell(board, r, col, totals, wheelSym, afterImmediateTurn, ref delayedCollected);
 
-            for (var r = K.ROWS - 1; r >= 0; r--)
+            for (var r = Settings.Default.ROWS - 1; r >= 0; r--)
             {
                 var src = r - push;
                 board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;
@@ -376,7 +376,7 @@ public sealed class EngineAndHelperTests
         ref bool delayedCollected)
     {
         var cell = board[row, col];
-        if (cell == null || K.IsFeat(cell.Sym)) return;
+        if (cell == null || Settings.Default.IsFeat(cell.Sym)) return;
         totals[cell.Sym] = totals.GetValueOrDefault(cell.Sym) + cell.Stack;
         if (afterImmediateTurn && cell.Sym == wheelSym && cell.Stack > 1)
             delayedCollected = true;
@@ -391,16 +391,16 @@ public sealed class EngineAndHelperTests
         {
             var sp = plan.Spins[i];
             Sim.FlatStale(board);
-            for (var col = 0; col < K.COLS; col++)
+            for (var col = 0; col < Settings.Default.COLS; col++)
             {
                 if (sp.Flush[col])
                 {
-                    for (var r = 0; r < K.ROWS; r++) board[r, col] = null;
+                    for (var r = 0; r < Settings.Default.ROWS; r++) board[r, col] = null;
                     continue;
                 }
 
                 var push = sp.Push[col];
-                for (var r = K.ROWS - 1; r >= 0; r--)
+                for (var r = Settings.Default.ROWS - 1; r >= 0; r--)
                 {
                     var src = r - push;
                     board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;
@@ -412,7 +412,7 @@ public sealed class EngineAndHelperTests
                 board[kv.Key.Item1, kv.Key.Item2] = kv.Value.Clone();
 
             var next = i + 1 < plan.Spins.Count ? plan.Spins[i + 1] : null;
-            Sim.FireAll(board, sp, next, plan.FillSyms.Count > 0 ? plan.FillSyms[0] : K.F_COIN);
+            Sim.FireAll(board, sp, next, plan.FillSyms.Count > 0 ? plan.FillSyms[0] : Settings.Default.F_COIN);
             maxStack = Math.Max(maxStack, board.Cast<Cell?>()
                 .Where(cell => cell != null && !cell.IsFeat && cell.Sym == sym)
                 .Select(cell => cell!.Stack)

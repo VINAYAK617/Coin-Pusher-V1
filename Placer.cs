@@ -140,7 +140,7 @@ internal sealed class Placer
             foreach (var spin in PrizeUpgradeSpinOrder(minS, maxS))
             {
                 if (ConflictsWithWheelSpin(feat, spin, done)) continue;
-                for (var col = 0; col < K.COLS - 1; col++)
+                for (var col = 0; col < _settings.COLS - 1; col++)
                 {
                     if (used.Contains((spin, col))) continue;
                     r = feat.TryPlace(new PlaceCtx
@@ -217,8 +217,9 @@ internal sealed class Placer
     /// </summary>
     private PlacedFeat? PlaceNearSpin(Feat feat, int target, int minS, int maxS,
                                        List<PlacedFeat> done, HashSet<(int, int)> used,
-                                       int maxCol = K.COLS)
+                                       int maxCol = -1)
     {
+        if (maxCol < 0) maxCol = _settings.COLS;
         for (int offset = 0; offset <= maxS - minS; offset++)
         {
             foreach (int spin in offset == 0
@@ -246,10 +247,10 @@ internal sealed class Placer
         return null;
     }
 
-    private static bool ConflictsWithWheelSpin(Feat feat, int spin, IReadOnlyList<PlacedFeat> done)
+    private bool ConflictsWithWheelSpin(Feat feat, int spin, IReadOnlyList<PlacedFeat> done)
     {
         if (feat.Id == "EXTRA_SPIN"
-            && done.Count(f => f.Id == "EXTRA_SPIN" && f.Spin == spin) >= K.MAX_EXTRA_GO_PER_TURN)
+            && done.Count(f => f.Id == "EXTRA_SPIN" && f.Spin == spin) >= _settings.MAX_EXTRA_GO_PER_TURN)
         {
             return true;
         }

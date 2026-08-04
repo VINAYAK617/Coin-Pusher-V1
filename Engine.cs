@@ -18,7 +18,7 @@ public sealed class Engine
     {
         var totals   = new Dictionary<int, int>();
         var board    = Grid.Clone(_plan.Spins[0].Board);
-        int fallback = _plan.FillSyms.Count > 0 ? _plan.FillSyms[0] : K.F_COIN;
+        int fallback = _plan.FillSyms.Count > 0 ? _plan.FillSyms[0] : Settings.Default.F_COIN;
 
         for (int i = 0; i < _plan.Spins.Count; i++)
         {
@@ -27,14 +27,14 @@ public sealed class Engine
 
             Sim.FlatStale(board);
 
-            for (int col = 0; col < K.COLS; col++)
+            for (int col = 0; col < Settings.Default.COLS; col++)
             {
                 if (sp.Flush[col])
                 {
                     var ctx = new FireCtx { Board=board, Col=col, Fp=new FP() };
                     foreach (var cell in FeatReg.Get("FLUSH").Collect(ctx))
                     {
-                        if (!K.IsFeat(cell.Sym))
+                        if (!Settings.Default.IsFeat(cell.Sym))
                         {
                             totals.TryGetValue(cell.Sym, out int ex);
                             totals[cell.Sym] = ex + cell.Stack;
@@ -44,16 +44,16 @@ public sealed class Engine
                 else
                 {
                     int push = sp.Push[col];
-                    for (int r = K.ROWS - push; r < K.ROWS; r++)
+                    for (int r = Settings.Default.ROWS - push; r < Settings.Default.ROWS; r++)
                     {
                         var cell = board[r, col];
-                        if (cell != null && !K.IsFeat(cell.Sym))
+                        if (cell != null && !Settings.Default.IsFeat(cell.Sym))
                         {
                             totals.TryGetValue(cell.Sym, out int ex);
                             totals[cell.Sym] = ex + cell.Stack;
                         }
                     }
-                    for (int r = K.ROWS - 1; r >= 0; r--)
+                    for (int r = Settings.Default.ROWS - 1; r >= 0; r--)
                     {
                         int src = r - push;
                         board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;

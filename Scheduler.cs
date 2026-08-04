@@ -182,8 +182,8 @@ internal sealed class Scheduler
     {
         int spinNum   = s + 1;
         int flushCols = _placed.Count(f => f.Id == "FLUSH" && f.Spin == spinNum);
-        int freeCols  = K.COLS - flushCols;
-        int flushCap  = flushCols * K.ROWS;
+        int freeCols  = _settings.COLS - flushCols;
+        int flushCap  = flushCols * _settings.ROWS;
         int reserved  = tokenReserve.GetValueOrDefault(s, 0);
         int already   = slots[s].Values.Sum();
 
@@ -196,11 +196,11 @@ internal sealed class Scheduler
     {
         int spinNum = s + 1;
         int flushCols = _placed.Count(f => f.Id == "FLUSH" && f.Spin == spinNum);
-        int freeCols = K.COLS - flushCols;
-        int flushCap = flushCols * K.ROWS;
+        int freeCols = _settings.COLS - flushCols;
+        int flushCap = flushCols * _settings.ROWS;
         int reserved = tokenReserve.GetValueOrDefault(s, 0);
 
-        return K.MixedPushCapacity(freeCols) + flushCap - reserved;
+        return _settings.MixedPushCapacity(freeCols) + flushCap - reserved;
     }
 
     private int FillAcrossSlots(int sym, int remaining, IEnumerable<int> candidates,

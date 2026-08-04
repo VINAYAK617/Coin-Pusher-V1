@@ -17,7 +17,7 @@ internal static class Sim
     {
         var totals   = new Dictionary<int, int>();
         var board    = Grid.Clone(plan.Spins[0].Board);
-        int fallback = plan.FillSyms.Count > 0 ? plan.FillSyms[0] : K.F_COIN;
+        int fallback = plan.FillSyms.Count > 0 ? plan.FillSyms[0] : Settings.Default.F_COIN;
 
         for (int i = 0; i < plan.Spins.Count; i++)
         {
@@ -36,7 +36,7 @@ internal static class Sim
     // ── Phase 2: Collect ───────────────────────────────────────────────────
     private static void Collect(Cell?[,] board, SpinPlan sp, Dictionary<int, int> totals)
     {
-        for (int col = 0; col < K.COLS; col++)
+        for (int col = 0; col < Settings.Default.COLS; col++)
         {
             if (sp.Flush[col])
             {
@@ -47,13 +47,13 @@ internal static class Sim
             else
             {
                 int push = sp.Push[col];
-                for (int r = K.ROWS - push; r < K.ROWS; r++)
+                for (int r = Settings.Default.ROWS - push; r < Settings.Default.ROWS; r++)
                 {
                     if (board[r, col] != null)
                         Acc(totals, board[r, col]!.Sym, board[r, col]!.Stack);
                 }
 
-                for (int r = K.ROWS - 1; r >= 0; r--)
+                for (int r = Settings.Default.ROWS - 1; r >= 0; r--)
                 {
                     int src = r - push;
                     board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;
@@ -75,9 +75,9 @@ internal static class Sim
         do
         {
             any = false;
-            for (int r = 0; r < K.ROWS; r++)
+            for (int r = 0; r < Settings.Default.ROWS; r++)
             {
-                for (int c = 0; c < K.COLS; c++)
+                for (int c = 0; c < Settings.Default.COLS; c++)
                 {
                     var fc = board[r, c];
                     if (fc?.IsFeat != true) continue;
@@ -86,7 +86,7 @@ internal static class Sim
                                  ? FeatReg.Get(fc.FeatId)
                                  : FeatReg.HasSym(fc.Sym) ? FeatReg.GetSym(fc.Sym) : null;
 
-                    var isWheel = feat?.Id == "WHEEL" || fc.Sym == K.F_WHEEL;
+                    var isWheel = feat?.Id == "WHEEL" || fc.Sym == Settings.Default.F_WHEEL;
                     if (isWheel != wheelPass) continue;
 
                     if (feat == null) { board[r, c] = Cvt(fc); any = true; continue; }
@@ -101,7 +101,7 @@ internal static class Sim
         while (any && board.Cast<Cell?>().Any(x =>
         {
             if (x?.IsFeat != true) return false;
-            var isWheel = x.Sym == K.F_WHEEL || x.FeatId == "WHEEL";
+            var isWheel = x.Sym == Settings.Default.F_WHEEL || x.FeatId == "WHEEL";
             return isWheel == wheelPass;
         }));
     }
@@ -117,28 +117,28 @@ internal static class Sim
     // ── Phase 1: FlatStale ─────────────────────────────────────────────────
     internal static void FlatStale(Cell?[,] board)
     {
-        for (int r = 0; r < K.ROWS; r++)
+        for (int r = 0; r < Settings.Default.ROWS; r++)
         {
-            for (int c = 0; c < K.COLS; c++)
+            for (int c = 0; c < Settings.Default.COLS; c++)
             {
                 var cell = board[r, c];
                 if (cell?.IsFeat != true) continue;
-                board[r, c] = Grid.Norm(cell.CvtSym > 0 && !K.IsFeat(cell.CvtSym)
-                                         ? cell.CvtSym : K.F_COIN);
+                board[r, c] = Grid.Norm(cell.CvtSym > 0 && !Settings.Default.IsFeat(cell.CvtSym)
+                                         ? cell.CvtSym : Settings.Default.F_COIN);
             }
         }
     }
 
     private static void Acc(Dictionary<int, int> d, int sym, int n)
     {
-        if (K.IsFeat(sym)) return;
+        if (Settings.Default.IsFeat(sym)) return;
         d.TryGetValue(sym, out int ex);
         d[sym] = ex + n;
     }
 
     private static Cell Cvt(Cell fc)
     {
-        int id = fc.CvtSym > 0 && !K.IsFeat(fc.CvtSym) ? fc.CvtSym : K.F_COIN;
+        int id = fc.CvtSym > 0 && !Settings.Default.IsFeat(fc.CvtSym) ? fc.CvtSym : Settings.Default.F_COIN;
         return Grid.Norm(id);
     }
 }

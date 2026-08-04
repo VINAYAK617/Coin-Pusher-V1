@@ -17,7 +17,7 @@ internal sealed class WheelFeat : Feat
     private const string FeatureId = "WHEEL";
 
     internal override string Id      => FeatureId;
-    internal override int    FeatSym => K.F_WHEEL;
+    internal override int    FeatSym => Settings.Default.F_WHEEL;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
     {
@@ -27,7 +27,7 @@ internal sealed class WheelFeat : Feat
         // rather than re-deriving a stale ceiling from BaseSpins alone, which would
         // wrongly exclude bonus spins added by EXTRA_SPIN.
         int maxSpin = ctx.MaxSpin;
-        if (spin < ctx.MinSpin || spin >= maxSpin || col >= K.COLS - 1) return null;
+        if (spin < ctx.MinSpin || spin >= maxSpin || col >= Settings.Default.COLS - 1) return null;
         if (ctx.Used.Contains((spin, col))) return null;
 
         int sym = PickSym(ctx);
@@ -55,7 +55,7 @@ internal sealed class WheelFeat : Feat
                 .Sum(f => ctx.Input.Targets.TryGetValue(f.WSym, out int ft)
                     ? Math.Max(1, WMath.Zone(ft, WMath.StackFromValue(f.WN)))
                     : 0);
-        if (existZone + zone > K.COLS - 1) return null;
+        if (existZone + zone > Settings.Default.COLS - 1) return null;
 
         return new PlacedFeat { Id=FeatureId, Spin=spin, Col=col, WSym=sym, WN=n };
     }
@@ -64,13 +64,13 @@ internal sealed class WheelFeat : Feat
     {
         int sym = ctx.Fp.WheelSym, st = ctx.Fp.WheelStack;
         if (sym == 0 || st <= 1) return;
-        for (int r = 0; r < K.ROWS; r++)
+        for (int r = 0; r < Settings.Default.ROWS; r++)
         {
-            for (int c = 0; c < K.COLS; c++)
+            for (int c = 0; c < Settings.Default.COLS; c++)
             {
                 var cell = ctx.Board[r, c];
                 if (cell != null && !cell.IsFeat && cell.Sym == sym)
-                    cell.Stack = Math.Min(K.MAX_COIN_STACK, cell.Stack + st - 1);
+                    cell.Stack = Math.Min(Settings.Default.MAX_COIN_STACK, cell.Stack + st - 1);
             }
         }
     }
@@ -147,7 +147,7 @@ internal sealed class FlushFeat : Feat
     private const string FeatureId = "FLUSH";
 
     internal override string Id       => FeatureId;
-    internal override int    FeatSym  => K.F_COIN;
+    internal override int    FeatSym  => Settings.Default.F_COIN;
     internal override bool   HasToken => false;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
@@ -161,7 +161,7 @@ internal sealed class FlushFeat : Feat
 
     internal override IEnumerable<Cell> Collect(FireCtx ctx)
     {
-        for (int r = 0; r < K.ROWS; r++)
+        for (int r = 0; r < Settings.Default.ROWS; r++)
         {
             var cell = ctx.Board[r, ctx.Col];
             if (cell == null) continue;
@@ -177,11 +177,11 @@ internal sealed class XSpinFeat : Feat
     private const string FeatureId = "EXTRA_SPIN";
 
     internal override string Id      => FeatureId;
-    internal override int    FeatSym => K.F_XSPIN;
+    internal override int    FeatSym => Settings.Default.F_XSPIN;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
     {
-        if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin || ctx.Col >= K.COLS - 1) return null;
+        if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin || ctx.Col >= Settings.Default.COLS - 1) return null;
         if (ctx.Used.Contains((ctx.Spin, ctx.Col))) return null;
         return new PlacedFeat { Id=FeatureId, Spin=ctx.Spin, Col=ctx.Col };
     }
@@ -213,12 +213,12 @@ internal sealed class PrupFeat : Feat
     private const string FeatureId = "PRIZE_UPGRADE";
 
     internal override string Id      => FeatureId;
-    internal override int    FeatSym => K.F_PRUP;
+    internal override int    FeatSym => Settings.Default.F_PRUP;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
     {
         if (ctx.Input.PrizeTiers == null || ctx.Input.PrizeTiers.Count == 0) return null;
-        if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin || ctx.Col >= K.COLS - 1) return null;
+        if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin || ctx.Col >= Settings.Default.COLS - 1) return null;
         if (ctx.Used.Contains((ctx.Spin, ctx.Col))) return null;
 
         // For each declared (symbol, targetTier) pair, find how many PRIZE_UPGRADE tokens

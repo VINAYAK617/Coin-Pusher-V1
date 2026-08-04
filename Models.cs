@@ -93,7 +93,7 @@ internal sealed class PlaceCtx
 
 internal sealed class FireCtx
 {
-    internal Cell?[,] Board { get; init; } = new Cell?[K.ROWS, K.COLS];
+    internal Cell?[,] Board { get; init; } = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
     internal int      Col   { get; init; }
     internal FP       Fp    { get; init; } = new();
 }
@@ -102,9 +102,9 @@ internal sealed class SpinPlan
 {
     internal int                               Spin    { get; init; }
     internal bool                              IsExtra { get; init; }
-    internal Cell?[,]                          Board   { get; init; } = new Cell?[K.ROWS, K.COLS];
-    internal int[]                             Push    { get; init; } = new int[K.COLS];
-    internal bool[]                            Flush   { get; init; } = new bool[K.COLS];
+    internal Cell?[,]                          Board   { get; init; } = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
+    internal int[]                             Push    { get; init; } = new int[Settings.Default.COLS];
+    internal bool[]                            Flush   { get; init; } = new bool[Settings.Default.COLS];
     internal Dictionary<(int, int), Cell>      Spawns  { get; init; } = new();
     internal List<(string Id, int Col, FP Fp)> Tokens  { get; init; } = new();
     internal IReadOnlyDictionary<int, int>     Alloc   { get; init; } = new Dictionary<int, int>();

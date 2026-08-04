@@ -314,8 +314,8 @@ public sealed class LadderCombinator
         if (fillSymbols.Length < 2) return false;
 
         var maxWheels = Math.Min(FeatReg.Cfg["WHEEL"].Max, list.Count);
-        var maxFlushes = K.COLS - 1;
-        var maxExtras = K.MAX_SPINS - K.BASE_SPINS;
+        var maxFlushes = Settings.Default.COLS - 1;
+        var maxExtras = Settings.Default.MAX_SPINS - Settings.Default.BASE_SPINS;
 
         for (var wheels = 0; wheels <= maxWheels; wheels++)
         {
@@ -323,7 +323,7 @@ public sealed class LadderCombinator
             {
                 for (var extras = 0; extras <= maxExtras; extras++)
                 {
-                    var totalSpins = K.BASE_SPINS + extras;
+                    var totalSpins = Settings.Default.BASE_SPINS + extras;
                     var wheelFireSpins = Math.Min(wheels, Math.Max(0, totalSpins - 2));
                     var physWins = CapacityAnalyzer.PhysicalWins(targets, wheels);
                     var tokenLoad = wheels + extras + requiredPrizeUpgrades;
@@ -477,7 +477,7 @@ public sealed class LadderCombinator
         new()
         {
             Targets = new Dictionary<int, int>(),
-            BaseSpins = K.BASE_SPINS,
+            BaseSpins = Settings.Default.BASE_SPINS,
             Required = new Dictionary<string, int>(),
             PrizeTiers = null,
             PrizeValues = BuildPrizeValues(Enumerable.Range(1, _rows.Count)),
@@ -520,7 +520,7 @@ public sealed class LadderCombinator
     }
 
     /// <summary>
-    /// BaseSpins is always fixed at K.BASE_SPINS (=5) — never computed from physWins
+    /// BaseSpins is always fixed at Settings.Default.BASE_SPINS (=5) — never computed from physWins
     /// or filler capacity. Any additional spin capacity needed comes from the
     /// EXTRA_SPIN feature (decided later, in Planner.ResolveFeatures, alongside
     /// WHEEL/FLUSH), not from this method.
@@ -529,7 +529,7 @@ public sealed class LadderCombinator
     {
         _ = target;
         _ = tier;
-        return K.BASE_SPINS;
+        return Settings.Default.BASE_SPINS;
     }
 
     /// <summary>Same fixed baseline for bundled multi-symbol tickets.</summary>
@@ -538,7 +538,7 @@ public sealed class LadderCombinator
         _ = physWins;
         _ = tier;
         _ = fillSymCount;
-        return K.BASE_SPINS;
+        return Settings.Default.BASE_SPINS;
     }
 
     private int SymbolPoolSizeFor(int targetCount) =>
