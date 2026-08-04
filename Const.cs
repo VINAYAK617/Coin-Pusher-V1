@@ -34,7 +34,8 @@ internal static class K
     internal const int MAX_WHEEL_STACK_VALUE = 3;
     internal const double P_WHEEL_STACK_VALUE_1 = 0.45;
     internal const double P_WHEEL_STACK_VALUE_2 = 0.35;
-    internal const double P_WHEEL_REPEAT_OPTIONAL = 0.35;
+    internal static readonly double P_WHEEL_REPEAT_OPTIONAL =
+        Probability("COINPUSHER_P_WHEEL_REPEAT_OPTIONAL", 0.35);
 
     internal static readonly double W_EXP_BALANCED =
         Weight("COINPUSHER_W_EXP_BALANCED", 0.30);
