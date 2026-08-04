@@ -45,6 +45,7 @@ var wheelStackValues = new Dictionary<int, int>();
 var retriggerPairs = new Dictionary<string, int>();
 var mixedScreens = 0;
 var all123Screens = 0;
+var all1234Screens = 0;
 var monotonicScreens = 0;
 var flatScreens = 0;
 var finalAnyFeature = 0;
@@ -90,6 +91,7 @@ for (var i = 0; i < count; i++)
             foreach (var push in normalPushes) Add(pushCounts, push);
             if (normalPushes.Distinct().Count() > 1) mixedScreens++;
             if (normalPushes.Contains(1) && normalPushes.Contains(2) && normalPushes.Contains(3)) all123Screens++;
+            if (normalPushes.Contains(1) && normalPushes.Contains(2) && normalPushes.Contains(3) && normalPushes.Contains(4)) all1234Screens++;
             if (normalPushes.Length > 1 && IsMonotonic(normalPushes)) monotonicScreens++;
             if (normalPushes.Length > 1 && normalPushes.Distinct().Count() == 1) flatScreens++;
 
@@ -157,6 +159,7 @@ Console.WriteLine($"retriggerPairs={FormatStringMap(retriggerPairs)}");
 Console.WriteLine($"pushCounts={FormatIntMap(pushCounts)}");
 Console.WriteLine($"mixedScreens={mixedScreens}");
 Console.WriteLine($"all123Screens={all123Screens}");
+Console.WriteLine($"all1234Screens={all1234Screens}");
 Console.WriteLine($"monotonicScreens={monotonicScreens}");
 Console.WriteLine($"flatScreens={flatScreens}");
 Console.WriteLine($"finalAnyFeature={finalAnyFeature}");

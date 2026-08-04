@@ -628,7 +628,12 @@ internal sealed class Builder
 
     private static int MinimumMixedPushTotal(int freeCols)
     {
-        if (freeCols >= 3)
+        if (freeCols >= 4)
+        {
+            return K.MIN_PUSH * freeCols + 6;
+        }
+
+        if (freeCols == 3)
         {
             return K.MIN_PUSH * freeCols + 3;
         }

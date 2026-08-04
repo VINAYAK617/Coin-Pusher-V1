@@ -73,6 +73,13 @@ internal static class Verifier
         var topPrizeSym = TopPrizeSymbol(plan);
         if (topPrizeSym > 0)
         {
+            if (plan.Targets.ContainsKey(topPrizeSym)
+                && plan.Spins[^1].Alloc.GetValueOrDefault(topPrizeSym) <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"VERIFY FAIL top prize sym={topPrizeSym} does not complete on final spin");
+            }
+
             var upgradesTopPrize = plan.Spins
                 .SelectMany(spin => spin.Spawns.Values)
                 .Any(cell => cell.IsFeat && cell.Sym == K.F_PRUP && cell.Fp?.PrupSym == topPrizeSym);

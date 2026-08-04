@@ -9,7 +9,7 @@ internal static class K
     internal const int ROWS       = 5;
     internal const int COLS       = 5;
     internal const int MIN_PUSH   = 1;    // minimum rows collected per column per spin
-    internal const int MAX_PUSH   = 3;    // maximum rows collected per column per spin
+    internal const int MAX_PUSH   = 4;    // maximum rows collected per column per spin
     internal const int FILL_CAP   = 20;   // conservative default filler threshold
 
     internal static int MixedPushCapacity(int freeCols)

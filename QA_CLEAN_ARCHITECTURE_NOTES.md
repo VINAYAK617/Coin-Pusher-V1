@@ -13,7 +13,7 @@
 - New game must reset board state, spinner state, and all prior feature state.
 - Bonus features are processed before coin push.
 - Feature order: Extra Go / Prize Upgrade before Wheel, and Wheel last when multiple features are revealed.
-- Spinner values are normal pushes 1-3 or full-column PUSH.
+- Spinner values are normal pushes 1-4 or full-column PUSH.
 - Multiple PUSH columns in one turn must collect without missing or duplicating coins.
 - Board rotates clockwise 90 degrees after every turn.
 - Every coin color must remain a valid configured symbol.

@@ -103,10 +103,14 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CapacityAnalyzerCalculatesCapacityAndFeasibility()
     {
-        Assert.AreEqual(60, CapacityAnalyzer.TotalCapacity(5, 0, 0));
-        Assert.AreEqual(64, CapacityAnalyzer.TotalCapacity(5, 2, 0));
-        Assert.AreEqual(64, CapacityAnalyzer.TotalCapacity(5, 2, 1));
-        Assert.AreEqual(44, CapacityAnalyzer.FillerBudget(20, 5, 0, 2, 1));
+        var normalCapacity = K.BASE_SPINS * K.MixedPushCapacity(K.COLS);
+        var flushCapacity = normalCapacity
+            + 2 * (K.ROWS + K.MixedPushCapacity(K.COLS - 1) - K.MixedPushCapacity(K.COLS));
+
+        Assert.AreEqual(normalCapacity, CapacityAnalyzer.TotalCapacity(5, 0, 0));
+        Assert.AreEqual(flushCapacity, CapacityAnalyzer.TotalCapacity(5, 2, 0));
+        Assert.AreEqual(flushCapacity, CapacityAnalyzer.TotalCapacity(5, 2, 1));
+        Assert.AreEqual(flushCapacity - 20, CapacityAnalyzer.FillerBudget(20, 5, 0, 2, 1));
         Assert.IsTrue(CapacityAnalyzer.IsFeasible(20, 5, 4, tokenLoad: 0, flushTokens: 2, wheelFireSpins: 1));
         Assert.IsTrue(CapacityAnalyzer.IsFeasible(20, 5, new[] { 1, 5, 6 }, tokenLoad: 0, flushTokens: 2, wheelFireSpins: 1));
         Assert.AreEqual(0, CapacityAnalyzer.MinExtraSpins(20, 4));

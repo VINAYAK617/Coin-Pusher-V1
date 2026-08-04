@@ -103,6 +103,24 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
+    public void TopPrizeTargetCompletesOnFinalTurn()
+    {
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int> { [1] = 20, [6] = 30 },
+            BaseSpins = 5,
+            PrizeValues = PrizeValues(6, tiers: 3),
+            MaxSym = 8,
+        };
+
+        var plan = new Planner(input, seed: 10000).Plan();
+
+        Assert.IsTrue(plan.Spins[^1].Alloc.GetValueOrDefault(6) > 0);
+        Assert.AreEqual(30, Sim.Run(plan)[6]);
+        AssertValid(JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(TicketSerializer.ToJson(plan))!);
+    }
+
+    [TestMethod]
     public void LadderResolveReturnsCandidateAndPrizeValuesForUpgradePath()
     {
         var combinator = new LadderCombinator(StandardRows(), seed: 12);

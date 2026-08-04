@@ -24,11 +24,14 @@ internal sealed class Scheduler
 
     internal Scheduler(IReadOnlyDictionary<int, int> targets,
                        List<PlacedFeat> placed, IReadOnlyList<WLock> locks, List<string> log,
-                       IEnumerable<int>? winSyms = null)
+                       IEnumerable<int>? winSyms = null,
+                       int finalAnchorSym = 0)
     {
         _targets=targets; _placed=placed; _locks=locks; _log=log;
         _winSyms = winSyms != null ? new HashSet<int>(winSyms) : targets.Keys.ToHashSet();
-        _finalAnchorSym = _winSyms.OrderBy(sym => sym).FirstOrDefault();
+        _finalAnchorSym = finalAnchorSym > 0 && _winSyms.Contains(finalAnchorSym)
+            ? finalAnchorSym
+            : _winSyms.OrderBy(sym => sym).FirstOrDefault();
     }
 
     internal List<Dictionary<int, int>> Schedule(int totalSpins)

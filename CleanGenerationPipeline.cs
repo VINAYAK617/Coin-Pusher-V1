@@ -779,31 +779,53 @@ internal sealed class AllocationStage
     internal AllocationPlan Resolve(PlacementPlan placements)
     {
         var features = placements.Features;
+        var finalAnchorSym = FinalAnchorSymbol(features);
         var allocations = new Scheduler(
                 features.AllocationTargets,
                 placements.PlacedFeatures.ToList(),
                 placements.WheelLocks,
                 features.Objectives.Log,
-                features.Objectives.WinSymbols)
+                features.Objectives.WinSymbols,
+                finalAnchorSym)
             .Schedule(placements.TotalSpins);
-        EnsureFinalWinAllocation(allocations, placements, features.Objectives.WinSymbols, features.Objectives.Log);
+        EnsureFinalWinAllocation(allocations, placements, features.Objectives.WinSymbols, finalAnchorSym, features.Objectives.Log);
 
         return new AllocationPlan(placements, allocations);
+    }
+
+    private static int FinalAnchorSymbol(FeaturePlan features)
+    {
+        var topPrizeSym = TopPrizeSymbol(features.PrizeValues);
+        return topPrizeSym > 0 && features.Objectives.WinSymbols.Contains(topPrizeSym)
+            ? topPrizeSym
+            : features.Objectives.WinSymbols.OrderBy(sym => sym).FirstOrDefault();
     }
 
     private static void EnsureFinalWinAllocation(
         IReadOnlyList<Dictionary<int, int>> allocations,
         PlacementPlan placements,
         IReadOnlyList<int> winSymbols,
+        int finalAnchorSym,
         List<string> log)
     {
         if (allocations.Count == 0) return;
         var finalSlot = allocations.Count - 1;
         var final = allocations[finalSlot];
-        if (winSymbols.Any(sym => final.GetValueOrDefault(sym) > 0)) return;
+        var requiredFinalSym = finalAnchorSym > 0 && winSymbols.Contains(finalAnchorSym)
+            ? finalAnchorSym
+            : 0;
+        if (requiredFinalSym > 0)
+        {
+            if (final.GetValueOrDefault(requiredFinalSym) > 0) return;
+        }
+        else if (winSymbols.Any(sym => final.GetValueOrDefault(sym) > 0)) return;
+
         if (FinalSlotCapacity(placements, finalSlot) - final.Values.Sum() <= 0) return;
 
-        foreach (var sym in winSymbols.OrderBy(sym => sym))
+        var candidates = requiredFinalSym > 0
+            ? new[] { requiredFinalSym }
+            : winSymbols.OrderBy(sym => sym).ToArray();
+        foreach (var sym in candidates)
         {
             for (var slot = finalSlot - 1; slot >= 0; slot--)
             {
@@ -816,6 +838,16 @@ internal sealed class AllocationStage
                 return;
             }
         }
+    }
+
+    private static int TopPrizeSymbol(IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>> prizeValues)
+    {
+        if (prizeValues.Count == 0) return 0;
+        return prizeValues
+            .Select(kv => (Sym: kv.Key, Value: kv.Value.Values.DefaultIfEmpty(0m).Max()))
+            .OrderByDescending(x => x.Value)
+            .ThenBy(x => x.Sym)
+            .First().Sym;
     }
 
     private static int FinalSlotCapacity(PlacementPlan placements, int finalSlot)
