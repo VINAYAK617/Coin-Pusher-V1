@@ -69,6 +69,26 @@ internal static class K
     // What these DO control: once a ticket is already solvable on its own, how
     // often the engine still adds the feature anyway, purely for visual variety.
 
+    /// <summary>Ticket-level chance that the game may receive optional/visual
+    /// bonus features at all. Compulsory features bypass this gate.</summary>
+    internal static readonly double P_OPTIONAL_FEATURE_TICKET =
+        Probability("COINPUSHER_P_OPTIONAL_FEATURE_TICKET", 1.0 / 30.0);
+
+    /// <summary>Within an optional-feature ticket, chance WHEEL is the selected
+    /// special flavor. This is ticket-level rarity, not per-symbol frequency.</summary>
+    internal static readonly double P_OPTIONAL_TICKET_WHEEL =
+        Probability("COINPUSHER_P_OPTIONAL_TICKET_WHEEL", 1.0 / 3.0);
+
+    /// <summary>Within an optional-feature ticket, chance FLUSH/PUSH is the selected
+    /// special flavor.</summary>
+    internal static readonly double P_OPTIONAL_TICKET_FLUSH =
+        Probability("COINPUSHER_P_OPTIONAL_TICKET_FLUSH", 1.0 / 3.0);
+
+    /// <summary>Within an optional-feature ticket, chance near-miss PRIZE_UPGRADE
+    /// is the selected visual flavor.</summary>
+    internal static readonly double P_OPTIONAL_TICKET_PRIZE_UPGRADE =
+        Probability("COINPUSHER_P_OPTIONAL_TICKET_PRIZE_UPGRADE", 1.0 / 4.0);
+
     /// <summary>Per eligible WIN symbol, chance WHEEL is added even though the
     /// ticket doesn't need it for feasibility. Win symbols with target &lt; 10 are
     /// never offered this — too small to benefit meaningfully from compression.</summary>

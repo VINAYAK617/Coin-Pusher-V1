@@ -43,10 +43,13 @@ internal sealed record ObjectivePlan(
     IReadOnlyDictionary<int, int> NonWinTargets,
     IReadOnlyDictionary<int, int> NonWinPrizeTiers,
     TicketExperienceProfile ExperienceProfile,
+    OptionalFeatureBudget OptionalFeatures,
     int PlanningPressure,
     int Seed,
     Random Rng,
     List<string> Log);
+
+internal sealed record OptionalFeatureBudget(bool AllowWheel, bool AllowFlush, bool AllowNearMissPrizeUpgrade);
 
 internal sealed record FeaturePlan(
     ObjectivePlan Objectives,
@@ -76,9 +79,10 @@ internal sealed class ObjectiveStage
             .ToArray();
         var nearMissCandidates = fillSymbols;
         var experienceProfile = PickExperienceProfile(request.Rng);
+        var optionalFeatures = PickOptionalFeatureBudget(input, request.Rng, request.PlanningPressure, experienceProfile);
 
         var nonWinTargets = ResolveNonWinTargets(input, nearMissCandidates, request.Rng, request.PlanningPressure, experienceProfile);
-        var nonWinPrizeTiers = ResolveNonWinPrizeTiers(input, nonWinTargets, request.Rng, request.PlanningPressure, experienceProfile);
+        var nonWinPrizeTiers = ResolveNonWinPrizeTiers(input, nonWinTargets, request.Rng, request.PlanningPressure, experienceProfile, optionalFeatures.AllowNearMissPrizeUpgrade);
 
         request.Log.Add($"experience={experienceProfile} wins=[{string.Join(",", winSymbols)}] fills=[{string.Join(",", fillSymbols)}]");
         if (nonWinTargets.Count > 0)
@@ -100,6 +104,7 @@ internal sealed class ObjectiveStage
             nonWinTargets,
             nonWinPrizeTiers,
             experienceProfile,
+            optionalFeatures,
             request.PlanningPressure,
             request.Seed,
             request.Rng,
@@ -314,11 +319,14 @@ internal sealed class ObjectiveStage
         IReadOnlyDictionary<int, int> nonWinTargets,
         Random rng,
         int planningPressure,
-        TicketExperienceProfile experienceProfile)
+        TicketExperienceProfile experienceProfile,
+        bool allowOptionalNearMissPrizeUpgrade)
     {
         if (input.NonWinPrizeTiers != null)
             return input.NonWinPrizeTiers.ToDictionary(kv => kv.Key, kv => kv.Value);
         if (planningPressure >= 1)
+            return new Dictionary<int, int>();
+        if (!allowOptionalNearMissPrizeUpgrade)
             return new Dictionary<int, int>();
 
         var eligible = nonWinTargets
@@ -333,6 +341,70 @@ internal sealed class ObjectiveStage
             return new Dictionary<int, int>();
 
         return new Dictionary<int, int> { [eligible[0]] = 1 };
+    }
+
+    private static OptionalFeatureBudget PickOptionalFeatureBudget(
+        MathInput input,
+        Random rng,
+        int planningPressure,
+        TicketExperienceProfile experienceProfile)
+    {
+        if (planningPressure >= 1)
+            return new OptionalFeatureBudget(false, false, input.NonWinPrizeTiers != null);
+
+        var ticketChance = ProfiledProbability(K.P_OPTIONAL_FEATURE_TICKET, experienceProfile);
+        if (rng.NextDouble() >= ticketChance)
+            return new OptionalFeatureBudget(false, false, input.NonWinPrizeTiers != null);
+
+        var flavor = PickOptionalFeatureFlavor(rng, experienceProfile);
+        var allowWheel = flavor == OptionalFeatureFlavor.Wheel;
+        var allowFlush = flavor == OptionalFeatureFlavor.Flush;
+        var allowNearMissPrizeUpgrade = input.NonWinPrizeTiers != null
+            || flavor == OptionalFeatureFlavor.NearMissPrizeUpgrade;
+
+        return new OptionalFeatureBudget(allowWheel, allowFlush, allowNearMissPrizeUpgrade);
+    }
+
+    private enum OptionalFeatureFlavor
+    {
+        Wheel,
+        Flush,
+        NearMissPrizeUpgrade,
+    }
+
+    private static OptionalFeatureFlavor PickOptionalFeatureFlavor(
+        Random rng,
+        TicketExperienceProfile experienceProfile)
+    {
+        var weighted = new[]
+        {
+            (Flavor: OptionalFeatureFlavor.Wheel, Weight: ProfiledProbability(
+                K.P_OPTIONAL_TICKET_WHEEL,
+                experienceProfile,
+                wheel: true,
+                repeatWheel: true)),
+            (Flavor: OptionalFeatureFlavor.Flush, Weight: ProfiledProbability(
+                K.P_OPTIONAL_TICKET_FLUSH,
+                experienceProfile,
+                flush: true)),
+            (Flavor: OptionalFeatureFlavor.NearMissPrizeUpgrade, Weight: ProfiledProbability(
+                K.P_OPTIONAL_TICKET_PRIZE_UPGRADE,
+                experienceProfile,
+                nearMiss: true)),
+        }.Where(item => item.Weight > 0).ToArray();
+
+        if (weighted.Length == 0) return OptionalFeatureFlavor.Flush;
+
+        var total = weighted.Sum(item => item.Weight);
+        var roll = rng.NextDouble() * total;
+        var acc = 0.0;
+        foreach (var item in weighted)
+        {
+            acc += item.Weight;
+            if (roll <= acc) return item.Flavor;
+        }
+
+        return weighted[^1].Flavor;
     }
 
     private static bool HasUpgradeTier(MathInput input, int sym, int tier) =>
@@ -475,8 +547,9 @@ internal sealed class FeaturePlanStage
         var flushes = plan.Flushes;
         var extras = plan.Extras;
         var wheelOrder = BuildMandatoryWheelOrder(objectives, wheels);
+        var optionalBudget = objectives.OptionalFeatures;
 
-        if (objectives.PlanningPressure == 0)
+        if (optionalBudget.AllowWheel)
         {
             foreach (var sym in objectives.WinSymbols
                          .OrderByDescending(s => input.Targets[s])
@@ -500,7 +573,7 @@ internal sealed class FeaturePlanStage
             }
         }
 
-        if (objectives.PlanningPressure == 0 && wheels > 0)
+        if (optionalBudget.AllowWheel && wheels > 0)
         {
             foreach (var sym in RepeatWheelCandidates(objectives.SourceInput, wheelOrder))
             {
@@ -523,7 +596,7 @@ internal sealed class FeaturePlanStage
         }
 
         var wheelBudget = FeatReg.Cfg["WHEEL"].Max - wheels;
-        if (wheelBudget > 0 && objectives.PlanningPressure == 0)
+        if (wheelBudget > 0 && optionalBudget.AllowWheel)
         {
             foreach (var sym in objectives.NonWinTargets.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).Take(1))
             {
@@ -545,7 +618,7 @@ internal sealed class FeaturePlanStage
             }
         }
 
-        if (objectives.PlanningPressure == 0)
+        if (optionalBudget.AllowFlush)
         {
             while (flushes < K.COLS - 1)
             {
@@ -796,9 +869,7 @@ internal sealed class AllocationStage
     private static int FinalAnchorSymbol(FeaturePlan features)
     {
         var topPrizeSym = TopPrizeSymbol(features.PrizeValues);
-        return topPrizeSym > 0
-            && features.PrizeTiers.ContainsKey(topPrizeSym)
-            && features.Objectives.WinSymbols.Contains(topPrizeSym)
+        return topPrizeSym > 0 && features.Objectives.WinSymbols.Contains(topPrizeSym)
             ? topPrizeSym
             : features.Objectives.WinSymbols.OrderBy(sym => sym).FirstOrDefault();
     }
