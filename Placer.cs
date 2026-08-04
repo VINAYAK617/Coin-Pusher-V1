@@ -49,7 +49,9 @@ internal sealed class Placer
             // instances at 20% each, completely bypassing that decision. This was a
             // real, confirmed bug: ~23% of tickets received EXTRA_SPIN awards
             // ResolveFeatures never decided were needed, occasionally stacking the
-            // full 3 awards on a ticket that needed zero. Skip entirely when req==0.
+            // full 3 awards on a ticket that needed zero. The planner may now add
+            // one rare no-win tease Extra Go, but it still arrives here as req>0;
+            // skip entirely when req==0.
             if (id == "EXTRA_SPIN" && req == 0) continue;
 
             if ((id == "WHEEL" || id == "FLUSH" || id == "EXTRA_SPIN") && req > 0)

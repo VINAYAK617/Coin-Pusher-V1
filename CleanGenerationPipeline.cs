@@ -638,11 +638,46 @@ internal sealed class FeaturePlanStage
             }
         }
 
+        if (ShouldAddNoWinExtraGo(objectives, input, plannedFillerLoad, fixedTokenLoad, wheels, flushes, extras))
+        {
+            extras++;
+            objectives.Log.Add("optionalNoWinExtraGo=1");
+        }
+
         SetRequired(required, "WHEEL", wheels);
         SetRequired(required, "FLUSH", flushes);
         SetRequired(required, "EXTRA_SPIN", extras);
 
         return (required, wheelOrder);
+    }
+
+    private static bool ShouldAddNoWinExtraGo(
+        ObjectivePlan objectives,
+        MathInput input,
+        int plannedFillerLoad,
+        int fixedTokenLoad,
+        int wheels,
+        int flushes,
+        int extras)
+    {
+        if (objectives.PlanningPressure > 0) return false;
+        if (input.Targets.Count != 0) return false;
+        if (input.Required.GetValueOrDefault("EXTRA_SPIN") > 0) return false;
+        if (extras >= K.MAX_SPINS - K.BASE_SPINS) return false;
+
+        var chance = ObjectiveStage.ProfiledProbability(
+            K.P_NOWIN_EXTRA_GO_OPTIONAL,
+            objectives.ExperienceProfile,
+            nearMiss: true);
+        if (objectives.Rng.NextDouble() >= chance) return false;
+
+        return IsFeatureShapeFeasible(
+            input,
+            plannedFillerLoad,
+            fixedTokenLoad,
+            wheels,
+            flushes,
+            extras + 1);
     }
 
     private static IEnumerable<int> RepeatWheelCandidates(MathInput input, IReadOnlyList<int> wheelOrder)

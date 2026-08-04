@@ -89,6 +89,12 @@ internal static class K
     internal static readonly double P_OPTIONAL_TICKET_PRIZE_UPGRADE =
         Probability("COINPUSHER_P_OPTIONAL_TICKET_PRIZE_UPGRADE", 1.0 / 4.0);
 
+    /// <summary>Rare 0-win/no-win ticket chance to add exactly one Extra Go as
+    /// a tease. This is independent from math-required EXTRA_SPIN and remains
+    /// feasibility checked before use.</summary>
+    internal static readonly double P_NOWIN_EXTRA_GO_OPTIONAL =
+        Probability("COINPUSHER_P_NOWIN_EXTRA_GO_OPTIONAL", 1.0 / 30.0);
+
     /// <summary>Per eligible WIN symbol, chance WHEEL is added even though the
     /// ticket doesn't need it for feasibility. Win symbols with target &lt; 10 are
     /// never offered this — too small to benefit meaningfully from compression.</summary>
