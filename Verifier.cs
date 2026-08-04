@@ -73,7 +73,8 @@ internal static class Verifier
         var topPrizeSym = TopPrizeSymbol(plan);
         if (topPrizeSym > 0)
         {
-            if (plan.Targets.ContainsKey(topPrizeSym)
+            if (plan.PrizeTiers.ContainsKey(topPrizeSym)
+                && plan.Targets.ContainsKey(topPrizeSym)
                 && plan.Spins[^1].Alloc.GetValueOrDefault(topPrizeSym) <= 0)
             {
                 throw new InvalidOperationException(

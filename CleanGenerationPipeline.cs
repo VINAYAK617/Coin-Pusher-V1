@@ -796,7 +796,9 @@ internal sealed class AllocationStage
     private static int FinalAnchorSymbol(FeaturePlan features)
     {
         var topPrizeSym = TopPrizeSymbol(features.PrizeValues);
-        return topPrizeSym > 0 && features.Objectives.WinSymbols.Contains(topPrizeSym)
+        return topPrizeSym > 0
+            && features.PrizeTiers.ContainsKey(topPrizeSym)
+            && features.Objectives.WinSymbols.Contains(topPrizeSym)
             ? topPrizeSym
             : features.Objectives.WinSymbols.OrderBy(sym => sym).FirstOrDefault();
     }

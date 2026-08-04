@@ -445,7 +445,7 @@ public static class TicketChecker
                             {
                                 var cell = board[rr, cc];
                                 if (cell != null && !cell.IsFeat && cell.Sym == sym)
-                                    cell.Stack = multiplier;
+                                    cell.Stack = Math.Min(K.MAX_COIN_STACK, cell.Stack + multiplier - 1);
                             }
                         }
 

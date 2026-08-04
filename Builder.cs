@@ -599,16 +599,7 @@ internal sealed class Builder
             targetTotal = Math.Min(maxTotal, targetTotal + ProfilePushLift(maxTotal - targetTotal));
         }
 
-        var best = BuildRandomPushComposition(freeCols, targetTotal);
-        for (var attempt = 0; attempt < 64; attempt++)
-        {
-            var candidate = BuildRandomPushComposition(freeCols, targetTotal);
-            if (PushShapeScore(candidate) > PushShapeScore(best))
-            {
-                best = candidate;
-            }
-        }
-
+        var best = BuildBalancedPushComposition(freeCols, targetTotal);
         return RandomizePushOrder(best);
     }
 
@@ -643,23 +634,61 @@ internal sealed class Builder
             : K.MIN_PUSH * freeCols;
     }
 
-    private int[] BuildRandomPushComposition(int freeCols, int targetTotal)
+    private int[] BuildBalancedPushComposition(int freeCols, int targetTotal)
+    {
+        var candidates = new List<int[]>();
+        var current = new int[freeCols];
+        CollectPushCompositions(0, targetTotal, current, candidates);
+        if (candidates.Count == 0)
+            return BuildFallbackPushComposition(freeCols, targetTotal);
+
+        var bestScore = candidates.Max(PushShapeScore);
+        var best = candidates
+            .Where(candidate => PushShapeScore(candidate) == bestScore)
+            .OrderBy(_ => _rng.Next())
+            .First();
+        return best;
+    }
+
+    private static void CollectPushCompositions(
+        int index,
+        int remaining,
+        int[] current,
+        List<int[]> candidates)
+    {
+        var left = current.Length - index;
+        if (left == 0)
+        {
+            if (remaining == 0)
+                candidates.Add(current.ToArray());
+            return;
+        }
+
+        for (var value = K.MIN_PUSH; value <= K.MAX_PUSH; value++)
+        {
+            var nextRemaining = remaining - value;
+            if (nextRemaining < (left - 1) * K.MIN_PUSH) continue;
+            if (nextRemaining > (left - 1) * K.MAX_PUSH) continue;
+            current[index] = value;
+            CollectPushCompositions(index + 1, nextRemaining, current, candidates);
+        }
+    }
+
+    private int[] BuildFallbackPushComposition(int freeCols, int targetTotal)
     {
         var values = Enumerable.Repeat(K.MIN_PUSH, freeCols).ToArray();
         var remaining = targetTotal - values.Sum();
-
-        while (remaining > 0)
+        var index = 0;
+        while (remaining > 0 && values.Any(value => value < K.MAX_PUSH))
         {
-            var candidates = Enumerable.Range(0, freeCols)
-                .Where(i => values[i] < K.MAX_PUSH)
-                .ToArray();
-            if (candidates.Length == 0) break;
+            if (values[index] < K.MAX_PUSH)
+            {
+                values[index]++;
+                remaining--;
+            }
 
-            var idx = candidates[_rng.Next(candidates.Length)];
-            values[idx]++;
-            remaining--;
+            index = (index + 1) % values.Length;
         }
-
         return values;
     }
 
@@ -667,9 +696,18 @@ internal sealed class Builder
     {
         var distinct = values.Distinct().Count();
         var maxFrequency = values.GroupBy(v => v).Max(g => g.Count());
-        var highPushes = values.Count(v => v == K.MAX_PUSH);
-        var score = distinct * 100 + highPushes * 12 - maxFrequency * 10;
-        if (IsMonotonic(values)) score -= 50;
+        var allValues = Enumerable.Range(K.MIN_PUSH, K.MAX_PUSH - K.MIN_PUSH + 1)
+            .Count(value => values.Contains(value));
+        var score = allValues * 500
+            + distinct * 120
+            + values.Count(v => v == 3) * 45
+            + values.Count(v => v == 2) * 35
+            + values.Count(v => v == 4) * 30
+            + values.Count(v => v == 1) * 25
+            - maxFrequency * 20
+            - Math.Abs(values.Count(v => v == 3) - values.Count(v => v == 4)) * 15
+            - Math.Abs(values.Count(v => v == 2) - values.Count(v => v == 3)) * 10;
+        if (IsMonotonic(values)) score -= 200;
         return score;
     }
 
