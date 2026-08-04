@@ -253,6 +253,48 @@ public sealed class GameLogicCoverageTests
         Assert.IsTrue(report.FailCount > 0);
     }
 
+    [TestMethod]
+    public void CheckerAcceptsFullFrameworkTicketObject()
+    {
+        var gameData = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int>(),
+            BaseSpins = 5,
+            MaxSym = 6,
+        }, seed: 30303);
+        var ticket = new Ticket
+        {
+            ErrorCode = 0,
+            Error = "success",
+            Game = new TicketGameEnvelope
+            {
+                PublicState = new TicketPublicState
+                {
+                    Game = new TicketPublicGame
+                    {
+                        Parameters = new TicketParameters
+                        {
+                            Stake = 1m,
+                            CashWin = 0m,
+                            StakeMultiplier = 0m,
+                            IsWinner = false,
+                        },
+                        GameData = gameData,
+                    },
+                },
+                PrivateState = new TicketPrivateState
+                {
+                    Stake = 1m,
+                    PendingCashWin = 0m,
+                },
+            },
+        };
+
+        var result = TicketChecker.CheckObject(ticket);
+
+        Assert.IsTrue(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+    }
+
     private static TicketSerializer.TicketDto PlanTicket(MathInput input, int seed)
     {
         var plan = new Planner(input, seed).Plan();

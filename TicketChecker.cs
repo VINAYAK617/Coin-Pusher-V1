@@ -89,10 +89,10 @@ public static class TicketChecker
             return result;
         }
 
-        TicketDto? ticket;
+        Ticket? ticket;
         try
         {
-            ticket = JsonConvert.DeserializeObject<TicketDto>(json);
+            ticket = JsonConvert.DeserializeObject<Ticket>(json);
         }
         catch (JsonException ex)
         {
@@ -104,8 +104,31 @@ public static class TicketChecker
         return CheckTicket(ticket).ToResult();
     }
 
+    public static TicketCheckResult CheckObject(Ticket? ticket) =>
+        CheckTicket(ticket).ToResult();
+
     public static TicketCheckResult CheckObject(TicketDto? ticket) =>
         CheckTicket(ticket).ToResult();
+
+    public static Report CheckTicket(Ticket? ticket)
+    {
+        var report = new Report();
+        void Add(string cat, string name, Status s, string detail) =>
+            report.Checks.Add(new CheckItem { Category = cat, Name = name, Result = s, Detail = detail });
+
+        var game = ticket?.Game?.PublicState?.Game;
+        var gameData = game?.GameData;
+        if (gameData == null)
+        {
+            Add("Ticket", "Coin Pusher GameData present", Status.Fail,
+                "ticket.game.publicState.game.GameData is missing; cannot run Coin Pusher logic validation");
+            return report;
+        }
+
+        Merge(report, CheckTicket(gameData));
+        CheckFrameworkLogicValues(ticket, gameData, Add);
+        return report;
+    }
 
     public static Report CheckTicket(TicketDto? t)
     {
@@ -367,6 +390,78 @@ public static class TicketChecker
     // ═══════════════════════════════════════════════════════════════════════
     // INDEPENDENT REPLAY — deliberately separate from Sim.cs
     // ═══════════════════════════════════════════════════════════════════════
+
+    private static void Merge(Report target, Report source)
+    {
+        target.Checks.AddRange(source.Checks);
+    }
+
+    private static void CheckFrameworkLogicValues(
+        Ticket? ticket,
+        TicketDto gameData,
+        Action<string, string, Status, string> add)
+    {
+        var parameters = ticket?.Game?.PublicState?.Game?.Parameters;
+        if (parameters == null)
+        {
+            add("Framework", "Parameters available for payout checks", Status.Warning,
+                "Parameters is missing, so CashWin/Stake/IsWinner consistency could not be checked");
+            return;
+        }
+
+        if (parameters.Stake <= 0m)
+        {
+            add("Framework", "Stake positive", Status.Fail,
+                $"Parameters.Stake must be positive, found {parameters.Stake}");
+        }
+        else
+        {
+            var expectedMultiplier = parameters.CashWin / parameters.Stake;
+            if (parameters.StakeMultiplier != expectedMultiplier)
+                add("Framework", "StakeMultiplier matches CashWin / Stake", Status.Fail,
+                    $"StakeMultiplier={parameters.StakeMultiplier}, expected {expectedMultiplier} from CashWin={parameters.CashWin} / Stake={parameters.Stake}");
+            else
+                add("Framework", "StakeMultiplier matches CashWin / Stake", Status.Pass,
+                    $"{parameters.StakeMultiplier}");
+        }
+
+        var expectedWinner = parameters.CashWin > 0m;
+        if (parameters.IsWinner != expectedWinner)
+            add("Framework", "IsWinner matches CashWin", Status.Fail,
+                $"IsWinner={parameters.IsWinner}, but CashWin={parameters.CashWin}");
+        else
+            add("Framework", "IsWinner matches CashWin", Status.Pass,
+                $"{parameters.IsWinner}");
+
+        var privateState = ticket?.Game?.PrivateState;
+        if (privateState != null)
+        {
+            if (privateState.PendingCashWin != parameters.CashWin)
+                add("Framework", "PendingCashWin matches CashWin", Status.Fail,
+                    $"privateState.PendingCashWin={privateState.PendingCashWin}, Parameters.CashWin={parameters.CashWin}");
+            else
+                add("Framework", "PendingCashWin matches CashWin", Status.Pass,
+                    $"{privateState.PendingCashWin}");
+
+            if (privateState.Stake != parameters.Stake)
+                add("Framework", "Private stake matches public stake", Status.Fail,
+                    $"privateState.Stake={privateState.Stake}, Parameters.Stake={parameters.Stake}");
+            else
+                add("Framework", "Private stake matches public stake", Status.Pass,
+                    $"{privateState.Stake}");
+        }
+
+        var hasWinningTargets = (gameData.WinInfo?.WinSymbols?.Length ?? 0) > 0;
+        if (!hasWinningTargets && parameters.CashWin != 0m)
+            add("Framework", "No-win ticket has zero CashWin", Status.Fail,
+                $"WinInfo.WinSymbols is empty but CashWin={parameters.CashWin}");
+        else if (!hasWinningTargets)
+            add("Framework", "No-win ticket has zero CashWin", Status.Pass, "0");
+
+        if (hasWinningTargets && parameters.CashWin <= 0m)
+            add("Framework", "Winning ticket has positive CashWin", Status.Fail,
+                $"WinInfo has winning targets but CashWin={parameters.CashWin}");
+    }
 
     private static void CheckWinInfoSchema(
         TicketDto t,
