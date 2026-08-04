@@ -34,7 +34,7 @@ internal sealed class WheelFeat : Feat
         if (sym == 0) return null;
         if (!ctx.Input.Targets.TryGetValue(sym, out int tgt) || tgt <= 0) return null;
 
-        int n = PickStackValue(tgt, ctx.Rng, ctx.ExperienceProfile);
+        int n = PickStackValue(tgt, ctx.Rng, ctx.ExperienceProfile, ctx.Settings);
         int stack = WMath.StackFromValue(n), zone = Math.Max(1, WMath.Zone(tgt, stack));
 
         bool isMulti = ctx.Done.Any(f => f.Id == FeatureId && f.WSym == sym);
@@ -98,13 +98,13 @@ internal sealed class WheelFeat : Feat
         return 0;
     }
 
-    private static int PickStackValue(int target, Random rng, TicketExperienceProfile profile)
+    private static int PickStackValue(int target, Random rng, TicketExperienceProfile profile, Settings settings)
     {
         var candidates = WMath.ValidStackValues(target).ToArray();
         if (candidates.Length == 0) return WMath.BestN(target);
 
         var weighted = candidates
-            .Select(value => (Value: value, Weight: StackValueWeight(value, profile)))
+            .Select(value => (Value: value, Weight: StackValueWeight(value, profile, settings)))
             .Where(item => item.Weight > 0)
             .ToArray();
         if (weighted.Length == 0) return candidates[rng.Next(candidates.Length)];
@@ -121,13 +121,13 @@ internal sealed class WheelFeat : Feat
         return weighted[^1].Value;
     }
 
-    private static double StackValueWeight(int value, TicketExperienceProfile profile)
+    private static double StackValueWeight(int value, TicketExperienceProfile profile, Settings settings)
     {
         var baseWeight = value switch
         {
-            1 => K.P_WHEEL_STACK_VALUE_1,
-            2 => K.P_WHEEL_STACK_VALUE_2,
-            _ => Math.Max(0.0, 1.0 - K.P_WHEEL_STACK_VALUE_1 - K.P_WHEEL_STACK_VALUE_2),
+            1 => settings.PWheelStackValue1,
+            2 => settings.PWheelStackValue2,
+            _ => Math.Max(0.0, 1.0 - settings.PWheelStackValue1 - settings.PWheelStackValue2),
         };
 
         return profile switch

@@ -21,13 +21,16 @@ internal sealed class Scheduler
     private readonly List<string>                  _log;
     private readonly HashSet<int>                  _winSyms;
     private readonly int                           _finalAnchorSym;
+    private readonly Settings                      _settings;
 
     internal Scheduler(IReadOnlyDictionary<int, int> targets,
                        List<PlacedFeat> placed, IReadOnlyList<WLock> locks, List<string> log,
                        IEnumerable<int>? winSyms = null,
-                       int finalAnchorSym = 0)
+                       int finalAnchorSym = 0,
+                       Settings? settings = null)
     {
         _targets=targets; _placed=placed; _locks=locks; _log=log;
+        _settings = settings ?? new Settings();
         _winSyms = winSyms != null ? new HashSet<int>(winSyms) : targets.Keys.ToHashSet();
         _finalAnchorSym = finalAnchorSym > 0 && _winSyms.Contains(finalAnchorSym)
             ? finalAnchorSym
@@ -234,15 +237,15 @@ internal sealed class Scheduler
     {
         if (!_winSyms.Contains(sym) || totalSpins <= 2) return false;
         if (sym == _finalAnchorSym) return true;
-        return UnitHash(sym, target, totalSpins, _placed.Count) < K.P_WIN_LATE_COMPLETION;
+        return UnitHash(sym, target, totalSpins, _placed.Count) < _settings.PWinLateCompletion;
     }
 
-    private static int LateTailCount(int target) =>
-        Math.Max(K.WIN_LATE_MIN_TAIL, (int)Math.Ceiling(target * K.WIN_LATE_TAIL_FRACTION));
+    private int LateTailCount(int target) =>
+        Math.Max(_settings.WinLateMinTail, (int)Math.Ceiling(target * _settings.WinLateTailFraction));
 
-    private static IEnumerable<int> LateSlots(int totalSpins, int lastFireSpin)
+    private IEnumerable<int> LateSlots(int totalSpins, int lastFireSpin)
     {
-        var firstLate = Math.Max(0, totalSpins - K.WIN_LATE_TAIL_SPINS);
+        var firstLate = Math.Max(0, totalSpins - _settings.WinLateTailSpins);
         for (int slot = firstLate; slot < totalSpins; slot++)
         {
             if (slot > lastFireSpin) yield return slot;

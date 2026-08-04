@@ -88,6 +88,7 @@ internal sealed class PlaceCtx
     internal int                       MinSpin { get; init; }
     internal HashSet<(int, int)>       Used    { get; init; } = new();
     internal TicketExperienceProfile   ExperienceProfile { get; init; } = TicketExperienceProfile.Balanced;
+    internal Settings                  Settings { get; init; } = new();
 }
 
 internal sealed class FireCtx

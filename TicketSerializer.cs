@@ -85,7 +85,11 @@ public static class TicketSerializer
     }
 
     /// <summary>Build the plain object graph (no JSON string yet) for a verified GamePlan.</summary>
-    public static TicketDto ToTicketObject(GamePlan plan)
+    public static TicketDto ToTicketObject(GamePlan plan) =>
+        ToTicketObject(plan, new Settings());
+
+    /// <summary>Build the plain object graph (no JSON string yet) for a verified GamePlan.</summary>
+    public static TicketDto ToTicketObject(GamePlan plan, Settings settings)
     {
         var board = plan.Spins[0].Board;
         var startingBoard = Enumerable.Range(0, K.ROWS).Select(r =>
@@ -116,13 +120,17 @@ public static class TicketSerializer
                                  .Select(kv => new PrizeTierDto { SymId = kv.Key, Tier = kv.Value }).ToArray()
             },
             StartingBoard = startingBoard,
-            Turns = BuildTurns(plan)
+            Turns = BuildTurns(plan, settings)
         };
     }
 
     /// <summary>Serialize a verified GamePlan straight to an indented JSON string.</summary>
     public static string ToJson(GamePlan plan) =>
-        JsonConvert.SerializeObject(ToTicketObject(plan), new JsonSerializerSettings
+        ToJson(plan, new Settings());
+
+    /// <summary>Serialize a verified GamePlan straight to an indented JSON string.</summary>
+    public static string ToJson(GamePlan plan, Settings settings) =>
+        JsonConvert.SerializeObject(ToTicketObject(plan, settings), new JsonSerializerSettings
         {
             Formatting = Formatting.None,
             NullValueHandling = NullValueHandling.Ignore,
@@ -131,7 +139,7 @@ public static class TicketSerializer
 
     // ── Turn / spawn assembly ───────────────────────────────────────────────────
 
-    private static TurnDto[] BuildTurns(GamePlan plan)
+    private static TurnDto[] BuildTurns(GamePlan plan, Settings settings)
     {
         var allFeatureTokens = plan.Spins
             .SelectMany(sp => sp.Spawns
@@ -140,7 +148,7 @@ public static class TicketSerializer
             .OrderBy(t => t.Spin)
             .ThenBy(t => t.Pos.Item1 * K.COLS + t.Pos.Item2)
             .ToList();
-        var chainPlan = BuildFeatureChainPlan(plan, allFeatureTokens);
+        var chainPlan = BuildFeatureChainPlan(plan, allFeatureTokens, settings);
 
         var chainStart = chainPlan.Start is null
             ? new HashSet<(int Spin, (int, int) Pos)>()
@@ -178,12 +186,12 @@ public static class TicketSerializer
                     {
                         Pos = pos,
                         Id = c.Sym,
-                        Feature = FeatureObj(c, plan, new[] { chainPlan.Nested }, depth: 0)
+                        Feature = FeatureObj(c, plan, settings, new[] { chainPlan.Nested }, depth: 0)
                     });
                     continue;
                 }
 
-                spawns.Add(SpawnObj(kv.Value, pos, plan));
+                spawns.Add(SpawnObj(kv.Value, pos, plan, settings));
             }
 
             turns.Add(new TurnDto { Pushers = pushers, Spawns = spawns.ToArray() });
@@ -194,7 +202,8 @@ public static class TicketSerializer
 
     private static FeatureChainPlan BuildFeatureChainPlan(
         GamePlan plan,
-        IReadOnlyList<(int Spin, (int, int) Pos, Cell Cell)> featureTokens)
+        IReadOnlyList<(int Spin, (int, int) Pos, Cell Cell)> featureTokens,
+        Settings settings)
     {
         if (featureTokens.Count == 0) return FeatureChainPlan.Empty;
 
@@ -220,10 +229,10 @@ public static class TicketSerializer
         if (payloadCandidates.Count == 0) return FeatureChainPlan.Empty;
 
         var roll = DeterministicUnitInterval(plan, start.Cell.Sym, start.Spin, start.Pos, payloadCandidates.Count);
-        if (roll >= K.P_FEATURE_RETRIGGER_CHAIN) return FeatureChainPlan.Empty;
+        if (roll >= settings.PFeatureRetriggerChain) return FeatureChainPlan.Empty;
 
         var payload = payloadCandidates[DeterministicIndex(plan, payloadCandidates.Count, salt: 193)];
-        var nested = FeatureObj(payload.Cell, plan, System.Array.Empty<FeatureDto>(), depth: 1);
+        var nested = FeatureObj(payload.Cell, plan, settings, System.Array.Empty<FeatureDto>(), depth: 1);
         return new FeatureChainPlan(start, new[] { payload }, nested);
     }
 
@@ -246,12 +255,12 @@ public static class TicketSerializer
         return payload.Cell.Sym == K.F_PRUP && payload.Spin <= start.Spin;
     }
 
-    private static int FeatureChainConvertId(Cell cell, int depth, GamePlan plan)
+    private static int FeatureChainConvertId(Cell cell, int depth, GamePlan plan, Settings settings)
     {
         var ids = plan.WinSyms
             .Concat(plan.NonWinTargets.Keys)
             .Concat(plan.FillSyms)
-            .Concat(K.FEATURE_RETRIGGER_BRIDGE_IDS)
+            .Concat(settings.FeatureRetriggerBridgeIds)
             .Distinct()
             .ToArray();
         if (ids.Length == 0) return K.F_COIN;
@@ -333,7 +342,7 @@ public static class TicketSerializer
         }
     }
 
-    private static SpawnDto SpawnObj(Cell c, int pos, GamePlan plan)
+    private static SpawnDto SpawnObj(Cell c, int pos, GamePlan plan, Settings settings)
     {
         if (!c.IsFeat)
             return c.Stack > 1
@@ -347,19 +356,19 @@ public static class TicketSerializer
             {
                 Pos = pos,
                 Id = c.Sym,
-                Feature = FeatureObj(c, plan)
+                Feature = FeatureObj(c, plan, settings)
             },
             K.F_XSPIN => new SpawnDto
             {
                 Pos = pos,
                 Id = c.Sym,
-                Feature = FeatureObj(c, plan)
+                Feature = FeatureObj(c, plan, settings)
             },
             K.F_PRUP => new SpawnDto
             {
                 Pos = pos,
                 Id = c.Sym,
-                Feature = FeatureObj(c, plan)
+                Feature = FeatureObj(c, plan, settings)
             },
             _ => new SpawnDto
             {
@@ -373,12 +382,13 @@ public static class TicketSerializer
     private static FeatureDto FeatureObj(
         Cell c,
         GamePlan plan,
+        Settings settings,
         FeatureDto[]? reTrigger = null,
         int depth = 0)
     {
         var chain = reTrigger ?? System.Array.Empty<FeatureDto>();
         var convertToId = chain.Length > 0 && depth > 0
-            ? FeatureChainConvertId(c, depth, plan)
+            ? FeatureChainConvertId(c, depth, plan, settings)
             : c.CvtSym > 0 && !K.IsFeat(c.CvtSym) ? c.CvtSym : K.F_COIN;
 
         var dto = new FeatureDto

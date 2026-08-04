@@ -12,6 +12,7 @@ public sealed class Planner
     private readonly MathInput _input;
     private readonly int _baseSeed;
     private readonly CleanGenerationPipeline _pipeline;
+    private readonly Settings _settings;
     private static readonly Random SeedRng = new();
     private static readonly object SeedLock = new();
     private static readonly IPlanAssemblyPipeline DefaultBoardPipeline = new DefaultPlanAssemblyPipeline();
@@ -20,14 +21,25 @@ public sealed class Planner
     private const int MaxPlanAttempts = 64;
 
     public Planner(MathInput inp, int? seed = null)
-        : this(inp, seed, DefaultBoardPipeline)
+        : this(inp, seed, new Settings(), DefaultBoardPipeline)
+    {
+    }
+
+    public Planner(MathInput inp, Settings settings, int? seed = null)
+        : this(inp, seed, settings, DefaultBoardPipeline)
     {
     }
 
     internal Planner(MathInput inp, int? seed, IPlanAssemblyPipeline boardPipeline)
+        : this(inp, seed, new Settings(), boardPipeline)
+    {
+    }
+
+    internal Planner(MathInput inp, int? seed, Settings settings, IPlanAssemblyPipeline boardPipeline)
     {
         _input = inp;
         _baseSeed = seed ?? NextSeed();
+        _settings = settings;
         _pipeline = ReferenceEquals(boardPipeline, DefaultBoardPipeline)
             ? DefaultPipeline
             : new CleanGenerationPipeline(boardPipeline);
@@ -53,6 +65,7 @@ public sealed class Planner
                     _input,
                     attemptSeed,
                     rng,
+                    _settings,
                     pressure,
                     log));
 
