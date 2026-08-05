@@ -95,6 +95,7 @@ public static class TicketSerializer
         var startingBoard = Enumerable.Range(0, settings.ROWS).Select(r =>
             Enumerable.Range(0, settings.COLS).Select(c => new BoardCellDto { Id = board[r, c]?.Sym ?? 0 }).ToArray()
         ).ToArray();
+        var collectedTotals = Sim.Run(plan);
 
         return new TicketDto
         {
@@ -103,25 +104,44 @@ public static class TicketSerializer
                 TotalSpins = plan.TotalSpins,
                 WinSymbols = plan.Targets.OrderBy(kv => kv.Key)
                                  .Select(kv => new WinSymbolDto { Id = kv.Key, Target = kv.Value }).ToArray(),
-                NonWinSymbols = plan.NonWinTargets.OrderBy(kv => kv.Key)
-                                 .Select(kv =>
-                                 {
-                                     plan.NonWinPrizeTiers.TryGetValue(kv.Key, out int tier);
-                                     return new NonWinSymbolDto
-                                     {
-                                         Id = kv.Key,
-                                         MinTarget = kv.Value,
-                                         MaxThreshold = settings.SymbolFillCap(kv.Key),
-                                         PrizeTier = tier > 0 ? tier : null,
-                                         PrizeValue = tier > 0 ? PrizeValueFor(plan, kv.Key, tier) : null,
-                                     };
-                                 }).ToArray(),
+                NonWinSymbols = BuildNonWinSymbols(plan, collectedTotals, settings),
                 PrizeTiers = plan.PrizeTiers.OrderBy(kv => kv.Key)
                                  .Select(kv => new PrizeTierDto { SymId = kv.Key, Tier = kv.Value }).ToArray()
             },
             StartingBoard = startingBoard,
             Turns = BuildTurns(plan, settings)
         };
+    }
+
+    private static NonWinSymbolDto[] BuildNonWinSymbols(
+        GamePlan plan,
+        IReadOnlyDictionary<int, int> collectedTotals,
+        Settings settings)
+    {
+        var ids = plan.NonWinTargets.Keys
+            .Concat(collectedTotals
+                .Where(kv => kv.Value > 0)
+                .Select(kv => kv.Key)
+                .Where(sym => !plan.Targets.ContainsKey(sym))
+                .Where(sym => !settings.IsFeat(sym)))
+            .Distinct()
+            .OrderBy(sym => sym);
+
+        return ids.Select(sym =>
+        {
+            plan.NonWinTargets.TryGetValue(sym, out int plannedMin);
+            collectedTotals.TryGetValue(sym, out int collected);
+            plan.NonWinPrizeTiers.TryGetValue(sym, out int tier);
+
+            return new NonWinSymbolDto
+            {
+                Id = sym,
+                MinTarget = plannedMin > 0 ? plannedMin : Math.Max(1, collected),
+                MaxThreshold = settings.SymbolFillCap(sym),
+                PrizeTier = tier > 0 ? tier : null,
+                PrizeValue = tier > 0 ? PrizeValueFor(plan, sym, tier) : null,
+            };
+        }).ToArray();
     }
 
     /// <summary>Serialize a verified GamePlan straight to an indented JSON string.</summary>

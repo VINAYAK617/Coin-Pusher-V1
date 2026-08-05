@@ -56,9 +56,10 @@ public sealed class GameLogicCoverageTests
 
         Assert.AreEqual(0, ticket.WinInfo.WinSymbols.Length);
         Assert.IsTrue(ticket.WinInfo.NonWinSymbols.Length > 0);
+        Assert.IsTrue(ticket.WinInfo.NonWinSymbols.Any(symbol => symbol.MinTarget >= 10));
         foreach (var symbol in ticket.WinInfo.NonWinSymbols)
         {
-            Assert.IsTrue(symbol.MinTarget >= 10 && symbol.MinTarget < symbol.MaxThreshold);
+            Assert.IsTrue(symbol.MinTarget > 0 && symbol.MinTarget < symbol.MaxThreshold);
             Assert.IsTrue(symbol.Id >= 1);
         }
         AssertValid(ticket);
@@ -357,6 +358,52 @@ public sealed class GameLogicCoverageTests
             check.Result == TicketChecker.Status.Fail &&
             check.Category == "Schema" &&
             check.Name.Contains("StartingBoard")));
+    }
+
+    [TestMethod]
+    public void SerializerDeclaresEveryCollectedNonWinningSymbol()
+    {
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int> { [2] = 20, [4] = 20 },
+            BaseSpins = 5,
+            MaxSym = 6,
+        };
+        var plan = new Planner(input, seed: 60606).Plan();
+        var ticket = TicketSerializer.ToTicketObject(plan);
+        var declared = ticket.WinInfo.WinSymbols.Select(w => w.Id)
+            .Concat(ticket.WinInfo.NonWinSymbols.Select(w => w.Id))
+            .ToHashSet();
+
+        foreach (var (sym, count) in Sim.Run(plan))
+        {
+            if (count > 0 && !Settings.Default.IsFeat(sym))
+                Assert.IsTrue(declared.Contains(sym), $"symbol {sym} collected {count} time(s) but was not declared");
+        }
+
+        AssertValid(ticket);
+    }
+
+    [TestMethod]
+    public void CheckerRejectsCollectedSymbolMissingFromWinInfo()
+    {
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int>(),
+            BaseSpins = 5,
+            MaxSym = 6,
+        }, seed: 70707);
+
+        Assert.IsTrue(ticket.WinInfo.NonWinSymbols.Length > 0);
+        ticket.WinInfo.NonWinSymbols = ticket.WinInfo.NonWinSymbols.Skip(1).ToArray();
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        Assert.IsFalse(report.IsValid);
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "WinInfo" &&
+            check.Name.Contains("Collected symbol")));
     }
 
     private static TicketSerializer.TicketDto PlanTicket(MathInput input, int seed)

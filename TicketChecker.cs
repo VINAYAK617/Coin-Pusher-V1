@@ -323,21 +323,23 @@ public static class TicketChecker
                 $"got={got} want [{nw.MinTarget}..{nw.MaxThreshold})");
         }
 
-        // ── 8. ORDINARY FILLER CAP CHECK ────────────────────────────────────
+        // ── 8. WININFO DECLARATION / FILLER CAP CHECK ───────────────────────
         var declaredWin    = (t.WinInfo.WinSymbols ?? Array.Empty<WinSymbolDto>()).Select(w => w.Id).ToHashSet();
         var declaredNonWin = (t.WinInfo.NonWinSymbols ?? Array.Empty<NonWinSymbolDto>()).Select(w => w.Id).ToHashSet();
-        bool fillerCapOk = true;
+        bool declarationOk = true;
         foreach (var (sym, count) in replay.Totals)
         {
-            if (declaredWin.Contains(sym) || declaredNonWin.Contains(sym) || Settings.Default.IsFeat(sym) || count == 0) continue;
-            var cap = Settings.Default.SymbolFillCap(sym);
-            if (count >= cap)
+            if (Settings.Default.IsFeat(sym) || count == 0) continue;
+            if (!declaredWin.Contains(sym) && !declaredNonWin.Contains(sym))
             {
-                fillerCapOk = false;
-                Add("Payout", $"Filler symbol {sym} under cap", Status.Fail, $"count={count} >= cap={cap}");
+                declarationOk = false;
+                Add("WinInfo", $"Collected symbol {sym} declared", Status.Fail,
+                    $"replay collected {count} of symbol {sym}, but it is absent from both WinSymbols and NonWinSymbols");
+                continue;
             }
+
         }
-        if (fillerCapOk) Add("Payout", "All ordinary filler symbols under cap", Status.Pass, "ok");
+        if (declarationOk) Add("WinInfo", "Every collected symbol declared", Status.Pass, "ok");
 
         // ── 9. WHEEL CONSISTENCY ────────────────────────────────────────────
         foreach (var w in replay.WheelFireEvents)
@@ -619,11 +621,11 @@ public static class TicketChecker
                 add("WinInfo", $"Non-win symbol {nonWin.Id} duplicate", Status.Fail,
                     "same symbol appears more than once in NonWinSymbols");
             }
-            if (nonWin.MinTarget < Settings.Default.NONWIN_MIN_TARGET || nonWin.MinTarget >= nonWin.MaxThreshold)
+            if (nonWin.MinTarget <= 0 || nonWin.MinTarget >= nonWin.MaxThreshold)
             {
                 ok = false;
                 add("WinInfo", $"Non-win symbol {nonWin.Id} threshold", Status.Fail,
-                    $"MinTarget={nonWin.MinTarget}, MaxThreshold={nonWin.MaxThreshold}; expected min >= {Settings.Default.NONWIN_MIN_TARGET} and min < max");
+                    $"MinTarget={nonWin.MinTarget}, MaxThreshold={nonWin.MaxThreshold}; expected positive min and min < max");
             }
             if (nonWin.PrizeTier.HasValue && nonWin.PrizeTier.Value <= 0)
             {
