@@ -11,7 +11,7 @@ public sealed class Settings
     public int FILL_CAP { get; init; } = 20;
 
     public int BASE_SPINS { get; init; } = 5;
-    public int MAX_SPINS { get; init; } = 12;
+    public int MAX_SPINS { get; init; } = 10;
     public int MAX_COIN_STACK { get; init; } = 7;
     public int MAX_EXTRA_GO_PER_TURN => MAX_SPINS - BASE_SPINS;
     public int MIN_WHEEL_STACK_VALUE { get; init; } = 1;

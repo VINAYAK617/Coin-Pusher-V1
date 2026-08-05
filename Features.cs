@@ -295,9 +295,9 @@ internal static class FeatReg
     internal static readonly IReadOnlyDictionary<string, (double P, int Max, int MinS, int MaxS, int Ord)> Cfg =
         new Dictionary<string, (double, int, int, int, int)>
         {
-            ["WHEEL"]         = (0.40, 6, 1, 98, 1),
+            ["WHEEL"]         = (0.40, 3, 1, 98, 1),
             ["FLUSH"]         = (0.30, 5, 1, 99, 2),
-            ["EXTRA_SPIN"]    = (0.20, 7, 1, 97, 3),
+            ["EXTRA_SPIN"]    = (0.20, 5, 1, 97, 3),
             ["PRIZE_UPGRADE"] = (0.15, 2, 1, 97, 4),
         };
 
