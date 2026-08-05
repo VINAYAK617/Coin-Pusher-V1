@@ -295,6 +295,45 @@ public sealed class GameLogicCoverageTests
         Assert.IsTrue(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
 
+    [TestMethod]
+    public void CheckerRejectsExtraDropThatOverwritesOccupiedCell()
+    {
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int>(),
+            BaseSpins = 5,
+            MaxSym = 6,
+        }, seed: 40404);
+
+        var firstTurn = ticket.Turns[0];
+        var existingPositions = firstTurn.Spawns.Select(spawn => spawn.Pos).ToHashSet();
+        var occupiedPos = Enumerable.Range(0, Settings.Default.ROWS * Settings.Default.COLS)
+            .First(pos => !existingPositions.Contains(pos));
+
+        firstTurn.Spawns = firstTurn.Spawns
+            .Concat(new[]
+            {
+                new TicketSerializer.SpawnDto
+                {
+                    Pos = occupiedPos,
+                    Id = Settings.Default.F_COIN,
+                },
+            })
+            .ToArray();
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        Assert.IsFalse(report.IsValid);
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Replay" &&
+            check.Name.Contains("spawn count matches popped cells")));
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Replay" &&
+            check.Name.Contains("spawns only fill empty cells")));
+    }
+
     private static TicketSerializer.TicketDto PlanTicket(MathInput input, int seed)
     {
         var plan = new Planner(input, seed).Plan();

@@ -264,6 +264,26 @@ public static class TicketChecker
         if (replay.MissingCellTurns.Count == 0)
             Add("Replay", "Every turn fully populated after spawns", Status.Pass, "ok");
 
+        foreach (var balance in replay.SpawnBalances)
+        {
+            if (balance.EmptySlotsBeforeSpawns != balance.SpawnCount)
+            {
+                Add("Replay", $"Turn {balance.Turn} spawn count matches popped cells", Status.Fail,
+                    $"physical popped cells={balance.EmptySlotsBeforeSpawns}, drops/spawns={balance.SpawnCount}");
+            }
+            else if (balance.OverwrittenSpawnPositions.Count == 0)
+            {
+                Add("Replay", $"Turn {balance.Turn} spawn count matches popped cells", Status.Pass,
+                    $"{balance.SpawnCount}/{balance.EmptySlotsBeforeSpawns}");
+            }
+        }
+
+        foreach (var balance in replay.SpawnBalances.Where(b => b.OverwrittenSpawnPositions.Count > 0))
+        {
+            Add("Replay", $"Turn {balance.Turn} spawns only fill empty cells", Status.Fail,
+                "spawn Pos overwrote occupied board cells: " + string.Join(",", balance.OverwrittenSpawnPositions));
+        }
+
         // ── 6. WIN-SYMBOL EXACT-COUNT VERIFICATION ─────────────────────────
         // Serialized spawns now carry the evolving board state closely enough that
         // WHEEL-related count mismatches are treated as real failures.
@@ -698,12 +718,21 @@ public static class TicketChecker
         public int ActualMultiplier;
     }
 
+    private sealed class SpawnBalance
+    {
+        public int Turn;
+        public int EmptySlotsBeforeSpawns;
+        public int SpawnCount;
+        public List<int> OverwrittenSpawnPositions = new();
+    }
+
     private sealed class ReplayResult
     {
         public Dictionary<int, int> Totals                 = new();
         public List<int>            MissingCellTurns        = new();
         public List<WheelFireEvent> WheelFireEvents         = new();
         public Dictionary<int, int> PrupFinalTierPerSymbol   = new();
+        public List<SpawnBalance>   SpawnBalances           = new();
     }
 
     private static ReplayResult ReplayTicket(TicketDto t)
@@ -764,10 +793,20 @@ public static class TicketChecker
             // Phase 3: Rotate 90 clockwise
             board = RotCW(board);
 
+            var spawnBalance = new SpawnBalance
+            {
+                Turn = turnIdx + 1,
+                EmptySlotsBeforeSpawns = CountEmptyCells(board),
+                SpawnCount = (turn.Spawns ?? Array.Empty<SpawnDto>()).Length,
+            };
+
             // Phase 4: ApplySpawns
             foreach (var sp in turn.Spawns ?? Array.Empty<SpawnDto>())
             {
                 int r = sp.Pos / Settings.Default.COLS, c = sp.Pos % Settings.Default.COLS;
+                if (board[r, c] != null)
+                    spawnBalance.OverwrittenSpawnPositions.Add(sp.Pos);
+
                 var cell = new ReplayCell { Sym = sp.Id, Stack = sp.Stack ?? 1 };
                 if (sp.Feature != null)
                 {
@@ -782,6 +821,7 @@ public static class TicketChecker
                 }
                 board[r, c] = cell;
             }
+            result.SpawnBalances.Add(spawnBalance);
 
             // Check: no cell left null after spawns
             bool anyMissing = false;
@@ -884,6 +924,19 @@ public static class TicketChecker
             }
         }
         return false;
+    }
+
+    private static int CountEmptyCells(ReplayCell?[,] board)
+    {
+        int count = 0;
+        for (int r = 0; r < Settings.Default.ROWS; r++)
+        {
+            for (int c = 0; c < Settings.Default.COLS; c++)
+            {
+                if (board[r, c] == null) count++;
+            }
+        }
+        return count;
     }
 
     private static void Acc(Dictionary<int, int> totals, ReplayCell cell)

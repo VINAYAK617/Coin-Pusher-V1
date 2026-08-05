@@ -189,13 +189,10 @@ internal sealed class Resolver
             // zone (its Push/Flush) — that is the same plan TokenReservedPositions
             // used when it originally reserved room for this exact token.
             if (slot == default)
-                slot = FindBoardFallbackSlot(sp.Spawns, next, origCol);
-
-            if (slot == default)
             {
                 throw new InvalidOperationException(
                     $"No filler slot available for required {featId} token at spin {sp.Spin}. " +
-                    "Retry with a different seed or adjust feature load.");
+                    "Feature tokens may only replace real drop slots; retry with different geometry.");
             }
 
             int cvt = sp.Spawns.TryGetValue(slot, out var existing)
@@ -215,38 +212,6 @@ internal sealed class Resolver
     /// order: the token's own reserved column first, then other rows in that column,
     /// then anywhere else in the zone.
     /// </summary>
-    private (int r, int c) FindBoardFallbackSlot(Dictionary<(int, int), Cell> spawns,
-                                                  SpinPlan next, int origCol)
-    {
-        var zoneSet = Grid.ZoneSet(next.Push, next.Flush);
-
-        // Same two-tier preference as FindFillerSlot (see its comment): win symbols
-        // are never eligible; near-miss symbols are tried last, only if no ordinary
-        // filler slot exists anywhere in the zone.
-        bool Eligible((int, int) pos, bool allowNearMiss)
-        {
-            if (!zoneSet.Contains(pos)) return false;
-            if (spawns.ContainsKey(pos)) return false;   // already handled by FindFillerSlot
-            var cell = next.Board[pos.Item1, pos.Item2];
-            if (cell == null || cell.IsFeat || _winSyms.Contains(cell.Sym)) return false;
-            return allowNearMiss || !_nonWinSyms.Contains(cell.Sym);
-        }
-
-        foreach (bool allowNearMiss in new[] { false, true })
-        {
-            var primary = (Settings.Default.ROWS - 1, origCol);
-            if (Eligible(primary, allowNearMiss)) return primary;
-
-            for (int r = Settings.Default.ROWS - 1; r >= 0; r--)
-                if (Eligible((r, origCol), allowNearMiss)) return (r, origCol);
-
-            foreach (var pos in zoneSet.OrderByDescending(p => p.Item2).ThenBy(p => p.Item1))
-                if (Eligible(pos, allowNearMiss)) return pos;
-        }
-
-        return default;
-    }
-
     private (int r, int c) FindFillerSlot(Dictionary<(int, int), Cell> spawns, int origCol)
     {
         // Win symbols are NEVER eligible — their exact count is load-bearing.
