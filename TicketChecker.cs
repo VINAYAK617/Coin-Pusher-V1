@@ -145,6 +145,7 @@ public static class TicketChecker
             if (t.StartingBoard[r] == null || t.StartingBoard[r].Length != Settings.Default.COLS)
             { Add("Structure", $"StartingBoard row {r} width", Status.Fail, $"expected {Settings.Default.COLS} cols, got {t.StartingBoard[r]?.Length ?? 0}"); return report; }
         Add("Structure", "StartingBoard is 5x5", Status.Pass, "ok");
+        CheckStartingBoardCells(t, Add);
 
         if (t.Turns == null || t.Turns.Length == 0)
         { Add("Structure", "Turns present", Status.Fail, "no turns"); return report; }
@@ -222,6 +223,21 @@ public static class TicketChecker
             }
         }
         if (pusherGeometryOk) Add("Geometry", "All pusher values valid", Status.Pass, "ok");
+
+        bool pusherSpawnCountOk = true;
+        for (int i = 0; i < t.Turns.Length; i++)
+        {
+            var turn = t.Turns[i];
+            var pushedCells = (turn.Pushers ?? Array.Empty<PusherDto>()).Sum(p => p.PushValue);
+            var spawnCount = (turn.Spawns ?? Array.Empty<SpawnDto>()).Length;
+            if (pushedCells != spawnCount)
+            {
+                pusherSpawnCountOk = false;
+                Add("Geometry", $"Turn {i + 1} pushed cells match drops", Status.Fail,
+                    $"Pushers sum to {pushedCells} physical popped cell(s), but Spawns contains {spawnCount} drop(s)");
+            }
+        }
+        if (pusherSpawnCountOk) Add("Geometry", "Every turn pushed-cell count matches spawn count", Status.Pass, "ok");
 
         // ── 4. SPAWN POSITION SANITY ────────────────────────────────────────
         bool spawnPosOk = true;
@@ -404,6 +420,8 @@ public static class TicketChecker
                     "that symbol were found anywhere in the replay");
         }
 
+        CheckExperienceWarnings(t, replay, Add);
+
         return report;
     }
 
@@ -481,6 +499,75 @@ public static class TicketChecker
         if (hasWinningTargets && parameters.CashWin <= 0m)
             add("Framework", "Winning ticket has positive CashWin", Status.Fail,
                 $"WinInfo has winning targets but CashWin={parameters.CashWin}");
+    }
+
+    private static void CheckStartingBoardCells(
+        TicketDto t,
+        Action<string, string, Status, string> add)
+    {
+        var ok = true;
+        for (var r = 0; r < Settings.Default.ROWS; r++)
+        {
+            for (var c = 0; c < Settings.Default.COLS; c++)
+            {
+                var id = t.StartingBoard[r][c].Id;
+                if (id <= 0)
+                {
+                    ok = false;
+                    add("Schema", $"StartingBoard ({r},{c}) symbol id", Status.Fail,
+                        $"Id={id} must be positive");
+                    continue;
+                }
+
+                if (Settings.Default.IsFeat(id) || id == Settings.Default.F_FLUSH_ID)
+                {
+                    ok = false;
+                    add("Schema", $"StartingBoard ({r},{c}) board symbol", Status.Fail,
+                        $"Id={id} is a feature/pusher id and must not appear on the starting board");
+                }
+            }
+        }
+
+        if (ok) add("Schema", "StartingBoard contains only valid coin symbols", Status.Pass, "ok");
+    }
+
+    private static void CheckExperienceWarnings(
+        TicketDto t,
+        ReplayResult replay,
+        Action<string, string, Status, string> add)
+    {
+        var repeatedPusherPattern = t.Turns
+            .Select((turn, index) => new
+            {
+                Turn = index + 1,
+                Pattern = string.Join(",", (turn.Pushers ?? Array.Empty<PusherDto>()).Select(p => p.PushValue)),
+            })
+            .GroupBy(item => item.Pattern)
+            .Where(group => group.Key.Length > 0 && group.Count() >= 3)
+            .OrderByDescending(group => group.Count())
+            .FirstOrDefault();
+        if (repeatedPusherPattern != null)
+        {
+            add("Experience", "Pusher pattern variety", Status.Warning,
+                $"pattern [{repeatedPusherPattern.Key}] appears {repeatedPusherPattern.Count()} time(s), turns " +
+                string.Join(",", repeatedPusherPattern.Select(item => item.Turn)));
+        }
+        else
+        {
+            add("Experience", "Pusher pattern variety", Status.Pass, "ok");
+        }
+
+        var wheelStackValues = replay.WheelFireEvents.Select(w => w.WheelStackValue).ToArray();
+        if (wheelStackValues.Length >= 3 && wheelStackValues.Distinct().Count() == 1)
+        {
+            add("Experience", "WHEEL stack value variety", Status.Warning,
+                $"{wheelStackValues.Length} WHEEL fire(s) all used WheelStackValue={wheelStackValues[0]}");
+        }
+        else
+        {
+            add("Experience", "WHEEL stack value variety", Status.Pass,
+                wheelStackValues.Length == 0 ? "no wheels" : string.Join(",", wheelStackValues));
+        }
     }
 
     private static void CheckWinInfoSchema(

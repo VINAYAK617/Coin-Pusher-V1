@@ -332,6 +332,31 @@ public sealed class GameLogicCoverageTests
             check.Result == TicketChecker.Status.Fail &&
             check.Category == "Replay" &&
             check.Name.Contains("spawns only fill empty cells")));
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Geometry" &&
+            check.Name.Contains("pushed cells match drops")));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsFeatureSymbolOnStartingBoard()
+    {
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int>(),
+            BaseSpins = 5,
+            MaxSym = 6,
+        }, seed: 50505);
+
+        ticket.StartingBoard[0][0].Id = Settings.Default.F_WHEEL;
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        Assert.IsFalse(report.IsValid);
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Schema" &&
+            check.Name.Contains("StartingBoard")));
     }
 
     private static TicketSerializer.TicketDto PlanTicket(MathInput input, int seed)
