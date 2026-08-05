@@ -406,6 +406,34 @@ public sealed class GameLogicCoverageTests
             check.Name.Contains("Collected symbol")));
     }
 
+    [TestMethod]
+    public void SerializerDoesNotCreateCrossTurnRetriggerChains()
+    {
+        var settings = new Settings { PFeatureRetriggerChain = 1.0 };
+        var plan = new GamePlan
+        {
+            TotalSpins = 3,
+            Targets = new Dictionary<int, int> { [2] = 1 },
+            WinSyms = new[] { 2 },
+            FillSyms = new[] { 1, 3 },
+            PrizeTiers = new Dictionary<int, int> { [2] = 2 },
+            PrizeValues = PrizeValues(6, tiers: 3),
+            Spins = new List<SpinPlan>
+            {
+                SpinWithPrizeUpgrade(1, tier: 1),
+                SpinWithPrizeUpgrade(2, tier: 2),
+                PlainSpin(3),
+            },
+        };
+
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
+
+        Assert.IsFalse(ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .Where(spawn => spawn.Feature != null)
+            .Any(spawn => spawn.Feature!.ReTrigger.Length > 0));
+    }
+
     private static TicketSerializer.TicketDto PlanTicket(MathInput input, int seed)
     {
         var plan = new Planner(input, seed).Plan();
@@ -456,6 +484,45 @@ public sealed class GameLogicCoverageTests
         if (feature == null) return false;
         if (feature.FeatureId == featureId) return true;
         return feature.ReTrigger.Any(child => ContainsFeature(child, featureId));
+    }
+
+    private static SpinPlan SpinWithPrizeUpgrade(int spin, int tier) =>
+        new()
+        {
+            Spin = spin,
+            Board = FilledBoard(1),
+            Push = Enumerable.Repeat(1, Settings.Default.COLS).ToArray(),
+            Flush = Enumerable.Repeat(false, Settings.Default.COLS).ToArray(),
+            Spawns = new Dictionary<(int, int), Cell>
+            {
+                [(0, 0)] = Grid.Feat(Settings.Default.F_PRUP, 1, new FP
+                {
+                    FeatId = "PRIZE_UPGRADE",
+                    PrupSym = 2,
+                    PrupTier = tier,
+                }),
+            },
+        };
+
+    private static SpinPlan PlainSpin(int spin) =>
+        new()
+        {
+            Spin = spin,
+            Board = FilledBoard(1),
+            Push = Enumerable.Repeat(1, Settings.Default.COLS).ToArray(),
+            Flush = Enumerable.Repeat(false, Settings.Default.COLS).ToArray(),
+            Spawns = new Dictionary<(int, int), Cell>(),
+        };
+
+    private static Cell?[,] FilledBoard(int sym)
+    {
+        var board = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
+        for (var row = 0; row < Settings.Default.ROWS; row++)
+        {
+            for (var col = 0; col < Settings.Default.COLS; col++)
+                board[row, col] = Grid.Norm(sym);
+        }
+        return board;
     }
 
     private static IReadOnlyList<PrizeLadderRow> StandardRows() =>

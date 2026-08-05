@@ -15,7 +15,7 @@ namespace CoinPusherEngine;
 ///   EXTRA_SPIN    -> { FeatureId, ConvertToId, ReTrigger: [...] }
 ///   PRIZE_UPGRADE -> { FeatureId, ConvertToId, UpgradeSymbolId, UpgradePrizeValue }
 ///
-/// ReTrigger chaining: with configurable probability, a cosmetic no-board-effect
+/// ReTrigger chaining: with configurable probability, a same-turn cosmetic
 /// PRIZE_UPGRADE token may be folded into another feature token's ReTrigger array.
 /// EXTRA_SPIN and WHEEL always stay physical because TotalSpins and WHEEL stack timing
 /// are load-bearing. ReTrigger depth is intentionally capped at one nested feature.
@@ -270,10 +270,10 @@ public static class TicketSerializer
         if (payload.Cell.Sym == settings.F_WHEEL || payload.Cell.Sym == settings.F_XSPIN)
             return false;
 
-        if (start.Cell.Sym == settings.F_WHEEL)
-            return payload.Spin == start.Spin && payload.Cell.Sym == settings.F_PRUP;
+        if (payload.Spin != start.Spin)
+            return false;
 
-        return payload.Cell.Sym == settings.F_PRUP && payload.Spin <= start.Spin;
+        return payload.Cell.Sym == settings.F_PRUP;
     }
 
     private static int FeatureChainConvertId(Cell cell, int depth, GamePlan plan, Settings settings)
