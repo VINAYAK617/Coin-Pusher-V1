@@ -13,16 +13,7 @@ internal static class Program
         try
         {
             var options = ParseOptions(args);
-            var input = new MathInput
-            {
-                Targets = options.Targets,
-                BaseSpins = options.Settings.BASE_SPINS,
-                Required = options.Required,
-                WheelSymOrder = options.WheelSymOrder.Count > 0 ? options.WheelSymOrder : null,
-                PrizeTiers = options.PrizeTiers.Count > 0 ? options.PrizeTiers : null,
-                NonWinTargets = options.NonWinTargets.Count > 0 ? options.NonWinTargets : null,
-                MaxSym = options.MaxSym,
-            };
+            var input = options.BuildMathInput();
 
             var plan = new Planner(input, options.Settings, options.Seed).Plan();
             Console.WriteLine(TicketSerializer.ToJson(plan, options.Settings));
@@ -51,6 +42,10 @@ internal static class Program
             {
                 case "--seed":
                     options.Seed = int.Parse(value);
+                    break;
+                case "--prize":
+                case "--prizes":
+                    options.Prizes = ParsePrizeList(value);
                     break;
                 case "--targets":
                     options.Targets = ParseIntMap(value);
@@ -115,6 +110,22 @@ internal static class Program
             .ToList();
     }
 
+    private static List<decimal> ParsePrizeList(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)
+            || value.Equals("none", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("nowin", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("loss", StringComparison.OrdinalIgnoreCase)
+            || value == "0")
+        {
+            return new List<decimal>();
+        }
+
+        return value.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(decimal.Parse)
+            .ToList();
+    }
+
     private static (string Key, string Value) ParsePair(string value)
     {
         var parts = value.Split('=', 2, StringSplitOptions.TrimEntries);
@@ -131,7 +142,8 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --seed <number>                 Optional deterministic seed");
-        Console.WriteLine("  --targets <id=count,...>         Winning targets, default 2=20,4=20");
+        Console.WriteLine("  --prizes <amount,...>            Prize amount(s), default 1; use 0/none/nowin for loss");
+        Console.WriteLine("  --targets <id=count,...>         Manual winning targets override");
         Console.WriteLine("  --nonwin <id=count,...>          Optional fixed near-miss targets");
         Console.WriteLine("  --required <feature=count,...>   Optional required features");
         Console.WriteLine("  --wheel <id,id,...>              Optional wheel symbol order");
@@ -144,7 +156,8 @@ internal static class Program
 
     private sealed class GeneratorOptions
     {
-        internal Dictionary<int, int> Targets { get; set; } = new() { [2] = 20, [4] = 20 };
+        internal List<decimal> Prizes { get; set; } = new() { 1m };
+        internal Dictionary<int, int>? Targets { get; set; }
         internal Dictionary<int, int> NonWinTargets { get; set; } = new();
         internal Dictionary<string, int> Required { get; set; } = new();
         internal List<int> WheelSymOrder { get; set; } = new();
@@ -152,5 +165,50 @@ internal static class Program
         internal int MaxSym { get; set; } = 6;
         internal int? Seed { get; set; }
         internal Settings Settings { get; } = new();
+
+        internal MathInput BuildMathInput()
+        {
+            if (Targets != null)
+            {
+                return new MathInput
+                {
+                    Targets = Targets,
+                    BaseSpins = Settings.BASE_SPINS,
+                    Required = Required,
+                    WheelSymOrder = WheelSymOrder.Count > 0 ? WheelSymOrder : null,
+                    PrizeTiers = PrizeTiers.Count > 0 ? PrizeTiers : null,
+                    NonWinTargets = NonWinTargets.Count > 0 ? NonWinTargets : null,
+                    MaxSym = MaxSym,
+                };
+            }
+
+            var bundle = new LadderCombinator(Settings.PrizeLadderRows, Seed).Bundle(Prizes);
+            return ApplyOverrides(bundle.Input);
+        }
+
+        private MathInput ApplyOverrides(MathInput input)
+        {
+            var required = input.Required.ToDictionary(kv => kv.Key, kv => kv.Value);
+            foreach (var (feature, count) in Required)
+                required[feature] = required.GetValueOrDefault(feature) + count;
+
+            var prizeTiers = input.PrizeTiers?.ToDictionary(kv => kv.Key, kv => kv.Value)
+                ?? new Dictionary<int, int>();
+            foreach (var (sym, tier) in PrizeTiers)
+                prizeTiers[sym] = tier;
+
+            return new MathInput
+            {
+                Targets = input.Targets,
+                BaseSpins = input.BaseSpins,
+                Required = required,
+                WheelSymOrder = WheelSymOrder.Count > 0 ? WheelSymOrder : input.WheelSymOrder,
+                PrizeTiers = prizeTiers.Count > 0 ? prizeTiers : null,
+                PrizeValues = input.PrizeValues,
+                NonWinTargets = NonWinTargets.Count > 0 ? NonWinTargets : input.NonWinTargets,
+                NonWinPrizeTiers = input.NonWinPrizeTiers,
+                MaxSym = Math.Max(MaxSym, input.MaxSym),
+            };
+        }
     }
 }

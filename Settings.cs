@@ -24,6 +24,17 @@ public sealed class Settings
     public int F_PRUP { get; init; } = 13;
     public int F_COIN { get; init; } = 1;
 
+    public IReadOnlyList<PrizeLadderRow> PrizeLadderRows { get; init; } =
+        new[]
+        {
+            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 1, 2, 5 } },
+            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 2, 5, 10 } },
+            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 5, 10, 25 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 10, 25, 100 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 100, 250, 1000 } },
+            new PrizeLadderRow { Target = 30, Tiers = new decimal[] { 10000 } },
+        };
+
     public double PWheelStackValue1 { get; init; } = Probability("COINPUSHER_P_WHEEL_STACK_VALUE_1", 0.45);
     public double PWheelStackValue2 { get; init; } = Probability("COINPUSHER_P_WHEEL_STACK_VALUE_2", 0.35);
     public double PWheelRepeatOptional { get; init; } = Probability("COINPUSHER_P_WHEEL_REPEAT_OPTIONAL", 0.35);
