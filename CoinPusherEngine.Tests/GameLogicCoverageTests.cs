@@ -6,8 +6,6 @@ namespace CoinPusherEngine.Tests;
 [TestClass]
 public sealed class GameLogicCoverageTests
 {
-    public TestContext TestContext { get; set; } = null!;
-
     [DataTestMethod]
     [DataRow(101)]
     [DataRow(202)]
@@ -406,75 +404,6 @@ public sealed class GameLogicCoverageTests
             check.Result == TicketChecker.Status.Fail &&
             check.Category == "WinInfo" &&
             check.Name.Contains("Collected symbol")));
-    }
-
-    [TestMethod]
-    public void VolumeAuditWithTicketCheckerWhenRequested()
-    {
-        var rawCount = Environment.GetEnvironmentVariable("COINPUSHER_VOLUME_TICKETS");
-        if (!int.TryParse(rawCount, out var ticketCount) || ticketCount <= 0)
-        {
-            TestContext.WriteLine("Set COINPUSHER_VOLUME_TICKETS to run the volume ticket checker audit.");
-            return;
-        }
-
-        var seed = int.TryParse(Environment.GetEnvironmentVariable("COINPUSHER_VOLUME_SEED"), out var parsedSeed)
-            ? parsedSeed
-            : 20260806;
-        var rng = new Random(seed);
-        var failures = new List<string>();
-        var warningCount = 0;
-        var noWinCount = 0;
-        var winningCount = 0;
-        var maxTurnCount = 0;
-        var featureTicketCount = 0;
-        var nearMissTicketCount = 0;
-
-        for (var i = 0; i < ticketCount; i++)
-        {
-            var ticketSeed = rng.Next(1, int.MaxValue);
-            TicketSerializer.TicketDto ticket;
-            try
-            {
-                var input = VolumeAuditInputs.Build(i, ticketSeed, rng);
-                ticket = PlanTicket(input, ticketSeed);
-            }
-            catch (Exception ex)
-            {
-                failures.Add($"ticket {i} seed {ticketSeed}: generation failed: {ex.Message}");
-                continue;
-            }
-
-            var report = TicketChecker.CheckTicket(ticket);
-            if (!report.IsValid)
-            {
-                var errors = string.Join(" | ", report.Checks
-                    .Where(c => c.Result == TicketChecker.Status.Fail)
-                    .Select(c => $"{c.Category}/{c.Name}: {c.Detail}")
-                    .Take(5));
-                failures.Add($"ticket {i} seed {ticketSeed}: checker failed: {errors}");
-            }
-
-            warningCount += report.WarningCount;
-            if (ticket.WinInfo.WinSymbols.Length == 0) noWinCount++;
-            else winningCount++;
-            if (ticket.WinInfo.TotalSpins == Settings.Default.MAX_SPINS) maxTurnCount++;
-            if (ticket.Turns.Any(turn => turn.Spawns.Any(spawn => spawn.Feature != null))
-                || ticket.Turns.Any(turn => turn.Pushers.Any(pusher => pusher.FeatureId.HasValue)))
-                featureTicketCount++;
-            if (ticket.WinInfo.NonWinSymbols.Any(symbol => symbol.MinTarget >= Settings.Default.NONWIN_MIN_TARGET))
-                nearMissTicketCount++;
-        }
-
-        TestContext.WriteLine(
-            $"volume tickets={ticketCount}, seed={seed}, failures={failures.Count}, warnings={warningCount}, " +
-            $"winning={winningCount}, noWin={noWinCount}, nearMiss={nearMissTicketCount}, " +
-            $"featureTickets={featureTicketCount}, maxTurns={maxTurnCount}");
-
-        if (failures.Count > 0)
-        {
-            Assert.Fail(string.Join(Environment.NewLine, failures.Take(20)));
-        }
     }
 
     private static TicketSerializer.TicketDto PlanTicket(MathInput input, int seed)

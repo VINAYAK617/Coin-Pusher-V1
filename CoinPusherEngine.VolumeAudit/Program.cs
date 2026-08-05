@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using CoinPusherEngine;
+using CoinPusherEngine.VolumeAudit;
 
 var count = ArgInt(args, 0, 1000);
 var seed = ArgInt(args, 1, 20260806);

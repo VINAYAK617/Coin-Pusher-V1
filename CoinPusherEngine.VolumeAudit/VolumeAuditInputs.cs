@@ -1,8 +1,10 @@
-namespace CoinPusherEngine;
+using CoinPusherEngine;
 
-public static class VolumeAuditInputs
+namespace CoinPusherEngine.VolumeAudit;
+
+internal static class VolumeAuditInputs
 {
-    public static MathInput Build(int index, int seed, Random rng)
+    internal static MathInput Build(int index, int seed, Random rng)
     {
         var rows = StandardRows();
         if (index % 10 == 0)
