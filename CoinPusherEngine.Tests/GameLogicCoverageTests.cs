@@ -103,6 +103,31 @@ public sealed class GameLogicCoverageTests
         AssertValid(ticket);
     }
 
+    [DataTestMethod]
+    [DataRow("1,2,5", 3, 810301)]
+    [DataRow("1,2,5,10", 4, 810302)]
+    [DataRow("1,2,5,10,100", 5, 810303)]
+    [DataRow("1,2,5,10,100,10000", 6, 810304)]
+    [DataRow("2,5,10", 3, 810305)]
+    [DataRow("5,10,100,10000", 4, 810306)]
+    public void LadderBundlesWithSeveralWinSymbolsGenerateValidTickets(
+        string prizeCsv,
+        int expectedWinSymbols,
+        int seed)
+    {
+        var prizes = prizeCsv.Split(',').Select(decimal.Parse).ToArray();
+        var bundle = new LadderCombinator(StandardRows(), seed).Bundle(prizes);
+
+        Assert.AreEqual(expectedWinSymbols, bundle.Input.Targets.Count);
+        CollectionAssert.AreEqual(prizes.OrderBy(prize => prize).ToArray(), bundle.Covered);
+
+        var ticket = PlanTicket(bundle.Input, seed);
+
+        Assert.AreEqual(expectedWinSymbols, ticket.WinInfo.WinSymbols.Length);
+        AssertNoFinalBoardFeatures(ticket);
+        AssertValid(ticket);
+    }
+
     [TestMethod]
     public void TopPrizeTargetCompletesOnFinalTurn()
     {
