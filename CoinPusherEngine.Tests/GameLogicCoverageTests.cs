@@ -272,6 +272,43 @@ public sealed class GameLogicCoverageTests
         AssertValid(ticket);
     }
 
+    [TestMethod]
+    public void ConfiguredLateFeaturePlacementBiasesNonWheelFeatureTriggersTowardEndSpinsWhenFeasible()
+    {
+        var settings = new Settings
+        {
+            PFeatureLatePlacement = 1.0,
+            PFeatureRetriggerChain = 0.0,
+        };
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int> { [2] = 20 },
+            BaseSpins = 5,
+            Required = new Dictionary<string, int>
+            {
+                ["EXTRA_SPIN"] = 1,
+                ["PRIZE_UPGRADE"] = 1,
+            },
+            PrizeTiers = new Dictionary<int, int> { [2] = 1 },
+            PrizeValues = PrizeValues(6, tiers: 3),
+            MaxSym = 6,
+        };
+
+        var plan = new Planner(input, settings, seed: 34344).Plan();
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
+        var lateStart = Math.Max(1, ticket.WinInfo.TotalSpins - Math.Max(2, settings.WinLateTailSpins + 1));
+        var featureTurns = ticket.Turns
+            .SelectMany((turn, index) => turn.Spawns
+                .Where(spawn => spawn.Feature != null)
+                .Select(_ => index + 1))
+            .ToArray();
+
+        Assert.IsTrue(featureTurns.Length >= 2);
+        Assert.IsTrue(featureTurns.All(turn => turn >= lateStart), string.Join(",", featureTurns));
+        AssertNoFinalBoardFeatures(ticket);
+        AssertValid(ticket);
+    }
+
     [DataTestMethod]
     [DataRow(7001)]
     [DataRow(7002)]
@@ -447,10 +484,10 @@ public sealed class GameLogicCoverageTests
                 ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
             };
             injected++;
-            if (injected > FeatReg.Cfg["WHEEL"].Max) break;
+            if (injected > Settings.Default.FeatureConfig("WHEEL").Max) break;
         }
 
-        Assert.IsTrue(injected > FeatReg.Cfg["WHEEL"].Max);
+        Assert.IsTrue(injected > Settings.Default.FeatureConfig("WHEEL").Max);
         var report = TicketChecker.CheckTicket(gameData);
 
         Assert.IsFalse(report.IsValid);

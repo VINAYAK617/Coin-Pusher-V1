@@ -23,6 +23,7 @@ internal sealed record PlanAssemblyRequest(
     int BaseSpins,
     IReadOnlyDictionary<int, int> DecorBudget,
     TicketExperienceProfile ExperienceProfile,
+    Settings Settings,
     int Seed,
     List<string> Log);
 
@@ -48,8 +49,6 @@ internal interface IPlanVerificationStage
 
 internal sealed class DefaultPlanAssemblyPipeline : IPlanAssemblyPipeline
 {
-    private const int LocalRealizationAttempts = 32;
-
     private readonly ISpinPlanBuildStage _builder;
     private readonly ISpawnResolutionStage _resolver;
     private readonly IPlanVerificationStage _verifier;
@@ -67,7 +66,7 @@ internal sealed class DefaultPlanAssemblyPipeline : IPlanAssemblyPipeline
     public GamePlan Assemble(PlanAssemblyRequest request)
     {
         Exception? last = null;
-        for (var attempt = 0; attempt < LocalRealizationAttempts; attempt++)
+        for (var attempt = 0; attempt < request.Settings.LocalRealizationAttempts; attempt++)
         {
             var rng = new Random(AttemptSeed(request.Seed, attempt));
             var fillTracker = new FillTracker(request.FillSyms.ToArray());
@@ -94,7 +93,7 @@ internal sealed class DefaultPlanAssemblyPipeline : IPlanAssemblyPipeline
         }
 
         throw new InvalidOperationException(
-            $"Could not realize verified board suffix after {LocalRealizationAttempts} local attempts.",
+            $"Could not realize verified board suffix after {request.Settings.LocalRealizationAttempts} local attempts.",
             last);
     }
 

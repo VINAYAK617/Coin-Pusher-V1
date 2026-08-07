@@ -4,6 +4,14 @@ public sealed class Settings
 {
     public static Settings Default { get; } = new();
 
+    private static readonly string[] FeatureIds =
+    {
+        "WHEEL",
+        "FLUSH",
+        "EXTRA_SPIN",
+        "PRIZE_UPGRADE",
+    };
+
     public int ROWS { get; init; } = 5;
     public int COLS { get; init; } = 5;
     public int MIN_PUSH { get; init; } = 1;
@@ -23,6 +31,45 @@ public sealed class Settings
     public int F_FLUSH_ID { get; init; } = 14;
     public int F_PRUP { get; init; } = 13;
     public int F_COIN { get; init; } = 1;
+
+    public int MaxPlanAttempts { get; init; } = Int("COINPUSHER_MAX_PLAN_ATTEMPTS", 64, 1);
+    public int LocalRealizationAttempts { get; init; } = Int("COINPUSHER_LOCAL_REALIZATION_ATTEMPTS", 32, 1);
+
+    public (double P, int Max, int MinS, int MaxS, int Ord) WheelFeatureConfig { get; init; } =
+        (
+            Probability("COINPUSHER_FEATURE_WHEEL_P", 0.40),
+            Int("COINPUSHER_FEATURE_WHEEL_MAX", 3, 0),
+            Int("COINPUSHER_FEATURE_WHEEL_MIN_SPIN", 1, 0),
+            Int("COINPUSHER_FEATURE_WHEEL_MAX_SPIN", 98, 1),
+            Int("COINPUSHER_FEATURE_WHEEL_ORDER", 1, 0)
+        );
+
+    public (double P, int Max, int MinS, int MaxS, int Ord) FlushFeatureConfig { get; init; } =
+        (
+            Probability("COINPUSHER_FEATURE_FLUSH_P", 0.30),
+            Int("COINPUSHER_FEATURE_FLUSH_MAX", 5, 0),
+            Int("COINPUSHER_FEATURE_FLUSH_MIN_SPIN", 1, 0),
+            Int("COINPUSHER_FEATURE_FLUSH_MAX_SPIN", 99, 1),
+            Int("COINPUSHER_FEATURE_FLUSH_ORDER", 2, 0)
+        );
+
+    public (double P, int Max, int MinS, int MaxS, int Ord) ExtraSpinFeatureConfig { get; init; } =
+        (
+            Probability("COINPUSHER_FEATURE_EXTRA_SPIN_P", 0.20),
+            Int("COINPUSHER_FEATURE_EXTRA_SPIN_MAX", 5, 0),
+            Int("COINPUSHER_FEATURE_EXTRA_SPIN_MIN_SPIN", 1, 0),
+            Int("COINPUSHER_FEATURE_EXTRA_SPIN_MAX_SPIN", 97, 1),
+            Int("COINPUSHER_FEATURE_EXTRA_SPIN_ORDER", 3, 0)
+        );
+
+    public (double P, int Max, int MinS, int MaxS, int Ord) PrizeUpgradeFeatureConfig { get; init; } =
+        (
+            Probability("COINPUSHER_FEATURE_PRIZE_UPGRADE_P", 0.15),
+            Int("COINPUSHER_FEATURE_PRIZE_UPGRADE_MAX", 2, 0),
+            Int("COINPUSHER_FEATURE_PRIZE_UPGRADE_MIN_SPIN", 1, 0),
+            Int("COINPUSHER_FEATURE_PRIZE_UPGRADE_MAX_SPIN", 97, 1),
+            Int("COINPUSHER_FEATURE_PRIZE_UPGRADE_ORDER", 4, 0)
+        );
 
     public IReadOnlyList<PrizeLadderRow> PrizeLadderRows { get; init; } =
         new[]
@@ -81,6 +128,7 @@ public sealed class Settings
     public double WNonWinHigh { get; init; } = Weight("COINPUSHER_W_NONWIN_HIGH", 0.20);
 
     public double PFeatureRetriggerChain { get; init; } = Probability("COINPUSHER_P_FEATURE_RETRIGGER_CHAIN", 0.25);
+    public double PFeatureLatePlacement { get; init; } = Probability("COINPUSHER_P_FEATURE_LATE_PLACEMENT", 0.90);
     public int[] FeatureRetriggerBridgeIds { get; init; } =
     {
         12,
@@ -102,6 +150,22 @@ public sealed class Settings
 
     public bool IsFeat(int id) => id == F_WHEEL || id == F_XSPIN || id == F_PRUP;
 
+    public IReadOnlyDictionary<string, (double P, int Max, int MinS, int MaxS, int Ord)> FeatureConfigs =>
+        FeatureIds.ToDictionary(id => id, FeatureConfig);
+
+    public IEnumerable<string> OrderedFeatureIds =>
+        FeatureIds.OrderBy(id => FeatureConfig(id).Ord);
+
+    public (double P, int Max, int MinS, int MaxS, int Ord) FeatureConfig(string id) =>
+        id switch
+        {
+            "WHEEL" => WheelFeatureConfig,
+            "FLUSH" => FlushFeatureConfig,
+            "EXTRA_SPIN" => ExtraSpinFeatureConfig,
+            "PRIZE_UPGRADE" => PrizeUpgradeFeatureConfig,
+            _ => throw new ArgumentException($"Unknown feature config '{id}'", nameof(id)),
+        };
+
     private static double Probability(string envName, double fallback)
     {
         var raw = Environment.GetEnvironmentVariable(envName);
@@ -117,6 +181,15 @@ public sealed class Settings
         if (string.IsNullOrWhiteSpace(raw)) return fallback;
         return double.TryParse(raw, out var value)
             ? Math.Max(0.0, value)
+            : fallback;
+    }
+
+    private static int Int(string envName, int fallback, int min, int max = int.MaxValue)
+    {
+        var raw = Environment.GetEnvironmentVariable(envName);
+        if (string.IsNullOrWhiteSpace(raw)) return fallback;
+        return int.TryParse(raw, out var value)
+            ? Math.Clamp(value, min, max)
             : fallback;
     }
 }

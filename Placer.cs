@@ -27,9 +27,9 @@ internal sealed class Placer
         int knownExtraSpins = _inp.Required.GetValueOrDefault("EXTRA_SPIN", 0);
         int totalSpinsKnown = _inp.BaseSpins + knownExtraSpins;
 
-        foreach (var id in FeatReg.Ordered)
+        foreach (var id in FeatReg.Ordered(_settings))
         {
-            var (_, _, minS, maxS, _) = FeatReg.Cfg[id];
+            var (_, _, minS, maxS, _) = _settings.FeatureConfig(id);
             int req     = _inp.Required.GetValueOrDefault(id, 0);
             // maxS is an exclusive upper bound throughout this class and in
             // Feat.TryPlace implementations. Any board-token feature must not appear
@@ -63,7 +63,7 @@ internal sealed class Placer
                 {
                     // A genuine placement failure, not a volume/feasibility one: the
                     // (spin,col) grid this feature's window offers — after whatever
-                    // higher-priority features (WHEEL, FLUSH; see FeatReg.Cfg's Ord)
+                    // higher-priority features (WHEEL, FLUSH; see Settings feature order)
                     // already claimed — has fewer free cells than this REQUIRED count
                     // needs. CapacityAnalyzer's feasibility math only ever reasons about
                     // collected-cell VOLUME, not this placement GEOMETRY, so it can't
@@ -109,7 +109,7 @@ internal sealed class Placer
         // spins with every feature while later spins stay empty. Targeting a spread
         // of preferred spins up front is what actually distributes placements across
         // the full ticket, not just the order cells are visited in.
-        foreach (int target in EvenlySpreadSpins(minS, maxS, req))
+        foreach (int target in FeatureSpinTargets(minS, maxS, req))
         {
             if (placed >= req) break;
             var r = PlaceNearSpin(feat, target, minS, maxS, done, used);
@@ -137,7 +137,7 @@ internal sealed class Placer
         {
             if (placed >= req) break;
             PlacedFeat? r = null;
-            foreach (var spin in PrizeUpgradeSpinOrder(minS, maxS))
+            foreach (var spin in FeatureSpinTargets(minS, maxS, req))
             {
                 if (ConflictsWithWheelSpin(feat, spin, done)) continue;
                 for (var col = 0; col < _settings.COLS - 1; col++)
@@ -172,21 +172,28 @@ internal sealed class Placer
         return placed;
     }
 
-    private IEnumerable<int> PrizeUpgradeSpinOrder(int minS, int maxS)
+    private IEnumerable<int> FeatureSpinTargets(int minS, int maxS, int count)
     {
         var all = Enumerable.Range(minS, Math.Max(0, maxS - minS)).ToArray();
         if (all.Length == 0) return all;
         var lateProbability = _experienceProfile switch
         {
-            TicketExperienceProfile.LateWin => 0.95,
-            TicketExperienceProfile.FeatureRich => 0.75,
-            _ => 0.80,
+            TicketExperienceProfile.LateWin => Math.Min(1.0, _settings.PFeatureLatePlacement + 0.05),
+            TicketExperienceProfile.FeatureRich => Math.Max(0.0, _settings.PFeatureLatePlacement - 0.05),
+            _ => _settings.PFeatureLatePlacement,
         };
-        if (_rng.NextDouble() >= lateProbability) return all;
+        var wantsLate = _rng.NextDouble() < lateProbability;
+        var pivot = Math.Max(minS + 1, maxS - Math.Max(2, _settings.WinLateTailSpins + 1));
+        var preferred = wantsLate
+            ? all.Where(spin => spin >= pivot).ToArray()
+            : all.Where(spin => spin < pivot).ToArray();
 
-        var lateStart = Math.Max(minS, maxS - Math.Max(2, _settings.WinLateTailSpins + 1));
-        var late = all.Where(spin => spin >= lateStart).ToArray();
-        return late.Concat(all.Where(spin => spin < lateStart));
+        if (preferred.Length == 0)
+            preferred = all;
+
+        var fallback = all.Except(preferred).ToArray();
+        return EvenlySpreadSpins(preferred[0], preferred[^1] + 1, count)
+            .Concat(fallback.OrderBy(_ => _rng.Next()));
     }
 
     /// <summary>

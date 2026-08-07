@@ -291,17 +291,9 @@ internal static class FeatReg
         ById.Where(kv => kv.Value.HasToken)
             .ToDictionary(kv => kv.Value.FeatSym, kv => kv.Value);
 
-    // (prob, maxInstances, minSpin, maxSpin, placementOrder)
-    internal static readonly IReadOnlyDictionary<string, (double P, int Max, int MinS, int MaxS, int Ord)> Cfg =
-        new Dictionary<string, (double, int, int, int, int)>
-        {
-            ["WHEEL"]         = (0.40, 3, 1, 98, 1),
-            ["FLUSH"]         = (0.30, 5, 1, 99, 2),
-            ["EXTRA_SPIN"]    = (0.20, 5, 1, 97, 3),
-            ["PRIZE_UPGRADE"] = (0.15, 2, 1, 97, 4),
-        };
+    internal static IEnumerable<string> Ordered(Settings settings) =>
+        settings.OrderedFeatureIds;
 
-    internal static IEnumerable<string> Ordered => Cfg.OrderBy(kv => kv.Value.Ord).Select(kv => kv.Key);
     internal static bool Has(string id)  => ById.ContainsKey(id);
     internal static bool HasSym(int sym) => BySym.ContainsKey(sym);
     internal static Feat Get(string id)  => ById[id];

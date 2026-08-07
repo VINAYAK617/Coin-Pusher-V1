@@ -560,7 +560,7 @@ public static class TicketChecker
             .Sum(turn => (turn.Pushers ?? Array.Empty<PusherDto>())
                 .Count(pusher => pusher.FeatureId == Settings.Default.F_FLUSH_ID));
 
-        CheckMax("WHEEL", wheelTokenCount, FeatReg.Cfg["WHEEL"].Max);
+        CheckMax("WHEEL", wheelTokenCount, Settings.Default.FeatureConfig("WHEEL").Max);
         CheckMax("EXTRA_SPIN", extraSpinTokenCount, Settings.Default.MAX_SPINS - Settings.Default.BASE_SPINS);
         CheckMax("FLUSH/PUSH", flushPusherCount, Settings.Default.COLS - 1);
 

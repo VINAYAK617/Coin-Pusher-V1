@@ -566,7 +566,7 @@ internal sealed class FeaturePlanStage
                          .OrderByDescending(s => input.Targets[s])
                          .Where(sym => !wheelOrder.Contains(sym) && input.Targets[sym] >= 10))
             {
-                if (wheels >= FeatReg.Cfg["WHEEL"].Max) break;
+                if (wheels >= objectives.Settings.FeatureConfig("WHEEL").Max) break;
                 if (rng.NextDouble() >= ObjectiveStage.ProfiledProbability(objectives.Settings.PWheelOptional, objectives.ExperienceProfile, wheel: true)) continue;
                 if (!IsFeatureShapeFeasible(
                         input,
@@ -589,7 +589,7 @@ internal sealed class FeaturePlanStage
         {
             foreach (var sym in RepeatWheelCandidates(objectives.SourceInput, wheelOrder))
             {
-                if (wheels >= FeatReg.Cfg["WHEEL"].Max) break;
+                if (wheels >= objectives.Settings.FeatureConfig("WHEEL").Max) break;
                 if (rng.NextDouble() >= ObjectiveStage.ProfiledProbability(objectives.Settings.PWheelRepeatOptional, objectives.ExperienceProfile, repeatWheel: true)) continue;
                 if (!IsFeatureShapeFeasible(
                         input,
@@ -608,7 +608,7 @@ internal sealed class FeaturePlanStage
             }
         }
 
-        var wheelBudget = FeatReg.Cfg["WHEEL"].Max - wheels;
+        var wheelBudget = objectives.Settings.FeatureConfig("WHEEL").Max - wheels;
         if (wheelBudget > 0 && optionalBudget.AllowWheel)
         {
             foreach (var sym in objectives.NonWinTargets.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).Take(1))
@@ -725,8 +725,8 @@ internal sealed class FeaturePlanStage
         int minExtras,
         Settings settings)
     {
-        var maxWheels = FeatReg.Cfg["WHEEL"].Max;
-        var maxFlushes = Math.Min(FeatReg.Cfg["FLUSH"].Max, settings.COLS - 1);
+        var maxWheels = settings.FeatureConfig("WHEEL").Max;
+        var maxFlushes = Math.Min(settings.FeatureConfig("FLUSH").Max, settings.COLS - 1);
         var maxExtras = settings.MAX_SPINS - settings.BASE_SPINS;
         (int Wheels, int Flushes, int Extras, int Score)? best = null;
 
@@ -815,8 +815,8 @@ internal sealed class FeaturePlanStage
         int extras,
         Settings settings)
     {
-        if (wheels > FeatReg.Cfg["WHEEL"].Max) return false;
-        if (flushes > Math.Min(FeatReg.Cfg["FLUSH"].Max, settings.COLS - 1)) return false;
+        if (wheels > settings.FeatureConfig("WHEEL").Max) return false;
+        if (flushes > Math.Min(settings.FeatureConfig("FLUSH").Max, settings.COLS - 1)) return false;
         if (extras > settings.MAX_SPINS - settings.BASE_SPINS) return false;
 
         var physWins = CapacityAnalyzer.PhysicalWins(input.Targets, wheels);
@@ -1026,6 +1026,7 @@ internal sealed class BoardRealizationStage
             features.SchedulingInput.BaseSpins,
             new Dictionary<int, int>(),
             objectives.ExperienceProfile,
+            objectives.Settings,
             objectives.Rng.Next(),
             objectives.Log));
     }

@@ -396,7 +396,7 @@ public sealed class LadderCombinator
             .ToArray();
         if (fillSymbols.Length < 2) return false;
 
-        var maxWheels = Math.Min(FeatReg.Cfg["WHEEL"].Max, list.Count);
+        var maxWheels = Math.Min(Settings.Default.FeatureConfig("WHEEL").Max, list.Count);
         var maxFlushes = Settings.Default.COLS - 1;
         var maxExtras = Settings.Default.MAX_SPINS - Settings.Default.BASE_SPINS;
 

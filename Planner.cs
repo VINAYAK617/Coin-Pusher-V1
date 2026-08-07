@@ -18,8 +18,6 @@ public sealed class Planner
     private static readonly IPlanAssemblyPipeline DefaultBoardPipeline = new DefaultPlanAssemblyPipeline();
     private static readonly CleanGenerationPipeline DefaultPipeline = new(DefaultBoardPipeline);
 
-    private const int MaxPlanAttempts = 64;
-
     public Planner(MathInput inp, int? seed = null)
         : this(inp, seed, new Settings(), DefaultBoardPipeline)
     {
@@ -53,7 +51,7 @@ public sealed class Planner
         var retryCauses = new Dictionary<string, int>();
         var pressure = PlanningPressure(_input);
 
-        for (var attempt = 0; attempt < MaxPlanAttempts; attempt++)
+        for (var attempt = 0; attempt < _settings.MaxPlanAttempts; attempt++)
         {
             var attemptSeed = AttemptSeed(_baseSeed, attempt);
             var rng = new Random(attemptSeed);
@@ -88,7 +86,7 @@ public sealed class Planner
         }
 
         throw new InvalidOperationException(
-            $"Could not build a verified plan after {MaxPlanAttempts} smart attempts.",
+            $"Could not build a verified plan after {_settings.MaxPlanAttempts} smart attempts.",
             last);
     }
 
