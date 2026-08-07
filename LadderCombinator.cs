@@ -171,7 +171,6 @@ public sealed class LadderCombinator
     public BundleResult Bundle(IEnumerable<decimal> amounts)
     {
         var ordered = amounts.OrderBy(a => a).ToList();
-        var bySym   = new Dictionary<int, BundleEntry>();
         var covered = new List<decimal>();
         var skipped = new List<decimal>();
 
@@ -186,88 +185,140 @@ public sealed class LadderCombinator
             };
         }
 
-        foreach (var amount in ordered)
-        {
-            var candidates = CandidatesFor(amount);
+        if (!TryBundleAll(ordered, 0, new Dictionary<int, BundleEntry>(), out var bySym))
+            throw new InvalidOperationException(
+                $"Prize list [{string.Join(",", ordered)}] cannot be reached without violating ticket capacity. " +
+                "Increase the spin/feature envelope or split the requested prizes across tickets.");
 
-            // Single-candidate fast path: try a direct/upgrade pick exactly matching the
-            // amount, same as before — this covers the common case without any search.
-            List<LadderCandidate>? winningCombo = null;
-
-            if (candidates.Count > 0)
-            {
-                var direct  = candidates.Where(c => c.Tier == 0).OrderBy(c => c.Sym).ToList();
-                var upgrade = candidates.Where(c => c.Tier > 0).OrderBy(c => c.Tier).ThenBy(c => c.Sym).ToList();
-
-                List<LadderCandidate> first, second;
-                if (direct.Count > 0 && upgrade.Count > 0)
-                {
-                    bool preferDirect = _rng.NextDouble() < 0.5;
-                    first  = preferDirect ? direct  : upgrade;
-                    second = preferDirect ? upgrade : direct;
-                }
-                else
-                {
-                    first  = direct.Count > 0 ? direct : upgrade;
-                    second = new List<LadderCandidate>();
-                }
-
-                var single = TryPickFeasible(bySym, first) ?? TryPickFeasible(bySym, second);
-                if (single != null) winningCombo = new List<LadderCandidate> { single };
-            }
-
-            // No single candidate worked (either none exist for this exact amount, or every
-            // one would reuse an already-consumed symbol) — search for a SUBSET of
-            // candidates across unused DIFFERENT symbols whose amounts sum to the target exactly.
-            // No cap on how many symbols may combine. When multiple valid combinations
-            if (winningCombo == null)
-            {
-                var allCombos = FindSumCombinations(amount, bySym);
-                var feasibleCombos = allCombos
-                    .Where(combo => IsFeasibleAddition(bySym, combo))
-                    .ToList();
-                if (feasibleCombos.Count > 0)
-                    winningCombo = feasibleCombos[_rng.Next(feasibleCombos.Count)];
-            }
-
-            if (winningCombo == null)
-                throw new InvalidOperationException(
-                    $"${amount} cannot be reached without violating ticket capacity. " +
-                    "Increase the spin/feature envelope or split the requested prizes across tickets.");
-
-            // Apply the whole winning combination atomically.
-            foreach (var c in winningCombo)
-            {
-                if (!bySym.TryGetValue(c.Sym, out var entry))
-                {
-                    entry = new BundleEntry { Sym = c.Sym, Target = c.Target, Tier = c.Tier, Amounts = new List<decimal>() };
-                    bySym[c.Sym] = entry;
-                }
-                entry.Amounts.Add(amount);
-            }
-            covered.Add(amount);
-        }
-
-        var input = BuildBundledInput(bySym.Values.ToList());
+        covered.AddRange(ordered);
+        var entries = bySym.Values.OrderBy(entry => entry.Sym).ToList();
+        var input = BuildBundledInput(entries);
 
         return new BundleResult
         {
-            Input   = input,
-            Entries = bySym.Values.ToList(),
+            Input = input,
+            Entries = entries,
             Covered = covered,
             Skipped = skipped,
         };
     }
 
-    private LadderCandidate? TryPickFeasible(Dictionary<int, BundleEntry> bySym, List<LadderCandidate> pool)
+    private bool TryBundleAll(
+        List<decimal> ordered,
+        int index,
+        Dictionary<int, BundleEntry> bySym,
+        out Dictionary<int, BundleEntry> result)
     {
-        foreach (var candidate in pool)
+        if (index >= ordered.Count)
         {
-            if (bySym.ContainsKey(candidate.Sym)) continue;
-            if (IsFeasibleAddition(bySym, new[] { candidate }))
-                return candidate;
+            result = CloneEntries(bySym);
+            return true;
         }
-        return null;
+
+        var amount = ordered[index];
+        foreach (var combo in CandidateCombosFor(amount, bySym))
+        {
+            var next = CloneEntries(bySym);
+            ApplyAmount(next, amount, combo);
+            if (TryBundleAll(ordered, index + 1, next, out result))
+                return true;
+        }
+
+        result = new Dictionary<int, BundleEntry>();
+        return false;
+    }
+
+    private List<List<LadderCandidate>> CandidateCombosFor(decimal amount, Dictionary<int, BundleEntry> bySym)
+    {
+        var combos = new List<List<LadderCandidate>>();
+        var seen = new HashSet<string>();
+        var candidates = CandidatesFor(amount);
+
+        if (candidates.Count > 0)
+        {
+            var direct = candidates
+                .Where(c => c.Tier == 0)
+                .OrderBy(c => c.Sym)
+                .ToList();
+            var upgrade = candidates
+                .Where(c => c.Tier > 0)
+                .OrderBy(c => c.Tier)
+                .ThenBy(c => c.Sym)
+                .ToList();
+
+            List<LadderCandidate> first;
+            List<LadderCandidate> second;
+            if (direct.Count > 0 && upgrade.Count > 0)
+            {
+                var preferDirect = _rng.NextDouble() < 0.5;
+                first = preferDirect ? direct : upgrade;
+                second = preferDirect ? upgrade : direct;
+            }
+            else
+            {
+                first = direct.Count > 0 ? direct : upgrade;
+                second = new List<LadderCandidate>();
+            }
+
+            AddFeasibleSingles(first);
+            AddFeasibleSingles(second);
+        }
+
+        foreach (var combo in FindSumCombinations(amount, bySym)
+                     .OrderBy(combo => combo.Count)
+                     .ThenBy(combo => combo.Sum(c => c.Tier))
+                     .ThenBy(combo => combo.Sum(c => c.Sym)))
+        {
+            AddFeasibleCombo(combo);
+        }
+
+        return combos;
+
+        void AddFeasibleSingles(List<LadderCandidate> pool)
+        {
+            foreach (var candidate in pool)
+                AddFeasibleCombo(new List<LadderCandidate> { candidate });
+        }
+
+        void AddFeasibleCombo(List<LadderCandidate> combo)
+        {
+            if (combo.Any(candidate => bySym.ContainsKey(candidate.Sym))) return;
+            if (!IsFeasibleAddition(bySym, combo)) return;
+
+            var key = string.Join("|", combo
+                .OrderBy(candidate => candidate.Sym)
+                .Select(candidate => $"{candidate.Sym}:{candidate.Tier}"));
+            if (seen.Add(key))
+                combos.Add(combo);
+        }
+    }
+
+    private static Dictionary<int, BundleEntry> CloneEntries(Dictionary<int, BundleEntry> entries) =>
+        entries.ToDictionary(
+            kv => kv.Key,
+            kv => new BundleEntry
+            {
+                Sym = kv.Value.Sym,
+                Target = kv.Value.Target,
+                Tier = kv.Value.Tier,
+                Amounts = new List<decimal>(kv.Value.Amounts),
+            });
+
+    private static void ApplyAmount(
+        Dictionary<int, BundleEntry> bySym,
+        decimal amount,
+        IEnumerable<LadderCandidate> combo)
+    {
+        foreach (var candidate in combo)
+        {
+            bySym[candidate.Sym] = new BundleEntry
+            {
+                Sym = candidate.Sym,
+                Target = candidate.Target,
+                Tier = candidate.Tier,
+                Amounts = new List<decimal> { amount },
+            };
+        }
     }
 
     private bool IsFeasibleAddition(

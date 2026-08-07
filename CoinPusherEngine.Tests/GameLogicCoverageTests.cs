@@ -103,6 +103,25 @@ public sealed class GameLogicCoverageTests
         AssertValid(ticket);
     }
 
+    [TestMethod]
+    public void LadderBundleBacktracksToPreserveFuturePrizeOptions()
+    {
+        var prizes = new decimal[] { 100, 250 };
+
+        for (var seed = 1; seed <= 20; seed++)
+        {
+            var bundle = new LadderCombinator(StandardRows(), seed).Bundle(prizes);
+
+            CollectionAssert.AreEqual(prizes, bundle.Covered);
+            Assert.AreEqual(2, bundle.Input.Targets.Count);
+            Assert.IsTrue(bundle.Input.PrizeTiers!.Values.Sum() >= 3);
+
+            var ticket = PlanTicket(bundle.Input, seed);
+            Assert.AreEqual(2, ticket.WinInfo.WinSymbols.Length);
+            AssertValid(ticket);
+        }
+    }
+
     [DataTestMethod]
     [DataRow("1,2,5", 3, 810301)]
     [DataRow("1,2,5,10", 4, 810302)]
