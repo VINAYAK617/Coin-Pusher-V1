@@ -252,7 +252,16 @@ public static class TicketSerializer
         if (roll >= settings.PFeatureRetriggerChain) return FeatureChainPlan.Empty;
 
         var payload = payloadCandidates[DeterministicIndex(plan, payloadCandidates.Count, salt: 193, settings)];
-        var nested = FeatureObj(payload.Cell, plan, settings, System.Array.Empty<FeatureDto>(), depth: 1);
+        var startConvertToId = start.Cell.CvtSym > 0 && !settings.IsFeat(start.Cell.CvtSym)
+            ? start.Cell.CvtSym
+            : settings.F_COIN;
+        var nested = FeatureObj(
+            payload.Cell,
+            plan,
+            settings,
+            System.Array.Empty<FeatureDto>(),
+            depth: 1,
+            convertToOverride: startConvertToId);
         return new FeatureChainPlan(start, new[] { payload }, nested);
     }
 
@@ -274,23 +283,6 @@ public static class TicketSerializer
             return false;
 
         return payload.Cell.Sym == settings.F_PRUP;
-    }
-
-    private static int FeatureChainConvertId(Cell cell, int depth, GamePlan plan, Settings settings)
-    {
-        var ids = plan.WinSyms
-            .Concat(plan.NonWinTargets.Keys)
-            .Concat(plan.FillSyms)
-            .Concat(settings.FeatureRetriggerBridgeIds)
-            .Distinct()
-            .ToArray();
-        if (ids.Length == 0) return settings.F_COIN;
-
-        var hash = cell.Sym;
-        hash = unchecked(hash * 397) ^ cell.CvtSym;
-        hash = unchecked(hash * 397) ^ depth;
-        hash = unchecked(hash * 397) ^ (cell.Fp?.PrupSym ?? 0);
-        return ids[(hash & 0x7fffffff) % ids.Length];
     }
 
     private sealed record FeatureChainPlan(
@@ -415,12 +407,13 @@ public static class TicketSerializer
         GamePlan plan,
         Settings settings,
         FeatureDto[]? reTrigger = null,
-        int depth = 0)
+        int depth = 0,
+        int? convertToOverride = null)
     {
         var chain = reTrigger ?? System.Array.Empty<FeatureDto>();
-        var convertToId = chain.Length > 0 && depth > 0
-            ? FeatureChainConvertId(c, depth, plan, settings)
-            : c.CvtSym > 0 && !settings.IsFeat(c.CvtSym) ? c.CvtSym : settings.F_COIN;
+        var convertToId = chain.Length > 0
+            ? chain[0].FeatureId
+            : convertToOverride ?? (c.CvtSym > 0 && !settings.IsFeat(c.CvtSym) ? c.CvtSym : settings.F_COIN);
 
         var dto = new FeatureDto
         {

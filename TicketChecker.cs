@@ -376,6 +376,7 @@ public static class TicketChecker
             Add("Feature", "EXTRA_SPIN token count matches bonus spins", Status.Pass,
                 $"{extraSpinTokenCount} logical token(s) for {expectedExtras} extra spin(s)");
 
+        CheckExtraSpinTiming(t, Add);
         CheckFeatureCaps(t, extraSpinTokenCount, Add);
 
         var finalTurn = t.Turns[^1];
@@ -573,6 +574,31 @@ public static class TicketChecker
                 add("Feature", $"{feature} count within max", Status.Pass,
                     $"{actual}/{max}");
         }
+    }
+
+    private static void CheckExtraSpinTiming(
+        TicketDto t,
+        Action<string, string, Status, string> add)
+    {
+        var ok = true;
+        for (var turnIndex = 0; turnIndex < t.Turns.Length; turnIndex++)
+        {
+            var turn = t.Turns[turnIndex];
+            var extrasThisTurn = (turn.Spawns ?? Array.Empty<SpawnDto>())
+                .Where(spawn => spawn.Feature != null)
+                .Sum(spawn => CountFeatureTree(spawn.Feature!, Settings.Default.F_XSPIN));
+            var remainingFutureTurns = t.Turns.Length - (turnIndex + 1);
+
+            if (extrasThisTurn <= remainingFutureTurns) continue;
+
+            ok = false;
+            add("Feature", "EXTRA_SPIN timing has enough future turns", Status.Fail,
+                $"turn {turnIndex + 1} has {extrasThisTurn} EXTRA_SPIN token(s), but only " +
+                $"{remainingFutureTurns} future turn(s) remain");
+        }
+
+        if (ok)
+            add("Feature", "EXTRA_SPIN timing has enough future turns", Status.Pass, "ok");
     }
 
     private static decimal ExpectedCashWin(TicketDto gameData, out List<string> errors)
@@ -811,6 +837,13 @@ public static class TicketChecker
             ok = false;
             add("Schema", $"{prefix} ReTrigger count", Status.Fail,
                 $"ReTrigger has {feature.ReTrigger.Length} child feature(s); max allowed is 1");
+        }
+
+        if (feature.ReTrigger is { Length: 1 } && feature.ConvertToId != feature.ReTrigger[0].FeatureId)
+        {
+            ok = false;
+            add("Schema", $"{prefix} ReTrigger convert target", Status.Fail,
+                $"ConvertToId={feature.ConvertToId} must equal nested FeatureId={feature.ReTrigger[0].FeatureId}");
         }
 
         if (feature.FeatureId == Settings.Default.F_WHEEL)

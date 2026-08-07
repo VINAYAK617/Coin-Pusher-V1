@@ -333,6 +333,7 @@ public sealed class GameLogicCoverageTests
 
         Assert.IsTrue(ticket.WinInfo.TotalSpins >= 8);
         Assert.AreEqual(ticket.WinInfo.TotalSpins - 5, PhysicalFeatureCount(ticket, 12));
+        AssertExtraSpinTiming(ticket);
         AssertNoFinalBoardFeatures(ticket);
         AssertValid(ticket);
     }
@@ -662,6 +663,93 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
+    public void CheckerRejectsExtraSpinAwardsWithTooFewFutureTurns()
+    {
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int>
+            {
+                [1] = 20,
+                [2] = 20,
+                [3] = 20,
+                [4] = 25,
+            },
+            BaseSpins = 5,
+            Required = new Dictionary<string, int> { ["EXTRA_SPIN"] = 3 },
+            MaxSym = 7,
+        }, seed: 7001);
+
+        foreach (var spawn in ticket.Turns.SelectMany(turn => turn.Spawns))
+        {
+            if (spawn.Feature?.FeatureId == Settings.Default.F_XSPIN)
+            {
+                spawn.Id = Settings.Default.F_COIN;
+                spawn.Feature = null;
+            }
+        }
+
+        var earlySpawn = ticket.Turns[0].Spawns.First(spawn => spawn.Feature == null);
+        earlySpawn.Id = Settings.Default.F_XSPIN;
+        earlySpawn.Feature = ExtraSpinFeature(convertToId: Settings.Default.F_COIN);
+
+        var secondLastTurn = ticket.Turns[^2];
+        var secondLastSpawns = secondLastTurn.Spawns
+            .Where(spawn => spawn.Feature == null)
+            .Take(2)
+            .ToArray();
+        Assert.AreEqual(2, secondLastSpawns.Length);
+        foreach (var spawn in secondLastSpawns)
+        {
+            spawn.Id = Settings.Default.F_XSPIN;
+            spawn.Feature = ExtraSpinFeature(convertToId: Settings.Default.F_COIN);
+        }
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        Assert.IsFalse(report.IsValid);
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Feature" &&
+            check.Name == "EXTRA_SPIN timing has enough future turns" &&
+            check.Detail.Contains("only 1 future turn")));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsRetriggerParentConvertIdThatDoesNotPointAtChildFeature()
+    {
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int> { [2] = 20 },
+            BaseSpins = 5,
+            Required = new Dictionary<string, int> { ["EXTRA_SPIN"] = 1 },
+            MaxSym = 6,
+        }, seed: 90909);
+        var parent = ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .First(spawn => spawn.Feature?.FeatureId == Settings.Default.F_XSPIN);
+        parent.Feature!.ConvertToId = 2;
+        parent.Feature.ReTrigger = new[]
+        {
+            new TicketSerializer.FeatureDto
+            {
+                FeatureId = Settings.Default.F_PRUP,
+                ConvertToId = 2,
+                UpgradeSymbolId = 2,
+                UpgradePrizeValue = 2m,
+                ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
+            },
+        };
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        Assert.IsFalse(report.IsValid);
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Schema" &&
+            check.Name.Contains("ReTrigger convert target")));
+    }
+
+    [TestMethod]
     public void SerializerDoesNotCreateCrossTurnRetriggerChains()
     {
         var settings = new Settings { PFeatureRetriggerChain = 1.0 };
@@ -687,6 +775,36 @@ public sealed class GameLogicCoverageTests
             .SelectMany(turn => turn.Spawns)
             .Where(spawn => spawn.Feature != null)
             .Any(spawn => spawn.Feature!.ReTrigger.Length > 0));
+    }
+
+    [TestMethod]
+    public void SerializerUsesNestedFeatureIdAsRetriggerConvertTarget()
+    {
+        var settings = new Settings { PFeatureRetriggerChain = 1.0 };
+        var plan = new GamePlan
+        {
+            TotalSpins = 3,
+            Targets = new Dictionary<int, int> { [2] = 1 },
+            WinSyms = new[] { 2 },
+            FillSyms = new[] { 1, 3 },
+            PrizeTiers = new Dictionary<int, int> { [2] = 1 },
+            PrizeValues = PrizeValues(6, tiers: 3),
+            Spins = new List<SpinPlan>
+            {
+                SpinWithExtraAndPrizeUpgrade(1),
+                PlainSpin(2),
+                PlainSpin(3),
+            },
+        };
+
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
+        var parent = ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .First(spawn => spawn.Feature?.ReTrigger.Length == 1);
+
+        Assert.AreEqual(Settings.Default.F_PRUP, parent.Feature!.ConvertToId);
+        Assert.AreEqual(Settings.Default.F_PRUP, parent.Feature.ReTrigger[0].FeatureId);
+        Assert.AreEqual(2, parent.Feature.ReTrigger[0].ConvertToId);
     }
 
     private static TicketSerializer.TicketDto PlanTicket(MathInput input, int seed)
@@ -733,6 +851,26 @@ public sealed class GameLogicCoverageTests
 
     private static void AssertNoFinalBoardFeatures(TicketSerializer.TicketDto ticket) =>
         Assert.IsFalse(ticket.Turns[^1].Spawns.Any(spawn => spawn.Feature != null));
+
+    private static void AssertExtraSpinTiming(TicketSerializer.TicketDto ticket)
+    {
+        for (var index = 0; index < ticket.Turns.Length; index++)
+        {
+            var extras = ticket.Turns[index].Spawns
+                .Where(spawn => spawn.Feature != null)
+                .Sum(spawn => CountFeatureTree(spawn.Feature!, Settings.Default.F_XSPIN));
+            var futureTurns = ticket.Turns.Length - (index + 1);
+            Assert.IsTrue(extras <= futureTurns, $"turn {index + 1} extras={extras}, futureTurns={futureTurns}");
+        }
+    }
+
+    private static TicketSerializer.FeatureDto ExtraSpinFeature(int convertToId) =>
+        new()
+        {
+            FeatureId = Settings.Default.F_XSPIN,
+            ConvertToId = convertToId,
+            ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
+        };
 
     private static Ticket FrameworkTicket(TicketSerializer.TicketDto gameData, decimal cashWin) =>
         new()
@@ -796,6 +934,28 @@ public sealed class GameLogicCoverageTests
             Push = Enumerable.Repeat(1, Settings.Default.COLS).ToArray(),
             Flush = Enumerable.Repeat(false, Settings.Default.COLS).ToArray(),
             Spawns = new Dictionary<(int, int), Cell>(),
+        };
+
+    private static SpinPlan SpinWithExtraAndPrizeUpgrade(int spin) =>
+        new()
+        {
+            Spin = spin,
+            Board = FilledBoard(1),
+            Push = Enumerable.Repeat(1, Settings.Default.COLS).ToArray(),
+            Flush = Enumerable.Repeat(false, Settings.Default.COLS).ToArray(),
+            Spawns = new Dictionary<(int, int), Cell>
+            {
+                [(0, 0)] = Grid.Feat(Settings.Default.F_XSPIN, 2, new FP
+                {
+                    FeatId = "EXTRA_SPIN",
+                }),
+                [(0, 1)] = Grid.Feat(Settings.Default.F_PRUP, 3, new FP
+                {
+                    FeatId = "PRIZE_UPGRADE",
+                    PrupSym = 2,
+                    PrupTier = 1,
+                }),
+            },
         };
 
     private static Cell?[,] FilledBoard(int sym)

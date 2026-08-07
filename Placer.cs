@@ -139,7 +139,7 @@ internal sealed class Placer
             PlacedFeat? r = null;
             foreach (var spin in FeatureSpinTargets(minS, maxS, req))
             {
-                if (ConflictsWithWheelSpin(feat, spin, done)) continue;
+                if (ConflictsWithWheelSpin(feat, spin, done, maxS)) continue;
                 for (var col = 0; col < _settings.COLS - 1; col++)
                 {
                     if (used.Contains((spin, col))) continue;
@@ -234,7 +234,7 @@ internal sealed class Placer
                          : new[] { target - offset, target + offset })
             {
                 if (spin < minS || spin >= maxS) continue;
-                if (ConflictsWithWheelSpin(feat, spin, done)) continue;
+                if (ConflictsWithWheelSpin(feat, spin, done, maxS)) continue;
 
                 for (int col = 0; col < maxCol; col++)
                 {
@@ -254,12 +254,14 @@ internal sealed class Placer
         return null;
     }
 
-    private bool ConflictsWithWheelSpin(Feat feat, int spin, IReadOnlyList<PlacedFeat> done)
+    private bool ConflictsWithWheelSpin(Feat feat, int spin, IReadOnlyList<PlacedFeat> done, int maxSpin)
     {
-        if (feat.Id == "EXTRA_SPIN"
-            && done.Count(f => f.Id == "EXTRA_SPIN" && f.Spin == spin) >= _settings.MAX_EXTRA_GO_PER_TURN)
+        if (feat.Id == "EXTRA_SPIN")
         {
-            return true;
+            var remainingFutureTurns = Math.Max(0, maxSpin - spin);
+            var perTurnLimit = Math.Min(_settings.MAX_EXTRA_GO_PER_TURN, remainingFutureTurns);
+            if (done.Count(f => f.Id == "EXTRA_SPIN" && f.Spin == spin) >= perTurnLimit)
+                return true;
         }
 
         if (feat.Id == "WHEEL")

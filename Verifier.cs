@@ -63,10 +63,12 @@ internal static class Verifier
         foreach (var (spin, index) in plan.Spins.Select((spin, index) => (spin, index)))
         {
             var extrasThisTurn = spin.Spawns.Values.Count(cell => cell.IsFeat && cell.Sym == Settings.Default.F_XSPIN);
-            if (extrasThisTurn > Settings.Default.MAX_EXTRA_GO_PER_TURN)
+            var remainingFutureTurns = plan.Spins.Count - (index + 1);
+            var maxExtrasThisTurn = Math.Min(Settings.Default.MAX_EXTRA_GO_PER_TURN, remainingFutureTurns);
+            if (extrasThisTurn > maxExtrasThisTurn)
             {
                 throw new InvalidOperationException(
-                    $"VERIFY FAIL spin {index + 1} has {extrasThisTurn} EXTRA_SPIN tokens");
+                    $"VERIFY FAIL spin {index + 1} has {extrasThisTurn} EXTRA_SPIN tokens but only {remainingFutureTurns} future turns remain");
             }
         }
 
