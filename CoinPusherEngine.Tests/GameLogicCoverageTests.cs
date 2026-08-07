@@ -129,6 +129,33 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
+    public void CustomBundleRowsGenerateSixSymbolTicketsAcrossSeeds()
+    {
+        var amounts = new decimal[] { 1, 2, 5, 10, 100, 10000 };
+        for (var i = 0; i < 50; i++)
+        {
+            var bundleSeed = MixedSeed(20260807, i);
+            var plannerSeed = MixedSeed(20260808, i);
+            var bundle = new LadderCombinator(CustomBundleRows(), bundleSeed).Bundle(amounts);
+
+            try
+            {
+                var ticket = PlanTicket(bundle.Input, plannerSeed);
+                Assert.AreEqual(6, ticket.WinInfo.WinSymbols.Length);
+                Assert.IsTrue(ticket.WinInfo.TotalSpins <= Settings.Default.MAX_SPINS);
+            }
+            catch (Exception ex)
+            {
+                Assert.Fail(
+                    $"i={i} bundleSeed={bundleSeed} plannerSeed={plannerSeed} " +
+                    $"targets=[{string.Join(",", bundle.Input.Targets.Select(kv => $"sym{kv.Key}={kv.Value}"))}] " +
+                    $"required=[{string.Join(",", bundle.Input.Required.Select(kv => $"{kv.Key}={kv.Value}"))}] " +
+                    $"error={ex.Message}");
+            }
+        }
+    }
+
+    [TestMethod]
     public void TopPrizeTargetCompletesOnFinalTurn()
     {
         var input = new MathInput
@@ -560,6 +587,32 @@ public sealed class GameLogicCoverageTests
             new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 100, 250, 1000 } },
             new PrizeLadderRow { Target = 30, Tiers = new decimal[] { 10000 } },
         };
+
+    private static IReadOnlyList<PrizeLadderRow> CustomBundleRows() =>
+        new[]
+        {
+            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 1, 2, 5 } },
+            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 2, 4, 8 } },
+            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 5, 10, 25 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 10, 20, 50 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 100, 200, 500 } },
+            new PrizeLadderRow { Target = 30, Tiers = new decimal[] { 10000 } },
+        };
+
+    private static int MixedSeed(int seed, int index)
+    {
+        unchecked
+        {
+            uint x = (uint)seed;
+            x ^= (uint)(index + 1) * 0x9E3779B9u;
+            x ^= x >> 16;
+            x *= 0x85EBCA6Bu;
+            x ^= x >> 13;
+            x *= 0xC2B2AE35u;
+            x ^= x >> 16;
+            return (int)x;
+        }
+    }
 
     private static Dictionary<int, IReadOnlyDictionary<int, decimal>> PrizeValues(int maxSym, int tiers)
     {
