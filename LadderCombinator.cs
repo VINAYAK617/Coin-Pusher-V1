@@ -185,10 +185,13 @@ public sealed class LadderCombinator
             };
         }
 
-        if (!TryBundleAll(ordered, 0, new Dictionary<int, BundleEntry>(), out var bySym))
+        if (!TryBundleAll(ordered, 0, new Dictionary<int, BundleEntry>(), out var bySym)
+            && !TryBundleAsTotal(ordered, out bySym))
+        {
             throw new InvalidOperationException(
                 $"Prize list [{string.Join(",", ordered)}] cannot be reached without violating ticket capacity. " +
                 "Increase the spin/feature envelope or split the requested prizes across tickets.");
+        }
 
         covered.AddRange(ordered);
         var entries = bySym.Values.OrderBy(entry => entry.Sym).ToList();
@@ -222,6 +225,35 @@ public sealed class LadderCombinator
             ApplyAmount(next, amount, combo);
             if (TryBundleAll(ordered, index + 1, next, out result))
                 return true;
+        }
+
+        result = new Dictionary<int, BundleEntry>();
+        return false;
+    }
+
+    private bool TryBundleAsTotal(List<decimal> ordered, out Dictionary<int, BundleEntry> result)
+    {
+        var total = ordered.Sum();
+        foreach (var combo in CandidateCombosFor(total, new Dictionary<int, BundleEntry>()))
+        {
+            var entries = new Dictionary<int, BundleEntry>();
+            foreach (var candidate in combo)
+            {
+                var coveredAmounts = combo.Count == 1
+                    ? new List<decimal>(ordered)
+                    : new List<decimal> { candidate.Amount };
+
+                entries[candidate.Sym] = new BundleEntry
+                {
+                    Sym = candidate.Sym,
+                    Target = candidate.Target,
+                    Tier = candidate.Tier,
+                    Amounts = coveredAmounts,
+                };
+            }
+
+            result = entries;
+            return true;
         }
 
         result = new Dictionary<int, BundleEntry>();

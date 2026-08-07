@@ -34,6 +34,7 @@ internal sealed class Builder
     // no risk of over- or under-counting.
     private readonly Dictionary<int, int> _decorBudget;
     private readonly Dictionary<int, int> _decorPlaced = new();
+    private readonly HashSet<string> _pushPatterns = new();
 
     internal Builder(IReadOnlyDictionary<int, int> targets, IReadOnlyList<WLock> locks,
                      List<PlacedFeat> placed, int[] fills, List<string> log, Random rng,
@@ -570,18 +571,47 @@ internal sealed class Builder
 
         int needed = Math.Clamp(total - flushCols.Count * Settings.Default.ROWS, freeCols * Settings.Default.MIN_PUSH, freeCols * Settings.Default.MAX_PUSH);
 
-        int[] pv = MakeVariedPushValues(freeCols, needed, allowVisualLift: true);
-
         var push  = new int[Settings.Default.COLS];
         var flush = new bool[Settings.Default.COLS];
-        int fi = 0;
-        for (int col = 0; col < Settings.Default.COLS; col++)
+        var pv = MakeVariedPushValues(freeCols, needed, allowVisualLift: true);
+        ApplyPushValues(push, flush, flushCols, pv);
+
+        for (var attempt = 0; attempt < 12 && _pushPatterns.Contains(PushPattern(push)); attempt++)
         {
-            if (flushCols.Contains(col)) { push[col] = Settings.Default.ROWS; flush[col] = true; }
-            else push[col] = pv[fi++];
+            pv = RandomizePushOrder(pv);
+            ApplyPushValues(push, flush, flushCols, pv);
         }
+
+        _pushPatterns.Add(PushPattern(push));
         return (push, flush);
     }
+
+    private static void ApplyPushValues(
+        int[] push,
+        bool[] flush,
+        HashSet<int> flushCols,
+        IReadOnlyList<int> values)
+    {
+        Array.Clear(push, 0, push.Length);
+        Array.Clear(flush, 0, flush.Length);
+
+        var fi = 0;
+        for (int col = 0; col < Settings.Default.COLS; col++)
+        {
+            if (flushCols.Contains(col))
+            {
+                push[col] = Settings.Default.ROWS;
+                flush[col] = true;
+            }
+            else
+            {
+                push[col] = values[fi++];
+            }
+        }
+    }
+
+    private static string PushPattern(IEnumerable<int> push) =>
+        string.Join(",", push);
 
     private int[] MakeVariedPushValues(int freeCols, int needed, bool allowVisualLift)
     {

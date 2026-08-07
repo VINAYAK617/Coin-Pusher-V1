@@ -376,6 +376,8 @@ public static class TicketChecker
             Add("Feature", "EXTRA_SPIN token count matches bonus spins", Status.Pass,
                 $"{extraSpinTokenCount} logical token(s) for {expectedExtras} extra spin(s)");
 
+        CheckFeatureCaps(t, extraSpinTokenCount, Add);
+
         var finalTurn = t.Turns[^1];
         var finalFeature = (finalTurn.Spawns ?? Array.Empty<SpawnDto>())
             .FirstOrDefault(spawn => spawn.Feature != null);
@@ -392,7 +394,8 @@ public static class TicketChecker
         // public token sequence, independent of the internal collected-total
         // verifier.
         var declaredTiers = (t.WinInfo.PrizeTiers ?? Array.Empty<PrizeTierDto>())
-            .ToDictionary(p => p.SymId, p => p.Tier);
+            .GroupBy(p => p.SymId)
+            .ToDictionary(group => group.Key, group => group.First().Tier);
         foreach (var nw in t.WinInfo.NonWinSymbols ?? Array.Empty<NonWinSymbolDto>())
             if (nw.PrizeTier.HasValue)
                 declaredTiers[nw.Id] = nw.PrizeTier.Value;
@@ -501,6 +504,20 @@ public static class TicketChecker
         if (hasWinningTargets && parameters.CashWin <= 0m)
             add("Framework", "Winning ticket has positive CashWin", Status.Fail,
                 $"WinInfo has winning targets but CashWin={parameters.CashWin}");
+
+        var expectedCashWin = ExpectedCashWin(gameData, out var payoutErrors);
+        foreach (var error in payoutErrors)
+            add("Framework", "CashWin ladder lookup", Status.Fail, error);
+
+        if (payoutErrors.Count == 0)
+        {
+            if (parameters.CashWin != expectedCashWin)
+                add("Framework", "CashWin matches declared ladder prizes", Status.Fail,
+                    $"Parameters.CashWin={parameters.CashWin}, expected {expectedCashWin} from WinInfo.WinSymbols and PrizeTiers");
+            else
+                add("Framework", "CashWin matches declared ladder prizes", Status.Pass,
+                    $"{expectedCashWin}");
+        }
     }
 
     private static void CheckStartingBoardCells(
@@ -531,6 +548,62 @@ public static class TicketChecker
         }
 
         if (ok) add("Schema", "StartingBoard contains only valid coin symbols", Status.Pass, "ok");
+    }
+
+    private static void CheckFeatureCaps(
+        TicketDto t,
+        int extraSpinTokenCount,
+        Action<string, string, Status, string> add)
+    {
+        var wheelTokenCount = CountLogicalFeatureSpawns(t, Settings.Default.F_WHEEL);
+        var flushPusherCount = t.Turns
+            .Sum(turn => (turn.Pushers ?? Array.Empty<PusherDto>())
+                .Count(pusher => pusher.FeatureId == Settings.Default.F_FLUSH_ID));
+
+        CheckMax("WHEEL", wheelTokenCount, FeatReg.Cfg["WHEEL"].Max);
+        CheckMax("EXTRA_SPIN", extraSpinTokenCount, Settings.Default.MAX_SPINS - Settings.Default.BASE_SPINS);
+        CheckMax("FLUSH/PUSH", flushPusherCount, Settings.Default.COLS - 1);
+
+        void CheckMax(string feature, int actual, int max)
+        {
+            if (actual > max)
+                add("Feature", $"{feature} count within max", Status.Fail,
+                    $"found {actual}, max allowed is {max}");
+            else
+                add("Feature", $"{feature} count within max", Status.Pass,
+                    $"{actual}/{max}");
+        }
+    }
+
+    private static decimal ExpectedCashWin(TicketDto gameData, out List<string> errors)
+    {
+        errors = new List<string>();
+        var settings = Settings.Default;
+        var total = 0m;
+        var tiers = (gameData.WinInfo?.PrizeTiers ?? Array.Empty<PrizeTierDto>())
+            .GroupBy(tier => tier.SymId)
+            .ToDictionary(group => group.Key, group => group.First().Tier);
+
+        foreach (var win in gameData.WinInfo?.WinSymbols ?? Array.Empty<WinSymbolDto>())
+        {
+            var tier = tiers.GetValueOrDefault(win.Id, 0);
+            if (win.Id < 1 || win.Id > settings.PrizeLadderRows.Count)
+            {
+                errors.Add($"winning symbol {win.Id} has no matching prize ladder row");
+                continue;
+            }
+
+            var row = settings.PrizeLadderRows[win.Id - 1];
+            if (tier < 0 || tier >= row.Tiers.Count)
+            {
+                errors.Add($"winning symbol {win.Id} declares tier {tier}, but ladder has tiers 0..{row.Tiers.Count - 1}");
+                continue;
+            }
+
+            total += row.Tiers[tier];
+        }
+
+        return total;
     }
 
     private static void CheckExperienceWarnings(
@@ -635,6 +708,7 @@ public static class TicketChecker
             }
         }
 
+        var prizeTierIds = new HashSet<int>();
         foreach (var tier in t.WinInfo.PrizeTiers ?? Array.Empty<PrizeTierDto>())
         {
             if (!winIds.Contains(tier.SymId))
@@ -648,6 +722,12 @@ public static class TicketChecker
                 ok = false;
                 add("WinInfo", $"Prize tier sym {tier.SymId} value", Status.Fail,
                     $"Tier={tier.Tier} must be positive");
+            }
+            if (!prizeTierIds.Add(tier.SymId))
+            {
+                ok = false;
+                add("WinInfo", $"Prize tier sym {tier.SymId} duplicate", Status.Fail,
+                    "same symbol appears more than once in WinInfo.PrizeTiers");
             }
         }
 

@@ -123,6 +123,23 @@ public sealed class GameLogicCoverageTests
     }
 
     [DataTestMethod]
+    [DataRow("1,1", 2)]
+    [DataRow("1,1,1", 3)]
+    public void LadderBundleGroupsDuplicateSmallPrizesByTotalWhenSeparateSymbolsAreImpossible(
+        string prizeCsv,
+        int expectedCash)
+    {
+        var prizes = prizeCsv.Split(',').Select(decimal.Parse).ToArray();
+        var bundle = new LadderCombinator(StandardRows(), seed: 34343).Bundle(prizes);
+
+        CollectionAssert.AreEqual(prizes, bundle.Covered);
+        Assert.AreEqual(expectedCash, bundle.Entries.Sum(entry => entry.Amounts.Sum()));
+
+        var ticket = PlanTicket(bundle.Input, seed: 34343);
+        AssertValid(ticket);
+    }
+
+    [DataTestMethod]
     [DataRow("1,2,5", 3, 810301)]
     [DataRow("1,2,5,10", 4, 810302)]
     [DataRow("1,2,5,10,100", 5, 810303)]
@@ -368,6 +385,82 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
+    public void CheckerRejectsFrameworkCashWinMismatchAgainstPrizeLadder()
+    {
+        var bundle = new LadderCombinator(StandardRows(), seed: 31313)
+            .Bundle(new decimal[] { 100, 250 });
+        var gameData = PlanTicket(bundle.Input, seed: 31313);
+        var ticket = FrameworkTicket(gameData, cashWin: 999m);
+
+        var result = TicketChecker.CheckObject(ticket);
+
+        Assert.IsFalse(result.IsValid);
+        Assert.IsTrue(result.Errors.Any(error => error.Contains("CashWin matches declared ladder prizes")));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsDuplicatePrizeTiersWithoutThrowing()
+    {
+        var gameData = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int> { [2] = 20 },
+            BaseSpins = 5,
+            Required = new Dictionary<string, int> { ["PRIZE_UPGRADE"] = 1 },
+            PrizeTiers = new Dictionary<int, int> { [2] = 1 },
+            PrizeValues = PrizeValues(6, tiers: 3),
+            MaxSym = 6,
+        }, seed: 32323);
+        gameData.WinInfo.PrizeTiers = gameData.WinInfo.PrizeTiers
+            .Concat(gameData.WinInfo.PrizeTiers)
+            .ToArray();
+
+        var report = TicketChecker.CheckTicket(gameData);
+
+        Assert.IsFalse(report.IsValid);
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "WinInfo" &&
+            check.Name.Contains("duplicate")));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsFeatureCountsAboveConfiguredCaps()
+    {
+        var bundle = new LadderCombinator(StandardRows(), seed: 33333)
+            .Bundle(new decimal[] { 1, 2, 5, 10, 100, 10000 });
+        var gameData = PlanTicket(bundle.Input, seed: 33333);
+        var injected = 0;
+
+        foreach (var turn in gameData.Turns.Take(gameData.Turns.Length - 1))
+        {
+            var spawn = turn.Spawns.FirstOrDefault(s => s.Feature == null);
+            if (spawn == null) continue;
+
+            var convertToId = spawn.Id;
+            spawn.Id = Settings.Default.F_WHEEL;
+            spawn.Feature = new TicketSerializer.FeatureDto
+            {
+                FeatureId = Settings.Default.F_WHEEL,
+                ConvertToId = convertToId,
+                WheelSymbolId = gameData.WinInfo.WinSymbols[0].Id,
+                WheelStackValue = 1,
+                ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
+            };
+            injected++;
+            if (injected > FeatReg.Cfg["WHEEL"].Max) break;
+        }
+
+        Assert.IsTrue(injected > FeatReg.Cfg["WHEEL"].Max);
+        var report = TicketChecker.CheckTicket(gameData);
+
+        Assert.IsFalse(report.IsValid);
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Feature" &&
+            check.Name.Contains("WHEEL count within max")));
+    }
+
+    [TestMethod]
     public void CheckerRejectsExtraDropThatOverwritesOccupiedCell()
     {
         var ticket = PlanTicket(new MathInput
@@ -549,6 +642,35 @@ public sealed class GameLogicCoverageTests
 
     private static void AssertNoFinalBoardFeatures(TicketSerializer.TicketDto ticket) =>
         Assert.IsFalse(ticket.Turns[^1].Spawns.Any(spawn => spawn.Feature != null));
+
+    private static Ticket FrameworkTicket(TicketSerializer.TicketDto gameData, decimal cashWin) =>
+        new()
+        {
+            ErrorCode = 0,
+            Error = "success",
+            Game = new TicketGameEnvelope
+            {
+                PublicState = new TicketPublicState
+                {
+                    Game = new TicketPublicGame
+                    {
+                        Parameters = new TicketParameters
+                        {
+                            Stake = 1m,
+                            CashWin = cashWin,
+                            StakeMultiplier = cashWin,
+                            IsWinner = cashWin > 0m,
+                        },
+                        GameData = gameData,
+                    },
+                },
+                PrivateState = new TicketPrivateState
+                {
+                    Stake = 1m,
+                    PendingCashWin = cashWin,
+                },
+            },
+        };
 
     private static bool ContainsFeature(TicketSerializer.FeatureDto? feature, int featureId)
     {
