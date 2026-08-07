@@ -504,6 +504,30 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
+    public void CheckerRejectsModifiedPusherPopValue()
+    {
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int>(),
+            BaseSpins = 5,
+            MaxSym = 6,
+        }, seed: 41414);
+
+        var pusher = ticket.Turns
+            .SelectMany(turn => turn.Pushers)
+            .First(p => p.FeatureId == null && p.PushValue < Settings.Default.MAX_PUSH);
+        pusher.PushValue++;
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        Assert.IsFalse(report.IsValid);
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Geometry" &&
+            check.Name.Contains("pushed cells match drops")));
+    }
+
+    [TestMethod]
     public void CheckerRejectsFeatureSymbolOnStartingBoard()
     {
         var ticket = PlanTicket(new MathInput
