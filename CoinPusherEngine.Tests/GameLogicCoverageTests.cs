@@ -528,6 +528,36 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
+    public void CheckerRejectsSpawnMovedToWrongPositionWithoutChangingCount()
+    {
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int>(),
+            BaseSpins = 5,
+            MaxSym = 6,
+        }, seed: 42424);
+
+        var firstTurn = ticket.Turns[0];
+        var correctSpawnPositions = firstTurn.Spawns.Select(spawn => spawn.Pos).ToHashSet();
+        var occupiedPosition = Enumerable.Range(0, Settings.Default.ROWS * Settings.Default.COLS)
+            .First(pos => !correctSpawnPositions.Contains(pos));
+
+        firstTurn.Spawns[0].Pos = occupiedPosition;
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        Assert.IsFalse(report.IsValid);
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Replay" &&
+            check.Name.Contains("spawns only fill empty cells")));
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail &&
+            check.Category == "Replay" &&
+            check.Name.Contains("fully populated")));
+    }
+
+    [TestMethod]
     public void CheckerRejectsFeatureSymbolOnStartingBoard()
     {
         var ticket = PlanTicket(new MathInput
