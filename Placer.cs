@@ -38,6 +38,14 @@ internal sealed class Placer
                 ? totalSpinsKnown
                 : totalSpinsKnown + 1);
 
+            // EXTRA_SPIN is the only feature that creates future turns. It must
+            // land while the ticket is still inside the base entitlement; otherwise
+            // the public ticket can show a bonus turn before the player has earned
+            // it. Later cosmetic features may use bonus turns, but Extra Go itself
+            // is restricted to already-guaranteed spins.
+            if (id == "EXTRA_SPIN")
+                capSpin = Math.Min(capSpin, _inp.BaseSpins + 1);
+
             // EXTRA_SPIN has no safe "optional, for variety" mode at all — unlike
             // WHEEL/FLUSH (whose own ResolveFeatures gate adds a "needed OR lucky"
             // branch before ever setting Required), every additional spin makes the

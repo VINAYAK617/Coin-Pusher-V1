@@ -299,11 +299,12 @@ public sealed class GameLogicCoverageTests
         var lateStart = Math.Max(1, ticket.WinInfo.TotalSpins - Math.Max(2, settings.WinLateTailSpins + 1));
         var featureTurns = ticket.Turns
             .SelectMany((turn, index) => turn.Spawns
-                .Where(spawn => spawn.Feature != null)
+                .Where(spawn => spawn.Feature != null
+                    && spawn.Feature.FeatureId != Settings.Default.F_XSPIN)
                 .Select(_ => index + 1))
             .ToArray();
 
-        Assert.IsTrue(featureTurns.Length >= 2);
+        Assert.IsTrue(featureTurns.Length >= 1);
         Assert.IsTrue(featureTurns.All(turn => turn >= lateStart), string.Join(",", featureTurns));
         AssertNoFinalBoardFeatures(ticket);
         AssertValid(ticket);
@@ -663,7 +664,7 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
-    public void CheckerRejectsExtraSpinAwardsWithTooFewFutureTurns()
+    public void CheckerRejectsBonusTurnsBeforeExtraSpinAwardsEarnThem()
     {
         var ticket = PlanTicket(new MathInput
         {
@@ -688,17 +689,17 @@ public sealed class GameLogicCoverageTests
             }
         }
 
-        var earlySpawn = ticket.Turns[0].Spawns.First(spawn => spawn.Feature == null);
-        earlySpawn.Id = Settings.Default.F_XSPIN;
-        earlySpawn.Feature = ExtraSpinFeature(convertToId: Settings.Default.F_COIN);
+        var turn5Spawn = ticket.Turns[4].Spawns.First(spawn => spawn.Feature == null);
+        turn5Spawn.Id = Settings.Default.F_XSPIN;
+        turn5Spawn.Feature = ExtraSpinFeature(convertToId: Settings.Default.F_COIN);
 
-        var secondLastTurn = ticket.Turns[^2];
-        var secondLastSpawns = secondLastTurn.Spawns
+        var turn7 = ticket.Turns[6];
+        var turn7Spawns = turn7.Spawns
             .Where(spawn => spawn.Feature == null)
             .Take(2)
             .ToArray();
-        Assert.AreEqual(2, secondLastSpawns.Length);
-        foreach (var spawn in secondLastSpawns)
+        Assert.AreEqual(2, turn7Spawns.Length);
+        foreach (var spawn in turn7Spawns)
         {
             spawn.Id = Settings.Default.F_XSPIN;
             spawn.Feature = ExtraSpinFeature(convertToId: Settings.Default.F_COIN);
@@ -710,8 +711,8 @@ public sealed class GameLogicCoverageTests
         Assert.IsTrue(report.Checks.Any(check =>
             check.Result == TicketChecker.Status.Fail &&
             check.Category == "Feature" &&
-            check.Name == "EXTRA_SPIN timing has enough future turns" &&
-            check.Detail.Contains("only 1 future turn")));
+            check.Name == "EXTRA_SPIN timeline earns every turn before play" &&
+            check.Detail.Contains("turn 7 exists")));
     }
 
     [TestMethod]
@@ -854,14 +855,24 @@ public sealed class GameLogicCoverageTests
 
     private static void AssertExtraSpinTiming(TicketSerializer.TicketDto ticket)
     {
+        var availableTurns = Settings.Default.BASE_SPINS;
         for (var index = 0; index < ticket.Turns.Length; index++)
         {
+            var turnNumber = index + 1;
+            Assert.IsTrue(turnNumber <= availableTurns,
+                $"turn {turnNumber} exists before being earned; availableTurns={availableTurns}");
+
             var extras = ticket.Turns[index].Spawns
                 .Where(spawn => spawn.Feature != null)
                 .Sum(spawn => CountFeatureTree(spawn.Feature!, Settings.Default.F_XSPIN));
             var futureTurns = ticket.Turns.Length - (index + 1);
             Assert.IsTrue(extras <= futureTurns, $"turn {index + 1} extras={extras}, futureTurns={futureTurns}");
+
+            availableTurns += extras;
+            Assert.IsTrue(availableTurns <= ticket.Turns.Length,
+                $"turn {turnNumber} over-awards extras; availableTurns={availableTurns}, total={ticket.Turns.Length}");
         }
+        Assert.AreEqual(ticket.Turns.Length, availableTurns);
     }
 
     private static TicketSerializer.FeatureDto ExtraSpinFeature(int convertToId) =>

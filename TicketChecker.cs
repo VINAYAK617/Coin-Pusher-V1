@@ -376,7 +376,7 @@ public static class TicketChecker
             Add("Feature", "EXTRA_SPIN token count matches bonus spins", Status.Pass,
                 $"{extraSpinTokenCount} logical token(s) for {expectedExtras} extra spin(s)");
 
-        CheckExtraSpinTiming(t, Add);
+        CheckExtraSpinTimeline(t, Add);
         CheckFeatureCaps(t, extraSpinTokenCount, Add);
 
         var finalTurn = t.Turns[^1];
@@ -576,29 +576,59 @@ public static class TicketChecker
         }
     }
 
-    private static void CheckExtraSpinTiming(
+    private static void CheckExtraSpinTimeline(
         TicketDto t,
         Action<string, string, Status, string> add)
     {
         var ok = true;
+        var availableTurns = Settings.Default.BASE_SPINS;
+
         for (var turnIndex = 0; turnIndex < t.Turns.Length; turnIndex++)
         {
             var turn = t.Turns[turnIndex];
+            var turnNumber = turnIndex + 1;
+
+            if (turnNumber > availableTurns)
+            {
+                ok = false;
+                add("Feature", "EXTRA_SPIN timeline earns every turn before play", Status.Fail,
+                    $"turn {turnNumber} exists before the player has earned it; " +
+                    $"available turns before this turn={availableTurns}, total serialized turns={t.Turns.Length}");
+            }
+
             var extrasThisTurn = (turn.Spawns ?? Array.Empty<SpawnDto>())
                 .Where(spawn => spawn.Feature != null)
                 .Sum(spawn => CountFeatureTree(spawn.Feature!, Settings.Default.F_XSPIN));
-            var remainingFutureTurns = t.Turns.Length - (turnIndex + 1);
+            var remainingFutureTurns = t.Turns.Length - turnNumber;
 
-            if (extrasThisTurn <= remainingFutureTurns) continue;
+            if (extrasThisTurn > remainingFutureTurns)
+            {
+                ok = false;
+                add("Feature", "EXTRA_SPIN timeline has enough future turns", Status.Fail,
+                    $"turn {turnNumber} has {extrasThisTurn} EXTRA_SPIN token(s), but only " +
+                    $"{remainingFutureTurns} future turn(s) remain");
+            }
 
+            availableTurns += extrasThisTurn;
+
+            if (availableTurns > t.Turns.Length)
+            {
+                ok = false;
+                add("Feature", "EXTRA_SPIN timeline does not over-award turns", Status.Fail,
+                    $"after turn {turnNumber}, earned turns={availableTurns}, but ticket only serializes " +
+                    $"{t.Turns.Length} turn(s)");
+            }
+        }
+
+        if (availableTurns != t.Turns.Length)
+        {
             ok = false;
-            add("Feature", "EXTRA_SPIN timing has enough future turns", Status.Fail,
-                $"turn {turnIndex + 1} has {extrasThisTurn} EXTRA_SPIN token(s), but only " +
-                $"{remainingFutureTurns} future turn(s) remain");
+            add("Feature", "EXTRA_SPIN timeline final entitlement matches ticket length", Status.Fail,
+                $"earned turns={availableTurns}, serialized turns={t.Turns.Length}");
         }
 
         if (ok)
-            add("Feature", "EXTRA_SPIN timing has enough future turns", Status.Pass, "ok");
+            add("Feature", "EXTRA_SPIN timeline earns every serialized turn", Status.Pass, "ok");
     }
 
     private static decimal ExpectedCashWin(TicketDto gameData, out List<string> errors)

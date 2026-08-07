@@ -60,8 +60,16 @@ internal static class Verifier
                 $"VERIFY FAIL TotalSpins={plan.TotalSpins} but BASE_SPINS+EXTRA_SPIN={Settings.Default.BASE_SPINS + extraSpinTokens}");
         }
 
+        var availableTurns = Settings.Default.BASE_SPINS;
         foreach (var (spin, index) in plan.Spins.Select((spin, index) => (spin, index)))
         {
+            var turnNumber = index + 1;
+            if (turnNumber > availableTurns)
+            {
+                throw new InvalidOperationException(
+                    $"VERIFY FAIL spin {turnNumber} exists before it is earned; available turns before spin={availableTurns}");
+            }
+
             var extrasThisTurn = spin.Spawns.Values.Count(cell => cell.IsFeat && cell.Sym == Settings.Default.F_XSPIN);
             var remainingFutureTurns = plan.Spins.Count - (index + 1);
             var maxExtrasThisTurn = Math.Min(Settings.Default.MAX_EXTRA_GO_PER_TURN, remainingFutureTurns);
@@ -70,6 +78,19 @@ internal static class Verifier
                 throw new InvalidOperationException(
                     $"VERIFY FAIL spin {index + 1} has {extrasThisTurn} EXTRA_SPIN tokens but only {remainingFutureTurns} future turns remain");
             }
+
+            availableTurns += extrasThisTurn;
+            if (availableTurns > plan.Spins.Count)
+            {
+                throw new InvalidOperationException(
+                    $"VERIFY FAIL spin {turnNumber} over-awards EXTRA_SPIN; earned turns={availableTurns} serialized turns={plan.Spins.Count}");
+            }
+        }
+
+        if (availableTurns != plan.Spins.Count)
+        {
+            throw new InvalidOperationException(
+                $"VERIFY FAIL EXTRA_SPIN timeline earned {availableTurns} turns but plan has {plan.Spins.Count}");
         }
 
         var topPrizeSym = TopPrizeSymbol(plan);
