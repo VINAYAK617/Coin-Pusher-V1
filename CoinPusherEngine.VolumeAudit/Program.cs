@@ -14,6 +14,11 @@ var inputTicks = 0L;
 var planTicks = 0L;
 var serializeTicks = 0L;
 var checkerTicks = 0L;
+var plannerRetryTicketCount = 0;
+var localRetryTicketCount = 0;
+var plannerRetryAttempts = 0L;
+var localRetryAttempts = 0L;
+var plannerRetryCauses = new Dictionary<string, int>();
 var failures = new List<string>();
 var failureCount = 0;
 var warningCount = 0;
@@ -54,6 +59,7 @@ Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = degreeOfPa
         var stage = Stopwatch.StartNew();
         var input = tickets[i].Input;
         var plan = new Planner(input, ticketSeed).Plan();
+        AccumulateRetryMetrics(plan);
         stage.Stop();
         Interlocked.Add(ref planTicks, stage.ElapsedTicks);
 
@@ -113,6 +119,14 @@ Console.WriteLine(
 Console.WriteLine(
     $"stage totals: input={Elapsed(inputTicks):hh\\:mm\\:ss\\.fff}, plan={Elapsed(planTicks):hh\\:mm\\:ss\\.fff}, " +
     $"serialize={Elapsed(serializeTicks):hh\\:mm\\:ss\\.fff}, checker={Elapsed(checkerTicks):hh\\:mm\\:ss\\.fff}");
+Console.WriteLine(
+    $"retry totals: plannerTickets={plannerRetryTicketCount}, plannerExtraAttempts={plannerRetryAttempts}, " +
+    $"localTickets={localRetryTicketCount}, localExtraAttempts={localRetryAttempts}");
+if (plannerRetryCauses.Count > 0)
+{
+    Console.WriteLine("planner retry causes: " + string.Join(", ",
+        plannerRetryCauses.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}={kv.Value}")));
+}
 
 if (failureCount > 0)
 {
@@ -138,3 +152,50 @@ void AddFailure(string failure, ParallelLoopState state)
 
 static TimeSpan Elapsed(long ticks) =>
     TimeSpan.FromSeconds(ticks / (double)Stopwatch.Frequency);
+
+void AccumulateRetryMetrics(GamePlan plan)
+{
+    foreach (var line in plan.Log)
+    {
+        if (line.StartsWith("planned after ", StringComparison.Ordinal)
+            && TryReadFirstNumber(line, out var plannerAttempts)
+            && plannerAttempts > 1)
+        {
+            Interlocked.Increment(ref plannerRetryTicketCount);
+            Interlocked.Add(ref plannerRetryAttempts, plannerAttempts - 1);
+        }
+
+        if (line.StartsWith("local realization succeeded after ", StringComparison.Ordinal)
+            && TryReadFirstNumber(line, out var localAttempts)
+            && localAttempts > 1)
+        {
+            Interlocked.Increment(ref localRetryTicketCount);
+            Interlocked.Add(ref localRetryAttempts, localAttempts - 1);
+        }
+
+        if (line.StartsWith("planner retry causes: ", StringComparison.Ordinal))
+            AccumulatePlannerRetryCauses(line["planner retry causes: ".Length..]);
+    }
+}
+
+void AccumulatePlannerRetryCauses(string causes)
+{
+    lock (plannerRetryCauses)
+    {
+        foreach (var item in causes.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = item.Trim().Split('=', 2);
+            if (parts.Length != 2 || !int.TryParse(parts[1], out var count)) continue;
+            plannerRetryCauses[parts[0]] = plannerRetryCauses.GetValueOrDefault(parts[0]) + count;
+        }
+    }
+}
+
+static bool TryReadFirstNumber(string text, out int value)
+{
+    value = 0;
+    var digits = new string(text.SkipWhile(ch => !char.IsDigit(ch))
+        .TakeWhile(char.IsDigit)
+        .ToArray());
+    return digits.Length > 0 && int.TryParse(digits, out value);
+}

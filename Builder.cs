@@ -205,11 +205,12 @@ internal sealed class Builder
         if (locks.Count == 0) return result;
 
         var occupied = new HashSet<(int, int)>();
+        var futureBySpin = futurePlans.ToDictionary(plan => plan.Spin);
         foreach (var lk in locks)
         {
             var immediate = lk.CarrySlots.GetValueOrDefault(lk.FireSpin);
             var delayedWanted = DelayedWheelCarryCount(lk, immediate);
-            foreach (var pos in DelayedCarryCandidates(spinNum, totalSpins, push, flush, futurePlans, occupied)
+            foreach (var pos in DelayedCarryCandidates(spinNum, totalSpins, push, flush, futureBySpin, occupied)
                          .Take(delayedWanted))
             {
                 result.Cells.Add((pos, lk.Sym));
@@ -217,7 +218,7 @@ internal sealed class Builder
                 occupied.Add(pos);
             }
 
-            foreach (var pos in PermanentResidueCandidates(spinNum, totalSpins, push, flush, futurePlans, occupied)
+            foreach (var pos in PermanentResidueCandidates(spinNum, totalSpins, push, flush, futureBySpin, occupied)
                          .Take(lk.PermanentResidue))
             {
                 result.Cells.Add((pos, lk.Sym));
@@ -258,13 +259,13 @@ internal sealed class Builder
         int collectSpin,
         int[] push,
         bool[] flush,
-        IReadOnlyList<SpinPlan> futurePlans,
+        IReadOnlyDictionary<int, SpinPlan> futureBySpin,
         HashSet<(int, int)> occupied)
     {
         return Enumerable.Range(0, Settings.Default.ROWS)
             .SelectMany(r => Enumerable.Range(0, Settings.Default.COLS).Select(c => (r, c)))
             .Where(pos => !occupied.Contains(pos))
-            .Where(pos => CollectsExactlyAt(pos, startSpin, collectSpin, push, flush, futurePlans))
+            .Where(pos => CollectsExactlyAt(pos, startSpin, collectSpin, push, flush, futureBySpin))
             .OrderBy(_ => _rng.Next());
     }
 
@@ -273,7 +274,7 @@ internal sealed class Builder
         int totalSpins,
         int[] push,
         bool[] flush,
-        IReadOnlyList<SpinPlan> futurePlans,
+        IReadOnlyDictionary<int, SpinPlan> futureBySpin,
         HashSet<(int, int)> occupied)
     {
         var positions = Enumerable.Range(0, Settings.Default.ROWS)
@@ -285,7 +286,7 @@ internal sealed class Builder
         for (var collectSpin = startSpin + 1; collectSpin <= totalSpins; collectSpin++)
         {
             foreach (var pos in positions)
-                if (CollectsExactlyAt(pos, startSpin, collectSpin, push, flush, futurePlans))
+                if (CollectsExactlyAt(pos, startSpin, collectSpin, push, flush, futureBySpin))
                     yield return pos;
         }
     }
@@ -295,13 +296,13 @@ internal sealed class Builder
         int totalSpins,
         int[] push,
         bool[] flush,
-        IReadOnlyList<SpinPlan> futurePlans,
+        IReadOnlyDictionary<int, SpinPlan> futureBySpin,
         HashSet<(int, int)> occupied)
     {
         return Enumerable.Range(0, Settings.Default.ROWS)
             .SelectMany(r => Enumerable.Range(0, Settings.Default.COLS).Select(c => (r, c)))
             .Where(pos => !occupied.Contains(pos))
-            .Where(pos => !CollectsByEnd(pos, startSpin, totalSpins, push, flush, futurePlans))
+            .Where(pos => !CollectsByEnd(pos, startSpin, totalSpins, push, flush, futureBySpin))
             .OrderBy(_ => _rng.Next());
     }
 
@@ -311,14 +312,14 @@ internal sealed class Builder
         int collectSpin,
         int[] push,
         bool[] flush,
-        IReadOnlyList<SpinPlan> futurePlans)
+        IReadOnlyDictionary<int, SpinPlan> futureBySpin)
     {
         var pos = start;
         for (var spin = startSpin; spin <= collectSpin; spin++)
         {
             var (p, f) = spin == startSpin
                 ? (push, flush)
-                : PlanGeometry(futurePlans, spin);
+                : PlanGeometry(futureBySpin, spin);
 
             var inZone = f[pos.c] || pos.r >= Settings.Default.ROWS - p[pos.c];
             if (spin == collectSpin) return inZone;
@@ -337,14 +338,14 @@ internal sealed class Builder
         int totalSpins,
         int[] push,
         bool[] flush,
-        IReadOnlyList<SpinPlan> futurePlans)
+        IReadOnlyDictionary<int, SpinPlan> futureBySpin)
     {
         var pos = start;
         for (var spin = startSpin; spin <= totalSpins; spin++)
         {
             var (p, f) = spin == startSpin
                 ? (push, flush)
-                : PlanGeometry(futurePlans, spin);
+                : PlanGeometry(futureBySpin, spin);
 
             if (f[pos.c] || pos.r >= Settings.Default.ROWS - p[pos.c]) return true;
             pos = AdvancePosition(pos, p[pos.c]);
@@ -354,9 +355,9 @@ internal sealed class Builder
         return false;
     }
 
-    private static (int[] Push, bool[] Flush) PlanGeometry(IReadOnlyList<SpinPlan> plans, int spin)
+    private static (int[] Push, bool[] Flush) PlanGeometry(IReadOnlyDictionary<int, SpinPlan> plans, int spin)
     {
-        var plan = plans.First(p => p.Spin == spin);
+        var plan = plans[spin];
         return (plan.Push, plan.Flush);
     }
 
