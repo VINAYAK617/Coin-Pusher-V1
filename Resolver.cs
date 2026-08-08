@@ -77,7 +77,7 @@ internal sealed class Resolver
             }
         }
 
-        PlaceTokens(cur, next);
+        PlaceTokens(cur, next, sim);
     }
 
     private void DoLast(SpinPlan last)
@@ -160,14 +160,16 @@ internal sealed class Resolver
         return Grid.RotCW(b);
     }
 
-    private void PlaceTokens(SpinPlan sp, SpinPlan next)
+    private void PlaceTokens(SpinPlan sp, SpinPlan next, Cell?[,] sim)
     {
-        foreach (var (featId, origCol, fp) in sp.Tokens)
+        for (var tokenIndex = 0; tokenIndex < sp.Tokens.Count; tokenIndex++)
         {
+            var (featId, origCol, fp) = sp.Tokens[tokenIndex];
             if (!FeatReg.Has(featId)) continue;
             var feat = FeatReg.Get(featId);
 
-            var slot = FindFillerSlot(sp.Spawns, origCol);
+            var slot = FindReservedTokenSlot(sp, sim, tokenIndex)
+                       ?? FindFillerSlot(sp.Spawns, origCol);
 
             // FindFillerSlot only searches EXISTING spawn entries — but a spawn entry
             // only exists where the natural forward simulation disagreed with the plan
@@ -188,18 +190,39 @@ internal sealed class Resolver
             // fallback must scan `next.Board`, restricted to `next`'s OWN collection
             // zone (its Push/Flush) — that is the same plan TokenReservedPositions
             // used when it originally reserved room for this exact token.
-            if (slot == default)
+            if (!slot.HasValue)
             {
                 throw new InvalidOperationException(
                     $"No filler slot available for required {featId} token at spin {sp.Spin}. " +
                     "Feature tokens may only replace real drop slots; retry with different geometry.");
             }
 
-            int cvt = sp.Spawns.TryGetValue(slot, out var existing)
+            var pos = slot.Value;
+            int cvt = sp.Spawns.TryGetValue(pos, out var existing)
                 ? existing.Sym
-                : next.Board[slot.Item1, slot.Item2]!.Sym;
-            sp.Spawns[slot] = Grid.Feat(feat.FeatSym, cvt, fp);
+                : next.Board[pos.r, pos.c]!.Sym;
+            sp.Spawns[pos] = Grid.Feat(feat.FeatSym, cvt, fp);
         }
+    }
+
+    private (int r, int c)? FindReservedTokenSlot(SpinPlan sp, Cell?[,] sim, int tokenIndex)
+    {
+        if (tokenIndex >= sp.TokenSlots.Count) return null;
+
+        var slot = sp.TokenSlots[tokenIndex];
+        if (EligibleTokenBase(sp.Spawns, slot, allowNearMiss: false)
+            || EligibleTokenBase(sp.Spawns, slot, allowNearMiss: true))
+        {
+            return slot;
+        }
+
+        if (sim[slot.r, slot.c] == null && !sp.Spawns.ContainsKey(slot))
+        {
+            sp.Spawns[slot] = Grid.Norm(EndBoardSym());
+            return slot;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -212,7 +235,7 @@ internal sealed class Resolver
     /// order: the token's own reserved column first, then other rows in that column,
     /// then anywhere else in the zone.
     /// </summary>
-    private (int r, int c) FindFillerSlot(Dictionary<(int, int), Cell> spawns, int origCol)
+    private (int r, int c)? FindFillerSlot(Dictionary<(int, int), Cell> spawns, int origCol)
     {
         // Win symbols are NEVER eligible — their exact count is load-bearing.
         // Near-miss symbols (declared minimum, see NonWinTargets/FillZone) are
@@ -230,33 +253,38 @@ internal sealed class Resolver
         // mistake, not the mistake being prevented by construction. Confirmed via
         // real-ticket review: a PRIZE_UPGRADE token legitimately converted a
         // near-miss symbol's cell this exact way.
-        bool Eligible((int, int) key, bool allowNearMiss) =>
-            spawns.TryGetValue(key, out var cell)
-            && !_winSyms.Contains(cell.Sym)
-            && (allowNearMiss || !_nonWinSyms.Contains(cell.Sym))
-            && !cell.IsFeat;
-
         foreach (bool allowNearMiss in new[] { false, true })
         {
             var primary = (Settings.Default.ROWS - 1, origCol);
-            if (Eligible(primary, allowNearMiss)) return primary;
+            if (EligibleTokenBase(spawns, primary, allowNearMiss)) return primary;
 
             var byRow = spawns.Keys
-                .Where(k => k.Item2 == origCol && Eligible(k, allowNearMiss))
+                .Where(k => k.Item2 == origCol && EligibleTokenBase(spawns, k, allowNearMiss))
                 .OrderByDescending(k => k.Item1)
+                .Select(k => ((int r, int c)?)k)
                 .FirstOrDefault();
-            if (byRow != default) return byRow;
+            if (byRow.HasValue) return byRow.Value;
 
             var anywhere = spawns.Keys
-                .Where(k => Eligible(k, allowNearMiss))
+                .Where(k => EligibleTokenBase(spawns, k, allowNearMiss))
                 .OrderByDescending(k => k.Item2)
                 .ThenBy(k => k.Item1)
+                .Select(k => ((int r, int c)?)k)
                 .FirstOrDefault();
-            if (anywhere != default) return anywhere;
+            if (anywhere.HasValue) return anywhere.Value;
         }
 
-        return default;
+        return null;
     }
+
+    private bool EligibleTokenBase(
+        IReadOnlyDictionary<(int, int), Cell> spawns,
+        (int, int) key,
+        bool allowNearMiss) =>
+        spawns.TryGetValue(key, out var cell)
+        && !_winSyms.Contains(cell.Sym)
+        && (allowNearMiss || !_nonWinSyms.Contains(cell.Sym))
+        && !cell.IsFeat;
 
     private static void FlattenFeats(Cell?[,] b)
     {

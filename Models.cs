@@ -107,6 +107,7 @@ internal sealed class SpinPlan
     internal bool[]                            Flush   { get; init; } = new bool[Settings.Default.COLS];
     internal Dictionary<(int, int), Cell>      Spawns  { get; init; } = new();
     internal List<(string Id, int Col, FP Fp)> Tokens  { get; init; } = new();
+    internal List<(int r, int c)>              TokenSlots { get; init; } = new();
     internal IReadOnlyDictionary<int, int>     Alloc   { get; init; } = new Dictionary<int, int>();
 }
 
@@ -170,12 +171,21 @@ internal sealed class FillTracker
 {
     private readonly int[] _fills;
     private readonly Dictionary<int, int> _used = new();
+    private readonly Dictionary<int, int> _collectedUsed = new();
+    private readonly Settings _settings;
     private int _cursor;
+    private int _collectedCursor;
 
-    internal FillTracker(int[] fills)
+    internal FillTracker(
+        int[] fills,
+        IReadOnlyDictionary<int, int>? collectedReserve = null,
+        Settings? settings = null)
     {
         _fills = fills;
+        _settings = settings ?? new Settings();
         foreach (var f in fills) _used[f] = 0;
+        foreach (var f in fills)
+            _collectedUsed[f] = collectedReserve?.GetValueOrDefault(f) ?? 0;
     }
 
     /// <summary>Pick the least-used filler symbol; round-robin tie-break for determinism.</summary>
@@ -191,6 +201,33 @@ internal sealed class FillTracker
         }
         _used[best]++;
         _cursor = (_cursor + 1) % _fills.Length;
+        return best;
+    }
+
+    /// <summary>
+    /// Pick filler for a cell that is expected to be collected later. Declared
+    /// near-miss targets are pre-reserved in _collectedUsed, so ordinary filler
+    /// cannot accidentally push any symbol to or beyond its threshold.
+    /// </summary>
+    internal int NextCollectable()
+    {
+        int best = -1, bestCount = int.MaxValue;
+        for (int i = 0; i < _fills.Length; i++)
+        {
+            int idx = (_collectedCursor + i) % _fills.Length;
+            int sym = _fills[idx];
+            int cnt = _collectedUsed[sym];
+            if (cnt >= _settings.SymbolFillCap(sym) - 1) continue;
+            if (cnt < bestCount) { bestCount = cnt; best = sym; }
+        }
+
+        if (best < 0)
+            best = Next();
+        else
+            _used[best] = _used.GetValueOrDefault(best) + 1;
+
+        _collectedUsed[best] = _collectedUsed.GetValueOrDefault(best) + 1;
+        _collectedCursor = (_collectedCursor + 1) % _fills.Length;
         return best;
     }
 }

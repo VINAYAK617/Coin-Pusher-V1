@@ -69,7 +69,10 @@ internal sealed class DefaultPlanAssemblyPipeline : IPlanAssemblyPipeline
         for (var attempt = 0; attempt < request.Settings.LocalRealizationAttempts; attempt++)
         {
             var rng = new Random(AttemptSeed(request.Seed, attempt));
-            var fillTracker = new FillTracker(request.FillSyms.ToArray());
+            var fillTracker = new FillTracker(
+                request.FillSyms.ToArray(),
+                request.NonWinTargets,
+                request.Settings);
             try
             {
                 var spins = _builder.Build(request, rng, fillTracker);

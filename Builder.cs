@@ -66,12 +66,14 @@ internal sealed class Builder
 
             var (push, flush) = MakePushers(s, sf, alloc, reservedCount);
             var tokenReserved = TokenReservedPositions(s - 1, push, flush);
+            var tokenSlots = TokenSpawnPositions(s, sf, push, flush, plans);
             var board = BuildBoard(nextBoard, plans, s, totalSpins, push, flush, alloc, tokenReserved);
 
             var plan = new SpinPlan
             {
                 Spin=s, IsExtra=s>baseSpins,
                 Board=board, Push=push, Flush=flush, Alloc=alloc,
+                TokenSlots=tokenSlots,
             };
             foreach (var f in sf.Where(f => FeatReg.Has(f.Id) && FeatReg.Get(f.Id).HasToken))
                 plan.Tokens.Add((f.Id, f.Col, MakeFP(f)));
@@ -81,6 +83,54 @@ internal sealed class Builder
         }
 
         return plans;
+    }
+
+    private static List<(int r, int c)> TokenSpawnPositions(
+        int spin,
+        IReadOnlyList<PlacedFeat> spinFeatures,
+        int[] push,
+        bool[] flush,
+        IReadOnlyList<SpinPlan> futurePlans)
+    {
+        var tokens = spinFeatures
+            .Where(f => FeatReg.Has(f.Id) && FeatReg.Get(f.Id).HasToken)
+            .ToArray();
+        if (tokens.Length == 0) return new List<(int r, int c)>();
+
+        var next = futurePlans.FirstOrDefault(plan => plan.Spin == spin + 1);
+        var nextZone = next != null
+            ? Grid.ZoneSet(next.Push, next.Flush)
+            : new HashSet<(int r, int c)>();
+        var spawnable = SpawnablePositions(push, flush).ToArray();
+        var used = new HashSet<(int, int)>();
+        var slots = new List<(int r, int c)>();
+
+        foreach (var token in tokens)
+        {
+            var slot = spawnable
+                .Where(pos => !used.Contains(pos))
+                .OrderBy(pos => nextZone.Contains(pos) ? 0 : 1)
+                .ThenBy(pos => pos.r == token.Col ? 0 : 1)
+                .ThenByDescending(pos => pos.c)
+                .Cast<(int r, int c)?>()
+                .FirstOrDefault();
+
+            if (!slot.HasValue) continue;
+            used.Add(slot.Value);
+            slots.Add(slot.Value);
+        }
+
+        return slots;
+    }
+
+    private static IEnumerable<(int r, int c)> SpawnablePositions(int[] push, bool[] flush)
+    {
+        for (var col = 0; col < Settings.Default.COLS; col++)
+        {
+            var count = flush[col] ? Settings.Default.ROWS : push[col];
+            for (var sourceRow = 0; sourceRow < count; sourceRow++)
+                yield return (col, Settings.Default.ROWS - 1 - sourceRow);
+        }
     }
 
     /// <summary>How many decorative occurrences were actually placed per symbol (always
@@ -151,7 +201,7 @@ internal sealed class Builder
         var carryStarts = PlanWheelCarryStarts(futurePlans, spinNum, totalSpins, push, flush);
         FillZone(board, spinNum, push, flush, alloc, tokenReserved, carryStarts.DelayedBySymbol);
         PlaceWheelCarryStarts(board, carryStarts);
-        FillRest(board);
+        FillRest(board, spinNum, totalSpins, push, flush, futurePlans);
         return board;
     }
 
@@ -529,14 +579,26 @@ internal sealed class Builder
     /// position isn't collected this spin, so it can't safely carry a decorative win
     /// symbol — see FillZone for where decoration actually happens.
     /// </summary>
-    private void FillRest(Cell?[,] board)
+    private void FillRest(
+        Cell?[,] board,
+        int spinNum,
+        int totalSpins,
+        int[] push,
+        bool[] flush,
+        IReadOnlyList<SpinPlan> futurePlans)
     {
+        var futureBySpin = futurePlans.ToDictionary(plan => plan.Spin);
         for (int r = 0; r < Settings.Default.ROWS; r++)
         {
             for (int c = 0; c < Settings.Default.COLS; c++)
             {
                 if (board[r, c] == null)
-                    board[r, c] = Grid.Norm(_fillTracker.Next());
+                {
+                    var willCollect = CollectsByEnd((r, c), spinNum, totalSpins, push, flush, futureBySpin);
+                    board[r, c] = Grid.Norm(willCollect
+                        ? _fillTracker.NextCollectable()
+                        : _fillTracker.Next());
+                }
             }
         }
     }

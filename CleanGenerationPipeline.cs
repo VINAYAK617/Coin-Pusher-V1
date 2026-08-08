@@ -1014,7 +1014,7 @@ internal sealed class BoardRealizationStage
             objectives.SourceInput,
             objectives.WinTargets,
             objectives.WinSymbols,
-            RealizationFillSymbols(objectives),
+            objectives.FillSymbols,
             objectives.NonWinTargets,
             objectives.NonWinPrizeTiers,
             features.PrizeTiers,
@@ -1029,19 +1029,5 @@ internal sealed class BoardRealizationStage
             objectives.Settings,
             objectives.Rng.Next(),
             objectives.Log));
-    }
-
-    private static IReadOnlyList<int> RealizationFillSymbols(ObjectivePlan objectives)
-    {
-        if (objectives.NonWinTargets.Count == 0)
-            return objectives.FillSymbols;
-
-        var unmanaged = objectives.FillSymbols
-            .Where(sym => !objectives.NonWinTargets.ContainsKey(sym))
-            .ToArray();
-
-        return unmanaged.Length > 0
-            ? unmanaged
-            : objectives.FillSymbols;
     }
 }
