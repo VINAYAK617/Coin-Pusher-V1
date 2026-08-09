@@ -122,6 +122,20 @@ public sealed class GameLogicCoverageTests
         }
     }
 
+    [TestMethod]
+    public void LadderBundleHonorsConfiguredPrizeUpgradeCap()
+    {
+        var current = Settings.Default.PrizeUpgradeFeatureConfig;
+        var settings = new Settings
+        {
+            PrizeUpgradeFeatureConfig = (current.P, 2, current.MinS, current.MaxS, current.Ord),
+        };
+
+        Assert.ThrowsException<InvalidOperationException>(() =>
+            new LadderCombinator(StandardRows(), seed: 31313, settings)
+                .Bundle(new decimal[] { 100, 250 }));
+    }
+
     [DataTestMethod]
     [DataRow("1,1", 2)]
     [DataRow("1,1,1", 3)]

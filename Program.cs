@@ -13,11 +13,11 @@ internal static class Program
         try
         {
             var (prizeList, seed) = ParseArgs(args);
-            var settings = new Settings();
-            var bundle = new LadderCombinator(settings.PrizeLadderRows, seed).Bundle(prizeList);
-            var plan = new Planner(bundle.Input, settings, seed).Plan();
+            var result = new CoinPusherTicketJsonGenerator(new Settings()).Generate(prizeList, seed);
+            if (!result.IsValid)
+                throw new InvalidOperationException(result.Detail);
 
-            Console.WriteLine(TicketSerializer.ToJson(plan, settings));
+            Console.WriteLine(result.Json);
             return 0;
         }
         catch (Exception ex)

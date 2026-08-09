@@ -65,7 +65,7 @@ public sealed class Settings
     public (double P, int Max, int MinS, int MaxS, int Ord) PrizeUpgradeFeatureConfig { get; init; } =
         (
             Probability("COINPUSHER_FEATURE_PRIZE_UPGRADE_P", 0.15),
-            Int("COINPUSHER_FEATURE_PRIZE_UPGRADE_MAX", 2, 0),
+            Int("COINPUSHER_FEATURE_PRIZE_UPGRADE_MAX", 4, 0),
             Int("COINPUSHER_FEATURE_PRIZE_UPGRADE_MIN_SPIN", 1, 0),
             Int("COINPUSHER_FEATURE_PRIZE_UPGRADE_MAX_SPIN", 97, 1),
             Int("COINPUSHER_FEATURE_PRIZE_UPGRADE_ORDER", 4, 0)
@@ -146,7 +146,13 @@ public sealed class Settings
         return MAX_PUSH;
     }
 
-    public int SymbolFillCap(int sym) => sym >= 5 ? 25 : FILL_CAP;
+    public int SymbolFillCap(int sym)
+    {
+        if (sym >= 1 && sym <= PrizeLadderRows.Count)
+            return PrizeLadderRows[sym - 1].Target;
+
+        return FILL_CAP;
+    }
 
     public bool IsFeat(int id) => id == F_WHEEL || id == F_XSPIN || id == F_PRUP;
 
