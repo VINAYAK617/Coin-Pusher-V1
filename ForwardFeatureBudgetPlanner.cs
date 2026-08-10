@@ -160,6 +160,14 @@ internal sealed class ForwardFeatureBudgetPlanner
             hasOptional = true;
         }
 
+        if (CanAddOptionalFlush(objectives)
+            && flushCount < _settings.FlushFeatureConfig.Max
+            && rng.NextDouble() < _settings.PFlushOptional)
+        {
+            flushCount++;
+            hasOptional = true;
+        }
+
         if (rng.NextDouble() < _settings.POptionalFeatureTicket)
         {
             if (wheelCount < _settings.WheelFeatureConfig.Max
@@ -169,7 +177,8 @@ internal sealed class ForwardFeatureBudgetPlanner
                 hasOptional = true;
             }
 
-            if (flushCount < _settings.FlushFeatureConfig.Max
+            if (CanAddOptionalFlush(objectives)
+                && flushCount < _settings.FlushFeatureConfig.Max
                 && rng.NextDouble() < _settings.POptionalTicketFlush)
             {
                 flushCount++;
@@ -255,7 +264,8 @@ internal sealed class ForwardFeatureBudgetPlanner
         int extraGoCount,
         int prizeUpgradeCount)
     {
-        var requiredCollections = objectives.WinTargets.Values.Sum();
+        var requiredCollections = objectives.WinTargets.Values.Sum()
+            + objectives.NearMissTargets.Values.Sum();
         if (requiredCollections <= 0)
             return new CapacityExpansion(wheelCount, flushCount, extraGoCount);
 
@@ -309,6 +319,9 @@ internal sealed class ForwardFeatureBudgetPlanner
             return objectives.PrizeValues.TryGetValue(symbol, out var tiers)
                 && tiers.ContainsKey(currentTier + 1);
         });
+
+    private static bool CanAddOptionalFlush(ForwardObjectives objectives) =>
+        HasGuaranteedSafeFiller(objectives);
 
     private static bool HasGuaranteedSafeFiller(ForwardObjectives objectives) =>
         objectives.FillSymbols.Any(symbol =>

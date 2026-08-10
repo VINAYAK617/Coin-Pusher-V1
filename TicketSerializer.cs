@@ -16,9 +16,10 @@ namespace CoinPusherEngine;
 ///   PRIZE_UPGRADE -> { FeatureId, ConvertToId, UpgradeSymbolId, UpgradePrizeValue }
 ///
 /// ReTrigger chaining: with configurable probability, a same-turn cosmetic
-/// PRIZE_UPGRADE token may be folded into another feature token's ReTrigger array.
-/// EXTRA_SPIN and WHEEL always stay physical because TotalSpins and WHEEL stack timing
-/// are load-bearing. ReTrigger depth is intentionally capped at one nested feature.
+/// PRIZE_UPGRADE or WHEEL token may be folded into another feature token's ReTrigger array.
+/// EXTRA_SPIN always stays physical because TotalSpins is load-bearing. WHEEL may
+/// be nested only as a same-turn child so stack timing remains replayable.
+/// ReTrigger depth is intentionally capped at one nested feature.
 ///
 /// Pos field: every spawn carries "Pos": row*5+col (flat index), per the established schema.
 /// </summary>
@@ -229,11 +230,11 @@ public static class TicketSerializer
 
         var chainable = featureTokens
             .Where(token => token.Spin < plan.TotalSpins)
-            .Where(token => IsReTriggerChainParticipant(token.Cell, settings))
+            .Where(token => IsReTriggerChainStart(token.Cell, settings))
             .ToList();
         if (chainable.Count == 0) return FeatureChainPlan.Empty;
 
-        if (chainable.Count < 2) return FeatureChainPlan.Empty;
+        if (featureTokens.Count < 2) return FeatureChainPlan.Empty;
 
         var ordered = chainable
             .OrderBy(token => token.Spin)
@@ -242,7 +243,10 @@ public static class TicketSerializer
             .ToList();
 
         var start = ordered[DeterministicIndex(plan, ordered.Count, salt: 97, settings)];
-        var payloadCandidates = ordered
+        var payloadCandidates = featureTokens
+            .OrderBy(token => token.Spin)
+            .ThenBy(token => token.Pos.Item1 * settings.COLS + token.Pos.Item2)
+            .ThenBy(token => token.Cell.Sym)
             .Where(token => token.Spin != start.Spin || token.Pos != start.Pos)
             .Where(token => IsTimingSafeReTriggerPayload(start, token, settings))
             .ToList();
@@ -268,21 +272,21 @@ public static class TicketSerializer
     private static bool IsNoBoardEffectFeature(Cell cell, Settings settings) =>
         cell.Sym == settings.F_XSPIN || cell.Sym == settings.F_PRUP;
 
-    private static bool IsReTriggerChainParticipant(Cell cell, Settings settings) =>
-        IsNoBoardEffectFeature(cell, settings) || cell.Sym == settings.F_WHEEL;
+    private static bool IsReTriggerChainStart(Cell cell, Settings settings) =>
+        IsNoBoardEffectFeature(cell, settings);
 
     private static bool IsTimingSafeReTriggerPayload(
         (int Spin, (int, int) Pos, Cell Cell) start,
         (int Spin, (int, int) Pos, Cell Cell) payload,
         Settings settings)
     {
-        if (payload.Cell.Sym == settings.F_WHEEL || payload.Cell.Sym == settings.F_XSPIN)
+        if (payload.Cell.Sym == settings.F_XSPIN)
             return false;
 
         if (payload.Spin != start.Spin)
             return false;
 
-        return payload.Cell.Sym == settings.F_PRUP;
+        return payload.Cell.Sym == settings.F_PRUP || payload.Cell.Sym == settings.F_WHEEL;
     }
 
     private sealed record FeatureChainPlan(

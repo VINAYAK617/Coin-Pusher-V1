@@ -55,7 +55,10 @@ internal sealed class ForwardTurnShapePlanner
         int maxPoppedCells,
         IReadOnlySet<int>? flushColumns = null,
         IReadOnlySet<int>? blockedColumns = null,
-        bool pressureMode = false)
+        bool pressureMode = false,
+        IReadOnlySet<long>? avoidedPushBags = null,
+        IReadOnlyDictionary<long, int>? pushBagUseCounts = null,
+        int? preferredPoppedCells = null)
     {
         if (minPoppedCells < 0 || maxPoppedCells < minPoppedCells)
         {
@@ -94,11 +97,22 @@ internal sealed class ForwardTurnShapePlanner
                 $"no legal turn shape for pop budget {minPoppedCells}..{maxPoppedCells}");
         }
 
-        var bestScore = legal.Max(candidate => Score(candidate, pressureMode));
-        var best = legal
-            .Where(candidate => Score(candidate, pressureMode) == bestScore)
+        var preferredPopCount = preferredPoppedCells.HasValue
+            ? ClosestLegalPopCount(legal, preferredPoppedCells.Value)
+            : PickPreferredPopCount(legal, pressureMode);
+        var eligible = PreferLeastUsedPushBags(
+            PreferFreshPushBags(legal, avoidedPushBags),
+            pushBagUseCounts);
+        var scored = eligible
+            .Select(candidate => new ScoredCandidate(candidate, Score(candidate, pressureMode, preferredPopCount)))
+            .ToArray();
+
+        var bestScore = scored.Max(candidate => candidate.Score);
+        var best = scored
+            .Where(candidate => candidate.Score == bestScore)
             .OrderBy(_ => _rng.Next())
-            .First();
+            .First()
+            .Candidate;
 
         return new ForwardTurnShapePlanResult(
             ForwardTurnShapePlanStatus.Valid,
@@ -146,28 +160,117 @@ internal sealed class ForwardTurnShapePlanner
         }
     }
 
-    private int Score(Candidate candidate, bool pressureMode)
+    internal static long PushBagKey(ForwardTurnShape shape, Settings settings) =>
+        BuildPushBagKey(shape, settings);
+
+    private IReadOnlyList<Candidate> PreferFreshPushBags(
+        IReadOnlyList<Candidate> legal,
+        IReadOnlySet<long>? avoidedPushBags)
     {
-        var score = 0;
-        score += candidate.DistinctPushValues * 100;
-        if (!candidate.IsSortedPattern) score += 60;
-        if (!candidate.IsAllSame) score += 40;
-        if (candidate.ContainsOne) score += 15;
-        if (candidate.ContainsTwo) score += 20;
-        if (candidate.ContainsThree) score += 25;
-        if (candidate.ContainsFour) score += pressureMode ? 15 : 10;
-        score -= candidate.FlushCount * 5;
-        var capacityWeight = pressureMode ? 80 : 15;
-        score -= Math.Abs(candidate.PoppedCellCount - PreferredPopCount(candidate.PoppedCellCount, pressureMode)) * capacityWeight;
-        return score;
+        if (avoidedPushBags == null || avoidedPushBags.Count == 0)
+            return legal;
+
+        var fresh = legal
+            .Where(candidate => !avoidedPushBags.Contains(candidate.PushBagKey))
+            .ToArray();
+
+        return fresh.Length == 0
+            ? legal
+            : fresh;
     }
 
-    private int PreferredPopCount(int actual, bool pressureMode)
+    private static IReadOnlyList<Candidate> PreferLeastUsedPushBags(
+        IReadOnlyList<Candidate> legal,
+        IReadOnlyDictionary<long, int>? pushBagUseCounts)
     {
-        _ = actual;
-        return pressureMode
-            ? _settings.COLS * 4
-            : (_settings.COLS * 3) - 1;
+        if (pushBagUseCounts == null || pushBagUseCounts.Count == 0)
+            return legal;
+
+        var minUse = legal.Min(candidate => pushBagUseCounts.GetValueOrDefault(candidate.PushBagKey));
+        return legal
+            .Where(candidate => pushBagUseCounts.GetValueOrDefault(candidate.PushBagKey) == minUse)
+            .ToArray();
+    }
+
+    private static int ClosestLegalPopCount(IReadOnlyList<Candidate> legal, int preferred)
+    {
+        return legal
+            .Select(candidate => candidate.PoppedCellCount)
+            .Distinct()
+            .OrderBy(count => Math.Abs(count - preferred))
+            .ThenByDescending(count => count)
+            .First();
+    }
+
+    private int PickPreferredPopCount(IReadOnlyList<Candidate> legal, bool pressureMode)
+    {
+        var counts = legal
+            .Select(candidate => candidate.PoppedCellCount)
+            .Distinct()
+            .OrderBy(count => count)
+            .ToArray();
+
+        if (counts.Length == 1)
+            return counts[0];
+
+        var min = counts[0];
+        var max = counts[counts.Length - 1];
+        var span = max - min;
+        var lower = pressureMode
+            ? min + Math.Max(0, (int)Math.Round(span * 0.60))
+            : min + Math.Max(0, (int)Math.Round(span * 0.35));
+        var upper = pressureMode
+            ? max
+            : min + Math.Max(0, (int)Math.Round(span * 0.80));
+
+        lower = Math.Clamp(lower, min, max);
+        upper = Math.Clamp(upper, lower, max);
+
+        var window = counts
+            .Where(count => count >= lower && count <= upper)
+            .ToArray();
+        if (window.Length == 0)
+            window = counts;
+
+        var third = Math.Max(1, (int)Math.Ceiling(window.Length / 3.0));
+        var low = window.Take(third).ToArray();
+        var mid = window.Skip(third).Take(third).ToArray();
+        var high = window.Skip(third * 2).ToArray();
+
+        var chosen = PickPopBucket(low, mid, high);
+        return chosen[_rng.Next(chosen.Length)];
+    }
+
+    private int[] PickPopBucket(int[] low, int[] mid, int[] high)
+    {
+        var lowWeight = low.Length == 0 ? 0.0 : _settings.WPusherLowPop;
+        var midWeight = mid.Length == 0 ? 0.0 : _settings.WPusherMidPop;
+        var highWeight = high.Length == 0 ? 0.0 : _settings.WPusherHighPop;
+        var total = lowWeight + midWeight + highWeight;
+        if (total <= 0.0)
+            return low.Length > 0 ? low : mid.Length > 0 ? mid : high;
+
+        var roll = _rng.NextDouble() * total;
+        if (roll < lowWeight) return low;
+        roll -= lowWeight;
+        if (roll < midWeight) return mid;
+        return high;
+    }
+
+    private int Score(Candidate candidate, bool pressureMode, int preferredPopCount)
+    {
+        var score = 0;
+        score += candidate.DistinctPushValues * 24;
+        if (!candidate.IsSortedPattern) score += 35;
+        if (candidate.IsAllSame) score -= 120;
+        if (candidate.ContainsOne) score += 10;
+        if (candidate.ContainsTwo) score += 12;
+        if (candidate.ContainsThree) score += 12;
+        if (candidate.ContainsFour) score += pressureMode ? 12 : 8;
+        score -= candidate.FlushCount * 5;
+        var capacityWeight = pressureMode ? 80 : 18;
+        score -= Math.Abs(candidate.PoppedCellCount - preferredPopCount) * capacityWeight;
+        return score;
     }
 
     private ForwardTurnShapePlanResult ValidateColumns(
@@ -196,6 +299,20 @@ internal sealed class ForwardTurnShapePlanner
         return ascending || descending;
     }
 
+    private static long BuildPushBagKey(ForwardTurnShape shape, Settings settings)
+    {
+        var key = 0L;
+        for (var push = settings.MIN_PUSH; push <= settings.MAX_PUSH; push++)
+        {
+            var count = shape.Pushers.Count(pusher =>
+                !pusher.IsFlush(settings) && pusher.PushValue == push);
+            key = (key * 8L) + count;
+        }
+
+        var flushCount = shape.Pushers.Count(pusher => pusher.IsFlush(settings));
+        return (key * 8L) + flushCount;
+    }
+
     private static ForwardTurnShapePlanResult Ok() =>
         new(ForwardTurnShapePlanStatus.Valid, "ok", null, 0, 0, false, false);
 
@@ -220,6 +337,7 @@ internal sealed class ForwardTurnShapePlanner
             ContainsThree = normalPushes.Contains(3);
             ContainsFour = normalPushes.Contains(4);
             FlushCount = shape.Pushers.Count(pusher => pusher.IsFlush(settings));
+            PushBagKey = BuildPushBagKey(shape, settings);
         }
 
         internal ForwardTurnShape Shape { get; }
@@ -232,5 +350,18 @@ internal sealed class ForwardTurnShapePlanner
         internal bool ContainsThree { get; }
         internal bool ContainsFour { get; }
         internal int FlushCount { get; }
+        internal long PushBagKey { get; }
+    }
+
+    private readonly struct ScoredCandidate
+    {
+        internal ScoredCandidate(Candidate candidate, int score)
+        {
+            Candidate = candidate;
+            Score = score;
+        }
+
+        internal Candidate Candidate { get; }
+        internal int Score { get; }
     }
 }

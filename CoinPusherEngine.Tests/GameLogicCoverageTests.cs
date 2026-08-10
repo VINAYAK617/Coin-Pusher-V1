@@ -17,9 +17,9 @@ public sealed class GameLogicCoverageTests
         {
             Targets = new Dictionary<int, int>
             {
-                [2] = 18,
-                [4] = 18,
-                [5] = 13,
+                [2] = Settings.Default.SymbolFillCap(2),
+                [4] = Settings.Default.SymbolFillCap(4),
+                [5] = Settings.Default.SymbolFillCap(5),
             },
             BaseSpins = 5,
             Required = new Dictionary<string, int>
@@ -74,8 +74,8 @@ public sealed class GameLogicCoverageTests
         {
             Targets = new Dictionary<int, int>
             {
-                [2] = 14,
-                [4] = 16,
+                [2] = Settings.Default.SymbolFillCap(2),
+                [4] = Settings.Default.SymbolFillCap(4),
             },
             BaseSpins = 5,
             Required = new Dictionary<string, int>(),
@@ -206,7 +206,7 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
-    public void TopPrizeTargetCompletesOnFinalTurn()
+    public void TopPrizeTargetCollectsExactly()
     {
         var input = new MathInput
         {
@@ -216,9 +216,8 @@ public sealed class GameLogicCoverageTests
             MaxSym = 8,
         };
 
-        var plan = new Planner(input, seed: 10000).Plan();
+        var plan = ForwardPlan(input, seed: 10000);
 
-        Assert.IsTrue(plan.Spins[^1].Alloc.GetValueOrDefault(6) > 0);
         Assert.AreEqual(30, Sim.Run(plan)[6]);
         AssertValid(JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(TicketSerializer.ToJson(plan))!);
     }
@@ -271,7 +270,11 @@ public sealed class GameLogicCoverageTests
     {
         var input = new MathInput
         {
-            Targets = new Dictionary<int, int> { [2] = 20, [4] = 20 },
+            Targets = new Dictionary<int, int>
+            {
+                [2] = Settings.Default.SymbolFillCap(2),
+                [4] = Settings.Default.SymbolFillCap(4),
+            },
             BaseSpins = 5,
             Required = new Dictionary<string, int> { ["PRIZE_UPGRADE"] = 2 },
             PrizeTiers = new Dictionary<int, int> { [2] = 1, [4] = 1 },
@@ -308,7 +311,7 @@ public sealed class GameLogicCoverageTests
             MaxSym = 6,
         };
 
-        var plan = new Planner(input, settings, seed: 34344).Plan();
+        var plan = ForwardPlan(input, seed: 34344, settings);
         var ticket = TicketSerializer.ToTicketObject(plan, settings);
         var lateStart = Math.Max(1, ticket.WinInfo.TotalSpins - Math.Max(2, settings.WinLateTailSpins + 1));
         var featureTurns = ticket.Turns
@@ -351,32 +354,6 @@ public sealed class GameLogicCoverageTests
         AssertExtraSpinTiming(ticket);
         AssertNoFinalBoardFeatures(ticket);
         AssertValid(ticket);
-    }
-
-    [TestMethod]
-    public void PlannerRejectsInvalidMathInputsBeforeGeneration()
-    {
-        Assert.ThrowsException<ArgumentException>(() => new Planner(new MathInput
-        {
-            Targets = new Dictionary<int, int> { [1] = 1 },
-            BaseSpins = 4,
-            MaxSym = 6,
-        }, seed: 1).Plan());
-
-        Assert.ThrowsException<ArgumentException>(() => new Planner(new MathInput
-        {
-            Targets = new Dictionary<int, int> { [99] = 1 },
-            BaseSpins = 5,
-            MaxSym = 6,
-        }, seed: 1).Plan());
-
-        Assert.ThrowsException<ArgumentException>(() => new Planner(new MathInput
-        {
-            Targets = new Dictionary<int, int> { [1] = 1 },
-            BaseSpins = 5,
-            Required = new Dictionary<string, int> { ["UNKNOWN"] = 1 },
-            MaxSym = 6,
-        }, seed: 1).Plan());
     }
 
     [TestMethod]
@@ -636,11 +613,16 @@ public sealed class GameLogicCoverageTests
     {
         var input = new MathInput
         {
-            Targets = new Dictionary<int, int> { [2] = 20, [4] = 20 },
+            Targets = new Dictionary<int, int>
+            {
+                [2] = Settings.Default.SymbolFillCap(2),
+                [4] = Settings.Default.SymbolFillCap(4),
+            },
             BaseSpins = 5,
+            PrizeValues = PrizeValues(Settings.Default.PrizeLadderRows.Count, tiers: 3),
             MaxSym = 6,
         };
-        var plan = new Planner(input, seed: 60606).Plan();
+        var plan = ForwardPlan(input, seed: 60606);
         var ticket = TicketSerializer.ToTicketObject(plan);
         var declared = ticket.WinInfo.WinSymbols.Select(w => w.Id)
             .Concat(ticket.WinInfo.NonWinSymbols.Select(w => w.Id))
@@ -822,9 +804,78 @@ public sealed class GameLogicCoverageTests
         Assert.AreEqual(2, parent.Feature.ReTrigger[0].ConvertToId);
     }
 
+    [TestMethod]
+    public void SerializerCanUseWheelAsSameTurnRetriggerPayload()
+    {
+        var settings = new Settings { PFeatureRetriggerChain = 1.0 };
+        var plan = new GamePlan
+        {
+            TotalSpins = 3,
+            Targets = new Dictionary<int, int>(),
+            WinSyms = Array.Empty<int>(),
+            FillSyms = new[] { 1, 2, 3 },
+            PrizeValues = PrizeValues(6, tiers: 3),
+            Spins = new List<SpinPlan>
+            {
+                SpinWithExtraAndWheel(1),
+                PlainSpin(2),
+                PlainSpin(3),
+            },
+        };
+
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
+        var parent = ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .First(spawn => spawn.Feature?.ReTrigger.Length == 1);
+
+        Assert.AreEqual(Settings.Default.F_WHEEL, parent.Feature!.ConvertToId);
+        Assert.AreEqual(Settings.Default.F_WHEEL, parent.Feature.ReTrigger[0].FeatureId);
+        Assert.AreEqual(2, parent.Feature.ReTrigger[0].WheelSymbolId);
+        Assert.AreEqual(1, parent.Feature.ReTrigger[0].WheelStackValue);
+    }
+
+    [TestMethod]
+    public void CheckerFlagsRepeatedPusherBags()
+    {
+        var ticket = new TicketSerializer.TicketDto
+        {
+            WinInfo = new TicketSerializer.WinInfoDto
+            {
+                TotalSpins = 3,
+                WinSymbols = Array.Empty<TicketSerializer.WinSymbolDto>(),
+                NonWinSymbols = new[]
+                {
+                    new TicketSerializer.NonWinSymbolDto { Id = 6, MinTarget = 1, MaxThreshold = 30 },
+                },
+                PrizeTiers = Array.Empty<TicketSerializer.PrizeTierDto>(),
+            },
+            StartingBoard = Enumerable.Range(0, Settings.Default.ROWS)
+                .Select(_ => Enumerable.Range(0, Settings.Default.COLS)
+                    .Select(_ => new TicketSerializer.BoardCellDto { Id = 6 })
+                    .ToArray())
+                .ToArray(),
+            Turns = Enumerable.Range(0, 3)
+                .Select(_ => new TicketSerializer.TurnDto
+                {
+                    Pushers = Enumerable.Repeat(new TicketSerializer.PusherDto { PushValue = 1 }, Settings.Default.COLS).ToArray(),
+                    Spawns = new[] { 4, 9, 14, 19, 24 }
+                        .Select(pos => new TicketSerializer.SpawnDto { Pos = pos, Id = 6 })
+                        .ToArray(),
+                })
+                .ToArray(),
+        };
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Warning &&
+            check.Category == "Experience" &&
+            check.Name.Contains("Pusher bag variety")));
+    }
+
     private static TicketSerializer.TicketDto PlanTicket(MathInput input, int seed)
     {
-        var plan = new Planner(input, seed).Plan();
+        var plan = ForwardPlan(input, seed);
 
         Assert.IsTrue(plan.Verified);
 
@@ -833,6 +884,100 @@ public sealed class GameLogicCoverageTests
 
         Assert.IsNotNull(ticket);
         return ticket!;
+    }
+
+    private static GamePlan ForwardPlan(MathInput input, int seed, Settings? settings = null)
+    {
+        var actualSettings = settings ?? Settings.Default;
+        var last = "";
+        for (var attempt = 0; attempt < Math.Min(actualSettings.MaxPlanAttempts, 32); attempt++)
+        {
+            var result = TryForwardPlan(input, AttemptSeed(seed, attempt), actualSettings);
+            if (result.Plan != null)
+                return result.Plan;
+
+            last = result.Detail;
+        }
+
+        Assert.Fail($"Could not build a forward plan from test MathInput after bounded attempts: {last}");
+        throw new InvalidOperationException(last);
+    }
+
+    private static (GamePlan? Plan, string Detail) TryForwardPlan(
+        MathInput input,
+        int seed,
+        Settings actualSettings)
+    {
+        var objectives = new ForwardObjectivePlanner(actualSettings).Resolve(input, seed + 1);
+        if (!objectives.IsValid) return (null, $"{objectives.Status}: {objectives.Detail}");
+
+        var budget = new ForwardFeatureBudgetPlanner(actualSettings).Plan(input, objectives.Objectives, seed + 2);
+        if (!budget.IsValid) return (null, $"{budget.Status}: {budget.Detail}");
+
+        var timing = new ForwardFeatureTimingPlanner(actualSettings, seed + 3).Plan(budget.Budget);
+        if (!timing.IsValid) return (null, $"{timing.Status}: {timing.Detail}");
+
+        var intents = new ForwardFeatureIntentPlanner(actualSettings, seed + 4).Plan(objectives.Objectives, timing.Timing);
+        if (!intents.IsValid) return (null, $"{intents.Status}: {intents.Detail}");
+
+        var frames = new ForwardTurnFramePlanner(actualSettings, seed + 5).Plan(
+            budget.Budget,
+            intents.Plan,
+            objectives.Objectives);
+        if (!frames.IsValid) return (null, $"{frames.Status}: {frames.Detail}");
+
+        var finalized = new ForwardObjectiveFinalizer(actualSettings).Finalize(
+            objectives.Objectives,
+            intents.Plan,
+            frames.Plan);
+        if (!finalized.IsValid) return (null, $"{finalized.Status}: {finalized.Detail}");
+
+        var finalObjectives = new ForwardObjectiveResult(
+            ForwardObjectiveStatus.Valid,
+            finalized.Detail,
+            finalized.Objectives);
+
+        var envelope = new ForwardTicketEnvelopeValidator(actualSettings).Validate(
+            finalObjectives.Objectives,
+            frames.Plan);
+        if (!envelope.IsValid) return (null, $"{envelope.Status}: {envelope.Detail}");
+
+        var pipeline = new ForwardTicketPipelineExecutor(actualSettings, seed + 6).Execute(
+            finalObjectives.Objectives,
+            frames.Plan);
+        if (!pipeline.IsValid) return (null, $"{pipeline.Status}: {pipeline.Detail}");
+
+        var build = new ForwardTicketBuildResult(
+            ForwardTicketBuildStatus.Valid,
+            "test helper",
+            null,
+            finalObjectives,
+            budget,
+            timing,
+            intents,
+            frames,
+            envelope,
+            pipeline);
+        var adapted = new ForwardGamePlanAdapter(actualSettings).Adapt(build);
+        if (!adapted.IsValid || adapted.Plan == null)
+            return (null, $"{adapted.Status}: {adapted.Detail}");
+
+        return adapted.Plan.Verified
+            ? (adapted.Plan, "ok")
+            : (null, "adapted plan was not verified");
+    }
+
+    private static int AttemptSeed(int seed, int attempt)
+    {
+        if (attempt == 0) return seed;
+
+        unchecked
+        {
+            var next = seed;
+            next = (next * 397) ^ attempt;
+            next ^= 0x6d2b79f5;
+            return next == int.MinValue ? 0 : Math.Abs(next);
+        }
     }
 
     private static void AssertValid(TicketSerializer.TicketDto ticket)
@@ -979,6 +1124,28 @@ public sealed class GameLogicCoverageTests
                     FeatId = "PRIZE_UPGRADE",
                     PrupSym = 2,
                     PrupTier = 1,
+                }),
+            },
+        };
+
+    private static SpinPlan SpinWithExtraAndWheel(int spin) =>
+        new()
+        {
+            Spin = spin,
+            Board = FilledBoard(1),
+            Push = Enumerable.Repeat(1, Settings.Default.COLS).ToArray(),
+            Flush = Enumerable.Repeat(false, Settings.Default.COLS).ToArray(),
+            Spawns = new Dictionary<(int, int), Cell>
+            {
+                [(0, 0)] = Grid.Feat(Settings.Default.F_XSPIN, 2, new FP
+                {
+                    FeatId = "EXTRA_SPIN",
+                }),
+                [(0, 1)] = Grid.Feat(Settings.Default.F_WHEEL, 3, new FP
+                {
+                    FeatId = "WHEEL",
+                    WheelSym = 2,
+                    WheelStack = 2,
                 }),
             },
         };

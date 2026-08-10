@@ -14,6 +14,7 @@ internal enum CoinPusherTicketGenerationValidationStatus
     SpinCountMismatch,
     PrizeCoverageMismatch,
     TicketCheckerFailed,
+    PusherPatternTooRepetitive,
 }
 
 internal sealed class CoinPusherTicketGenerationValidationResult
@@ -62,6 +63,10 @@ internal sealed class CoinPusherTicketGenerationValidator
         var coverage = ValidatePrizeCoverage(requestedPrizeAmounts, generated.Build);
         if (coverage != null)
             return coverage;
+
+        var pusherVariety = ValidatePusherVariety(generated.Ticket);
+        if (pusherVariety != null)
+            return pusherVariety;
 
         if (!generated.CheckerReport.IsValid)
         {
@@ -122,6 +127,51 @@ internal sealed class CoinPusherTicketGenerationValidator
             return Fail(
                 CoinPusherTicketGenerationValidationStatus.PrizeCoverageMismatch,
                 $"bundle skipped prize amount(s): [{string.Join(",", bundle.Skipped.OrderBy(amount => amount))}]");
+        }
+
+        return null;
+    }
+
+    private static CoinPusherTicketGenerationValidationResult? ValidatePusherVariety(
+        TicketSerializer.TicketDto ticket)
+    {
+        var repeatedPattern = ticket.Turns
+            .Select((turn, index) => new
+            {
+                Turn = index + 1,
+                Pattern = string.Join(",", (turn.Pushers ?? Array.Empty<TicketSerializer.PusherDto>())
+                    .Select(pusher => pusher.PushValue)),
+            })
+            .GroupBy(item => item.Pattern)
+            .Where(group => group.Key.Length > 0 && group.Count() >= 3)
+            .OrderByDescending(group => group.Count())
+            .FirstOrDefault();
+        if (repeatedPattern != null)
+        {
+            return Fail(
+                CoinPusherTicketGenerationValidationStatus.PusherPatternTooRepetitive,
+                $"pusher pattern [{repeatedPattern.Key}] appears {repeatedPattern.Count()} time(s), turns " +
+                string.Join(",", repeatedPattern.Select(item => item.Turn)));
+        }
+
+        var repeatedBag = ticket.Turns
+            .Select((turn, index) => new
+            {
+                Turn = index + 1,
+                Bag = string.Join(",", (turn.Pushers ?? Array.Empty<TicketSerializer.PusherDto>())
+                    .Select(pusher => pusher.PushValue)
+                    .OrderBy(value => value)),
+            })
+            .GroupBy(item => item.Bag)
+            .Where(group => group.Key.Length > 0 && group.Count() >= 3)
+            .OrderByDescending(group => group.Count())
+            .FirstOrDefault();
+        if (repeatedBag != null)
+        {
+            return Fail(
+                CoinPusherTicketGenerationValidationStatus.PusherPatternTooRepetitive,
+                $"pusher bag [{repeatedBag.Key}] appears {repeatedBag.Count()} time(s), turns " +
+                string.Join(",", repeatedBag.Select(item => item.Turn)));
         }
 
         return null;

@@ -688,6 +688,29 @@ public static class TicketChecker
             add("Experience", "Pusher pattern variety", Status.Pass, "ok");
         }
 
+        var repeatedPusherBag = t.Turns
+            .Select((turn, index) => new
+            {
+                Turn = index + 1,
+                Bag = string.Join(",", (turn.Pushers ?? Array.Empty<PusherDto>())
+                    .Select(p => p.PushValue)
+                    .OrderBy(value => value)),
+            })
+            .GroupBy(item => item.Bag)
+            .Where(group => group.Key.Length > 0 && group.Count() >= 3)
+            .OrderByDescending(group => group.Count())
+            .FirstOrDefault();
+        if (repeatedPusherBag != null)
+        {
+            add("Experience", "Pusher bag variety", Status.Warning,
+                $"push-value bag [{repeatedPusherBag.Key}] appears {repeatedPusherBag.Count()} time(s), turns " +
+                string.Join(",", repeatedPusherBag.Select(item => item.Turn)));
+        }
+        else
+        {
+            add("Experience", "Pusher bag variety", Status.Pass, "ok");
+        }
+
         var wheelStackValues = replay.WheelFireEvents.Select(w => w.WheelStackValue).ToArray();
         if (wheelStackValues.Length >= 3 && wheelStackValues.Distinct().Count() == 1)
         {
@@ -1096,36 +1119,59 @@ public static class TicketChecker
                     var isWheel = fc.FeatureId == Settings.Default.F_WHEEL;
                     if (isWheel != wheelPass) continue;
 
-                    if (isWheel && fc.WheelStackValue + 1 > 1)
-                    {
-                        int multiplier = fc.WheelStackValue + 1;
-                        int sym = fc.WheelSymbolId;
-                        for (int rr = 0; rr < Settings.Default.ROWS; rr++)
-                        {
-                            for (int cc = 0; cc < Settings.Default.COLS; cc++)
-                            {
-                                var cell = board[rr, cc];
-                                if (cell != null && !cell.IsFeat && cell.Sym == sym)
-                                    cell.Stack = Math.Min(Settings.Default.MAX_COIN_STACK, cell.Stack + multiplier - 1);
-                            }
-                        }
+                    if (isWheel)
+                        ApplyWheelEffect(board, result, turn, fc);
 
-                        result.WheelFireEvents.Add(new WheelFireEvent
-                        {
-                            Turn = turn,
-                            WheelSymbolId = sym,
-                            WheelStackValue = fc.WheelStackValue,
-                            ActualMultiplier = multiplier,
-                        });
-                    }
-
-                    board[r, c] = new ReplayCell { Sym = ResolveConvert(fc) };
+                    board[r, c] = fc.ReTrigger is { Length: > 0 }
+                        ? FeatureCell(fc.ReTrigger[0])
+                        : new ReplayCell { Sym = ResolveConvert(fc) };
                     any = true;
                 }
             }
         }
         while (any && BoardHasFeatureCell(board, wheelPass));
     }
+
+    private static void ApplyWheelEffect(
+        ReplayCell?[,] board,
+        ReplayResult result,
+        int turn,
+        ReplayCell fc)
+    {
+        if (fc.WheelStackValue + 1 <= 1) return;
+
+        int multiplier = fc.WheelStackValue + 1;
+        int sym = fc.WheelSymbolId;
+        for (int rr = 0; rr < Settings.Default.ROWS; rr++)
+        {
+            for (int cc = 0; cc < Settings.Default.COLS; cc++)
+            {
+                var cell = board[rr, cc];
+                if (cell != null && !cell.IsFeat && cell.Sym == sym)
+                    cell.Stack = Math.Min(Settings.Default.MAX_COIN_STACK, cell.Stack + multiplier - 1);
+            }
+        }
+
+        result.WheelFireEvents.Add(new WheelFireEvent
+        {
+            Turn = turn,
+            WheelSymbolId = sym,
+            WheelStackValue = fc.WheelStackValue,
+            ActualMultiplier = multiplier,
+        });
+    }
+
+    private static ReplayCell FeatureCell(FeatureDto feature) =>
+        new()
+        {
+            Sym = feature.FeatureId,
+            IsFeat = true,
+            FeatureId = feature.FeatureId,
+            ConvertToId = feature.ConvertToId,
+            WheelSymbolId = feature.WheelSymbolId ?? 0,
+            WheelStackValue = feature.WheelStackValue ?? 0,
+            ReTrigger = feature.ReTrigger ?? Array.Empty<FeatureDto>(),
+        };
 
     /// <summary>
     /// Resolves the REAL eventual symbol a feature cell converts to. When a

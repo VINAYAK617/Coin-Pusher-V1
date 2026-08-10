@@ -121,7 +121,14 @@ internal sealed class ForwardObjectiveFinalizer
                 $"winning targets need {winRequired}, but only {usableCollectionSlots} normal progress slot(s) are available"));
         }
 
-        var nearMissBudget = Math.Max(0, usableCollectionSlots - winRequired - TemporalReserve(framePlan));
+        var rawNearMissCapacity = Math.Max(0, usableCollectionSlots - winRequired);
+        var nearMissBudget = Math.Max(0, rawNearMissCapacity - TemporalReserve(framePlan));
+        if (objectives.NearMissTargets.Count > 0
+            && nearMissBudget < _settings.NONWIN_MIN_TARGET
+            && rawNearMissCapacity >= _settings.NONWIN_MIN_TARGET)
+        {
+            nearMissBudget = _settings.NONWIN_MIN_TARGET;
+        }
 
         var protectedSymbols = featureIntents.EffectiveNonWinPrizeTiers.Keys
             .Concat(featureIntents.Intents

@@ -91,7 +91,8 @@ internal sealed class ForwardTurnFramePlanner
 
     internal ForwardTurnFrameResult Plan(
         ForwardFeatureBudget? budget,
-        ForwardFeatureIntentPlan? intentPlan)
+        ForwardFeatureIntentPlan? intentPlan,
+        ForwardObjectives? objectives = null)
     {
         if (budget == null)
             return Fail(ForwardTurnFrameStatus.MissingBudget, "feature budget is missing");
@@ -116,6 +117,7 @@ internal sealed class ForwardTurnFramePlanner
         }
 
         var frames = new List<ForwardTurnFrame>(budget.TotalTurns);
+        var usedPushBags = new Dictionary<long, int>();
         for (var turn = 1; turn <= budget.TotalTurns; turn++)
         {
             var intents = intentPlan.ByTurn.TryGetValue(turn, out var turnIntents)
@@ -130,7 +132,7 @@ internal sealed class ForwardTurnFramePlanner
             }
 
             var flushColumns = PickFlushColumns(flushCount);
-            var shape = BuildShape(turn, budget.TotalTurns, flushColumns);
+            var shape = BuildShape(turn, budget, objectives, flushColumns, usedPushBags);
             if (!shape.IsValid)
             {
                 return Fail(
@@ -138,6 +140,8 @@ internal sealed class ForwardTurnFramePlanner
                     $"turn {turn}: {shape.Detail}");
             }
 
+            var pushBagKey = ForwardTurnShapePlanner.PushBagKey(shape.Shape!, _settings);
+            usedPushBags[pushBagKey] = usedPushBags.GetValueOrDefault(pushBagKey) + 1;
             frames.Add(new ForwardTurnFrame(
                 turn,
                 shape.Shape!,
@@ -186,22 +190,46 @@ internal sealed class ForwardTurnFramePlanner
 
     private ForwardTurnShapePlanResult BuildShape(
         int turn,
-        int totalTurns,
-        IReadOnlySet<int> flushColumns)
+        ForwardFeatureBudget budget,
+        ForwardObjectives? objectives,
+        IReadOnlySet<int> flushColumns,
+        IReadOnlyDictionary<long, int> usedPushBags)
     {
+        var totalTurns = budget.TotalTurns;
         var normalColumns = _settings.COLS - flushColumns.Count;
         var minPopped = (flushColumns.Count * _settings.ROWS)
             + (normalColumns * _settings.MIN_PUSH);
         var maxPopped = (flushColumns.Count * _settings.ROWS)
             + (normalColumns * _settings.MAX_PUSH);
-        var pressureMode = false;
+        var pressureMode = totalTurns >= _settings.MAX_SPINS;
+        var preferredPoppedCells = pressureMode && objectives != null
+            ? PressurePreferredPoppedCells(budget, objectives, minPopped, maxPopped)
+            : (int?)null;
 
         return new ForwardTurnShapePlanner(_settings, _rng).Plan(
             minPopped,
             maxPopped,
             flushColumns,
             blockedColumns: null,
-            pressureMode);
+            pressureMode,
+            avoidedPushBags: null,
+            pushBagUseCounts: usedPushBags,
+            preferredPoppedCells);
+    }
+
+    private int PressurePreferredPoppedCells(
+        ForwardFeatureBudget budget,
+        ForwardObjectives objectives,
+        int minPopped,
+        int maxPopped)
+    {
+        var required = objectives.WinTargets.Values.Sum()
+            + objectives.NearMissTargets.Values.Sum();
+        var averageDemand = budget.TotalTurns <= 0
+            ? maxPopped
+            : (int)Math.Ceiling(required / (double)budget.TotalTurns);
+
+        return Math.Clamp(averageDemand, minPopped, maxPopped);
     }
 
     private static ForwardTurnFrameResult Ok() =>

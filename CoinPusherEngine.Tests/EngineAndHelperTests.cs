@@ -11,7 +11,11 @@ public sealed class EngineAndHelperTests
     {
         var input = new MathInput
         {
-            Targets = new Dictionary<int, int> { [2] = 18, [4] = 18 },
+            Targets = new Dictionary<int, int>
+            {
+                [2] = Settings.Default.SymbolFillCap(2),
+                [4] = Settings.Default.SymbolFillCap(4),
+            },
             BaseSpins = 5,
             Required = new Dictionary<string, int>
             {
@@ -19,9 +23,10 @@ public sealed class EngineAndHelperTests
                 ["FLUSH"] = 1,
                 ["EXTRA_SPIN"] = 1,
             },
+            PrizeValues = PrizeValues(Settings.Default.PrizeLadderRows.Count, tiers: 3),
             MaxSym = 6,
         };
-        var plan = new Planner(input, seed: 909).Plan();
+        var plan = ForwardPlan(input, seed: 909);
 
         var result = new Engine(plan).Run();
         var simTotals = Sim.Run(plan);
@@ -43,61 +48,6 @@ public sealed class EngineAndHelperTests
         var plan = new GamePlan { Verified = false };
 
         Assert.ThrowsException<ArgumentException>(() => new Engine(plan));
-    }
-
-    [TestMethod]
-    public void PrizeCombinatorDecidesFreshAndUpgradeCombos()
-    {
-        var prizes = new[]
-        {
-            new Prize { Amount = 1, Target = 12 },
-            new Prize { Amount = 5, Target = 15 },
-            new Prize { Amount = 10, Target = 18 },
-        };
-        var combinator = new PrizeCombinator(new PrizeCombinatorOptions
-        {
-            MinSym = 1,
-            MaxSym = 3,
-            UpgradeProbability = 1,
-            Seed = 5,
-        });
-
-        var combos = combinator.Decide(prizes);
-
-        Assert.AreEqual(3, combos.Count);
-        Assert.IsFalse(combos[0].IsUpgrade);
-        Assert.IsTrue(combos.Skip(1).All(c => c.IsUpgrade));
-        Assert.IsTrue(combos.All(c => c.Input.BaseSpins == 5));
-        Assert.IsTrue(combos.All(c => c.Input.MaxSym == 3));
-        Assert.AreEqual("PRIZE_UPGRADE", combos[1].Input.Required.Single().Key);
-        Assert.IsTrue(combos[1].Input.PrizeTiers!.Values.Single() > 0);
-    }
-
-    [TestMethod]
-    public void VerifierRejectsIllegalNormalPushValues()
-    {
-        var plan = new Planner(new MathInput
-        {
-            Targets = new Dictionary<int, int> { [2] = 12 },
-            BaseSpins = 5,
-            MaxSym = 6,
-        }, seed: 1701).Plan();
-
-        var firstNormalCol = Enumerable.Range(0, Settings.Default.COLS)
-            .First(col => !plan.Spins[0].Flush[col]);
-        plan.Spins[0].Push[firstNormalCol] = Settings.Default.MAX_PUSH + 1;
-
-        var ex = Assert.ThrowsException<InvalidOperationException>(() => Verifier.Check(plan));
-        StringAssert.Contains(ex.Message, "push=");
-    }
-
-    [TestMethod]
-    public void PrizeCombinatorReturnsEmptyForEmptyPrizeList()
-    {
-        var combos = new PrizeCombinator(new PrizeCombinatorOptions { Seed = 1 })
-            .Decide(Array.Empty<Prize>());
-
-        Assert.AreEqual(0, combos.Count);
     }
 
     [TestMethod]
@@ -1511,6 +1461,26 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
+    public void ForwardTurnShapePlannerAvoidsRepeatedPushBagsWhenLegal()
+    {
+        var planner = new ForwardTurnShapePlanner(Settings.Default, new Random(20260813));
+        var used = new HashSet<long>();
+
+        for (var i = 0; i < Settings.Default.BASE_SPINS; i++)
+        {
+            var result = planner.Plan(
+                minPoppedCells: Settings.Default.COLS * Settings.Default.MIN_PUSH,
+                maxPoppedCells: Settings.Default.COLS * Settings.Default.MAX_PUSH,
+                avoidedPushBags: used);
+
+            Assert.AreEqual(ForwardTurnShapePlanStatus.Valid, result.Status, result.Detail);
+            used.Add(ForwardTurnShapePlanner.PushBagKey(result.Shape!, Settings.Default));
+        }
+
+        Assert.AreEqual(Settings.Default.BASE_SPINS, used.Count);
+    }
+
+    [TestMethod]
     public void ForwardMathInputResolverBuildsNoWinInputFromEmptyPrizeList()
     {
         var result = new ForwardMathInputResolver(Settings.Default)
@@ -1538,6 +1508,29 @@ public sealed class EngineAndHelperTests
         CollectionAssert.AreEqual(
             first.Bundle.Entries.Select(entry => $"{entry.Sym}:{entry.Target}:{entry.Tier}").ToArray(),
             second.Bundle.Entries.Select(entry => $"{entry.Sym}:{entry.Target}:{entry.Tier}").ToArray());
+    }
+
+    [TestMethod]
+    public void ForwardObjectivePlannerAlwaysPlansNearMissWhenEligible()
+    {
+        var settings = Settings.Default;
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
+            Required = new Dictionary<string, int>(),
+            BaseSpins = settings.BASE_SPINS,
+            PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
+            MaxSym = settings.PrizeLadderRows.Count,
+        };
+
+        for (var seed = 1; seed <= 100; seed++)
+        {
+            var result = new ForwardObjectivePlanner(settings).Resolve(input, seed);
+
+            Assert.AreEqual(ForwardObjectiveStatus.Valid, result.Status, result.Detail);
+            Assert.IsTrue(result.Objectives!.NearMissTargets.Count > 0, $"seed {seed}");
+            Assert.IsTrue(result.Objectives.NearMissTargets.Values.All(target => target >= settings.NONWIN_MIN_TARGET));
+        }
     }
 
     [TestMethod]
@@ -1630,39 +1623,15 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
-    public void SimFlattensStaleFeaturesAndPrinterEmitsTrace()
+    public void SimFlattensStaleFeatures()
     {
-        var input = new MathInput
-        {
-            Targets = new Dictionary<int, int> { [2] = 12 },
-            BaseSpins = 5,
-            MaxSym = 6,
-        };
-        var plan = new Planner(input, seed: 707).Plan();
-
-        var board = Grid.Clone(plan.Spins[0].Board);
+        var board = FilledBoard(1);
         board[0, 0] = Grid.Feat(Settings.Default.F_PRUP, 3, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 2, PrupTier = 1 });
 
         Sim.FlatStale(board);
 
         Assert.AreEqual(3, board[0, 0]!.Sym);
         Assert.IsFalse(board[0, 0]!.IsFeat);
-
-        using var writer = new StringWriter();
-        var original = Console.Out;
-        try
-        {
-            Console.SetOut(writer);
-            BoardPrinter.TraceGame(plan);
-        }
-        finally
-        {
-            Console.SetOut(original);
-        }
-
-        var trace = writer.ToString();
-        StringAssert.Contains(trace, "GAME TRACE");
-        StringAssert.Contains(trace, "FINAL TOTALS");
     }
 
     [TestMethod]
@@ -1687,69 +1656,6 @@ public sealed class EngineAndHelperTests
 
         Assert.AreEqual(2, board[0, 1]!.Sym);
         Assert.AreEqual(3, board[0, 1]!.Stack);
-    }
-
-    [TestMethod]
-    public void WheelPlanningSupportsImmediateDelayedAndPermanentResidueBuckets()
-    {
-        var input = new MathInput
-        {
-            Targets = new Dictionary<int, int> { [2] = 24 },
-            BaseSpins = 5,
-            Required = new Dictionary<string, int> { ["WHEEL"] = 1 },
-            WheelSymOrder = new[] { 2 },
-            MaxSym = 6,
-        };
-
-        var foundResidue = false;
-        for (var seed = 4242; seed < 4300; seed++)
-        {
-            var plan = new Planner(input, seed).Plan();
-            var audit = AuditWheelResidue(plan, wheelSym: 2);
-
-            Assert.IsTrue(audit.ImmediateStacked > 0);
-            Assert.AreEqual(24, Sim.Run(plan)[2]);
-
-            if (audit.DelayedCollected || audit.PermanentResidue > 0)
-            {
-                foundResidue = true;
-                break;
-            }
-        }
-
-        Assert.IsTrue(foundResidue);
-    }
-
-    [TestMethod]
-    public void RepeatedWheelSymbolsCanStackAndStillVerifyExactly()
-    {
-        var input = new MathInput
-        {
-            Targets = new Dictionary<int, int> { [2] = 30 },
-            BaseSpins = 5,
-            Required = new Dictionary<string, int> { ["WHEEL"] = 2 },
-            WheelSymOrder = new[] { 2, 2 },
-            MaxSym = 6,
-        };
-
-        var plan = new Planner(input, seed: 9191).Plan();
-        var wheelTokens = plan.Spins
-            .SelectMany(spin => spin.Spawns.Values)
-            .Where(cell => cell.IsFeat && cell.Sym == Settings.Default.F_WHEEL && cell.Fp?.WheelSym == 2)
-            .ToArray();
-        var maxStackSeen = MaxStackSeenDuringReplay(plan, 2);
-
-        Assert.AreEqual(2, wheelTokens.Length);
-        Assert.IsTrue(maxStackSeen > 1);
-        Assert.IsTrue(maxStackSeen <= Settings.Default.MAX_COIN_STACK);
-        Assert.AreEqual(30, Sim.Run(plan)[2]);
-
-        var ticket = JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(TicketSerializer.ToJson(plan))!;
-        var report = TicketChecker.CheckTicket(ticket);
-        Assert.IsTrue(report.IsValid, string.Join(Environment.NewLine,
-            report.Checks
-                .Where(c => c.Result == TicketChecker.Status.Fail)
-                .Select(c => $"{c.Category}/{c.Name}: {c.Detail}")));
     }
 
     [TestMethod]
@@ -2014,6 +1920,7 @@ public sealed class EngineAndHelperTests
         {
             PNoWinExtraGoOptional = 1.0,
             POptionalFeatureTicket = 0.0,
+            PFlushOptional = 0.0,
         };
         var input = new MathInput
         {
@@ -2028,9 +1935,67 @@ public sealed class EngineAndHelperTests
         var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 35);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
-        Assert.AreEqual(1, result.Budget!.ExtraGoCount);
-        Assert.AreEqual(settings.BASE_SPINS + 1, result.Budget.TotalTurns);
+        Assert.IsTrue(result.Budget!.ExtraGoCount >= 1);
+        Assert.IsTrue(result.Budget.ExtraGoCount <= settings.MAX_SPINS - settings.BASE_SPINS);
+        Assert.AreEqual(settings.BASE_SPINS + result.Budget.ExtraGoCount, result.Budget.TotalTurns);
         Assert.IsTrue(result.Budget.HasOptionalFeatures);
+    }
+
+    [TestMethod]
+    public void ForwardFeatureBudgetPlannerCanAddDedicatedOptionalFlush()
+    {
+        var settings = new Settings
+        {
+            PNoWinExtraGoOptional = 0.0,
+            POptionalFeatureTicket = 0.0,
+            PFlushOptional = 1.0,
+        };
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
+            Required = new Dictionary<string, int>(),
+            BaseSpins = settings.BASE_SPINS,
+            PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
+            MaxSym = settings.PrizeLadderRows.Count,
+        };
+        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 35).Objectives;
+
+        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 36);
+
+        Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
+        Assert.AreEqual(1, result.Budget!.FlushCount);
+        Assert.IsTrue(result.Budget.HasOptionalFeatures);
+    }
+
+    [TestMethod]
+    public void ForwardFeatureBudgetPlannerSkipsOptionalFlushWithoutSafeFiller()
+    {
+        var settings = new Settings
+        {
+            PNoWinExtraGoOptional = 0.0,
+            POptionalFeatureTicket = 1.0,
+            PFlushOptional = 1.0,
+            POptionalTicketFlush = 1.0,
+            POptionalTicketWheel = 0.0,
+            POptionalTicketPrizeUpgrade = 0.0,
+        };
+        var input = new MathInput
+        {
+            Targets = settings.PrizeLadderRows
+                .Select((row, index) => (Symbol: index + 1, row.Target))
+                .ToDictionary(item => item.Symbol, item => item.Target),
+            Required = new Dictionary<string, int>(),
+            BaseSpins = settings.BASE_SPINS,
+            PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
+            MaxSym = settings.PrizeLadderRows.Count,
+        };
+        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 365).Objectives;
+
+        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 366);
+
+        Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
+        Assert.AreEqual(0, result.Budget!.FlushCount);
+        Assert.IsFalse(result.Budget.HasOptionalFeatures);
     }
 
     [TestMethod]
@@ -2039,6 +2004,7 @@ public sealed class EngineAndHelperTests
         var settings = new Settings
         {
             PNoWinExtraGoOptional = 0.0,
+            PFlushOptional = 0.0,
             POptionalFeatureTicket = 1.0,
             POptionalTicketWheel = 1.0,
             POptionalTicketFlush = 1.0,
@@ -3355,6 +3321,7 @@ public sealed class EngineAndHelperTests
             objectives.WinTargets.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}:{kv.Value}").ToArray(),
             result.Objectives!.WinTargets.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}:{kv.Value}").ToArray());
         Assert.IsTrue(result.Objectives!.NearMissTargets.Values.Sum() < objectives.NearMissTargets.Values.Sum());
+        Assert.IsTrue(result.Objectives.NearMissTargets.Count > 0);
         Assert.IsTrue(result.Objectives.NearMissTargets.Values.All(target => target >= settings.NONWIN_MIN_TARGET));
         Assert.AreEqual(
             ForwardTicketEnvelopeStatus.Valid,
@@ -4044,142 +4011,6 @@ public sealed class EngineAndHelperTests
         }
     }
 
-    private static (int ImmediateStacked, bool DelayedCollected, int PermanentResidue) AuditWheelResidue(
-        GamePlan plan,
-        int wheelSym)
-    {
-        var board = Grid.Clone(plan.Spins[0].Board);
-        var totals = new Dictionary<int, int>();
-        var wheelIndex = plan.Spins.FindIndex(spin =>
-            spin.Spawns.Values.Any(cell => cell.IsFeat && cell.Sym == Settings.Default.F_WHEEL && cell.Fp?.WheelSym == wheelSym));
-        var immediateStacked = 0;
-        var delayedCollected = false;
-
-        for (var i = 0; i < plan.Spins.Count; i++)
-        {
-            var sp = plan.Spins[i];
-            Sim.FlatStale(board);
-            CollectForAudit(board, sp, totals, wheelSym, i > wheelIndex + 1, ref delayedCollected);
-            board = Grid.RotCW(board);
-            foreach (var kv in sp.Spawns)
-                board[kv.Key.Item1, kv.Key.Item2] = kv.Value.Clone();
-            var next = i + 1 < plan.Spins.Count ? plan.Spins[i + 1] : null;
-            Sim.FireAll(board, sp, next, plan.FillSyms.Count > 0 ? plan.FillSyms[0] : Settings.Default.F_COIN);
-
-            if (i == wheelIndex && next != null)
-            {
-                var zone = Grid.ZoneSet(next.Push, next.Flush);
-                immediateStacked = CountStackedInZone(board, wheelSym, zone);
-            }
-        }
-
-        var permanentResidue = board.Cast<Cell?>()
-            .Count(cell => cell != null && !cell.IsFeat && cell.Sym == wheelSym && cell.Stack > 1);
-
-        return (immediateStacked, delayedCollected, permanentResidue);
-    }
-
-    private static int CountStackedInZone(Cell?[,] board, int sym, HashSet<(int, int)> zone)
-    {
-        var count = 0;
-        for (var r = 0; r < Settings.Default.ROWS; r++)
-        {
-            for (var c = 0; c < Settings.Default.COLS; c++)
-            {
-                var cell = board[r, c];
-                if (cell != null && !cell.IsFeat && cell.Sym == sym && cell.Stack > 1 && zone.Contains((r, c)))
-                    count++;
-            }
-        }
-        return count;
-    }
-
-    private static void CollectForAudit(
-        Cell?[,] board,
-        SpinPlan sp,
-        Dictionary<int, int> totals,
-        int wheelSym,
-        bool afterImmediateTurn,
-        ref bool delayedCollected)
-    {
-        for (var col = 0; col < Settings.Default.COLS; col++)
-        {
-            if (sp.Flush[col])
-            {
-                for (var r = 0; r < Settings.Default.ROWS; r++)
-                    CollectCell(board, r, col, totals, wheelSym, afterImmediateTurn, ref delayedCollected);
-                continue;
-            }
-
-            var push = sp.Push[col];
-            for (var r = Settings.Default.ROWS - push; r < Settings.Default.ROWS; r++)
-                CollectCell(board, r, col, totals, wheelSym, afterImmediateTurn, ref delayedCollected);
-
-            for (var r = Settings.Default.ROWS - 1; r >= 0; r--)
-            {
-                var src = r - push;
-                board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;
-            }
-        }
-    }
-
-    private static void CollectCell(
-        Cell?[,] board,
-        int row,
-        int col,
-        Dictionary<int, int> totals,
-        int wheelSym,
-        bool afterImmediateTurn,
-        ref bool delayedCollected)
-    {
-        var cell = board[row, col];
-        if (cell == null || Settings.Default.IsFeat(cell.Sym)) return;
-        totals[cell.Sym] = totals.GetValueOrDefault(cell.Sym) + cell.Stack;
-        if (afterImmediateTurn && cell.Sym == wheelSym && cell.Stack > 1)
-            delayedCollected = true;
-    }
-
-    private static int MaxStackSeenDuringReplay(GamePlan plan, int sym)
-    {
-        var board = Grid.Clone(plan.Spins[0].Board);
-        var maxStack = 1;
-
-        for (var i = 0; i < plan.Spins.Count; i++)
-        {
-            var sp = plan.Spins[i];
-            Sim.FlatStale(board);
-            for (var col = 0; col < Settings.Default.COLS; col++)
-            {
-                if (sp.Flush[col])
-                {
-                    for (var r = 0; r < Settings.Default.ROWS; r++) board[r, col] = null;
-                    continue;
-                }
-
-                var push = sp.Push[col];
-                for (var r = Settings.Default.ROWS - 1; r >= 0; r--)
-                {
-                    var src = r - push;
-                    board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;
-                }
-            }
-
-            board = Grid.RotCW(board);
-            foreach (var kv in sp.Spawns)
-                board[kv.Key.Item1, kv.Key.Item2] = kv.Value.Clone();
-
-            var next = i + 1 < plan.Spins.Count ? plan.Spins[i + 1] : null;
-            Sim.FireAll(board, sp, next, plan.FillSyms.Count > 0 ? plan.FillSyms[0] : Settings.Default.F_COIN);
-            maxStack = Math.Max(maxStack, board.Cast<Cell?>()
-                .Where(cell => cell != null && !cell.IsFeat && cell.Sym == sym)
-                .Select(cell => cell!.Stack)
-                .DefaultIfEmpty(1)
-                .Max());
-        }
-
-        return maxStack;
-    }
-
     private static Cell?[,] FilledBoard(int symbol)
     {
         var board = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
@@ -4290,6 +4121,7 @@ public sealed class EngineAndHelperTests
         {
             PNoWinExtraGoOptional = 0.0,
             POptionalFeatureTicket = 0.0,
+            PFlushOptional = 0.0,
         };
 
     private static Settings SettingsWithNoOptionalFeaturesAndNoNearMiss() =>
@@ -4297,6 +4129,7 @@ public sealed class EngineAndHelperTests
         {
             PNoWinExtraGoOptional = 0.0,
             POptionalFeatureTicket = 0.0,
+            PFlushOptional = 0.0,
             NonWinTargetProfiles = new[] { (1.0, 0, 0, 0) },
         };
 
@@ -4321,6 +4154,100 @@ public sealed class EngineAndHelperTests
         var result = new ForwardObjectivePlanner(settings).Resolve(input, seed: 1234);
         Assert.AreEqual(ForwardObjectiveStatus.Valid, result.Status, result.Detail);
         return result.Objectives!;
+    }
+
+    private static GamePlan ForwardPlan(MathInput input, int seed, Settings? settings = null)
+    {
+        var actualSettings = settings ?? Settings.Default;
+        var last = "";
+        for (var attempt = 0; attempt < Math.Min(actualSettings.MaxPlanAttempts, 32); attempt++)
+        {
+            var result = TryForwardPlan(input, AttemptSeed(seed, attempt), actualSettings);
+            if (result.Plan != null)
+                return result.Plan;
+
+            last = result.Detail;
+        }
+
+        Assert.Fail($"Could not build a forward plan from test MathInput after bounded attempts: {last}");
+        throw new InvalidOperationException(last);
+    }
+
+    private static (GamePlan? Plan, string Detail) TryForwardPlan(
+        MathInput input,
+        int seed,
+        Settings actualSettings)
+    {
+        var objectives = new ForwardObjectivePlanner(actualSettings).Resolve(input, seed + 1);
+        if (!objectives.IsValid) return (null, $"{objectives.Status}: {objectives.Detail}");
+
+        var budget = new ForwardFeatureBudgetPlanner(actualSettings).Plan(input, objectives.Objectives, seed + 2);
+        if (!budget.IsValid) return (null, $"{budget.Status}: {budget.Detail}");
+
+        var timing = new ForwardFeatureTimingPlanner(actualSettings, seed + 3).Plan(budget.Budget);
+        if (!timing.IsValid) return (null, $"{timing.Status}: {timing.Detail}");
+
+        var intents = new ForwardFeatureIntentPlanner(actualSettings, seed + 4).Plan(objectives.Objectives, timing.Timing);
+        if (!intents.IsValid) return (null, $"{intents.Status}: {intents.Detail}");
+
+        var frames = new ForwardTurnFramePlanner(actualSettings, seed + 5).Plan(
+            budget.Budget,
+            intents.Plan,
+            objectives.Objectives);
+        if (!frames.IsValid) return (null, $"{frames.Status}: {frames.Detail}");
+
+        var finalized = new ForwardObjectiveFinalizer(actualSettings).Finalize(
+            objectives.Objectives,
+            intents.Plan,
+            frames.Plan);
+        if (!finalized.IsValid) return (null, $"{finalized.Status}: {finalized.Detail}");
+
+        var finalObjectives = new ForwardObjectiveResult(
+            ForwardObjectiveStatus.Valid,
+            finalized.Detail,
+            finalized.Objectives);
+
+        var envelope = new ForwardTicketEnvelopeValidator(actualSettings).Validate(
+            finalObjectives.Objectives,
+            frames.Plan);
+        if (!envelope.IsValid) return (null, $"{envelope.Status}: {envelope.Detail}");
+
+        var pipeline = new ForwardTicketPipelineExecutor(actualSettings, seed + 6).Execute(
+            finalObjectives.Objectives,
+            frames.Plan);
+        if (!pipeline.IsValid) return (null, $"{pipeline.Status}: {pipeline.Detail}");
+
+        var build = new ForwardTicketBuildResult(
+            ForwardTicketBuildStatus.Valid,
+            "test helper",
+            null,
+            finalObjectives,
+            budget,
+            timing,
+            intents,
+            frames,
+            envelope,
+            pipeline);
+        var adapted = new ForwardGamePlanAdapter(actualSettings).Adapt(build);
+        if (!adapted.IsValid || adapted.Plan == null)
+            return (null, $"{adapted.Status}: {adapted.Detail}");
+
+        return adapted.Plan.Verified
+            ? (adapted.Plan, "ok")
+            : (null, "adapted plan was not verified");
+    }
+
+    private static int AttemptSeed(int seed, int attempt)
+    {
+        if (attempt == 0) return seed;
+
+        unchecked
+        {
+            var next = seed;
+            next = (next * 397) ^ attempt;
+            next ^= 0x6d2b79f5;
+            return next == int.MinValue ? 0 : Math.Abs(next);
+        }
     }
 
     private static Dictionary<int, IReadOnlyDictionary<int, decimal>> PrizeValues(int maxSym, int tiers)

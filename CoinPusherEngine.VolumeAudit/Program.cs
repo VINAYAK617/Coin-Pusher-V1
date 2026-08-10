@@ -27,6 +27,7 @@ var completedCount = 0;
 var winningCount = 0;
 var noWinCount = 0;
 var nearMissTicketCount = 0;
+var nearMissEligibleCount = 0;
 var featureTicketCount = 0;
 var maxTurnCount = 0;
 
@@ -37,6 +38,8 @@ var featureCounts = new ConcurrentDictionary<string, int>();
 var pushCounts = new ConcurrentDictionary<int, int>();
 var wheelStackCounts = new ConcurrentDictionary<int, int>();
 var prizeCaseCounts = new ConcurrentDictionary<string, int>();
+var nearMissEligibleByPrize = new ConcurrentDictionary<string, int>();
+var nearMissHitByPrize = new ConcurrentDictionary<string, int>();
 var progressLock = new object();
 
 Console.WriteLine(
@@ -92,6 +95,13 @@ Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = degreeOfPa
     if (ticket.WinInfo.WinSymbols.Length == 0) Interlocked.Increment(ref noWinCount);
     else Interlocked.Increment(ref winningCount);
     if (result.Plan.NonWinTargets.Count > 0) Interlocked.Increment(ref nearMissTicketCount);
+    if (HasEligibleNearMissSymbol(result.Plan, settings))
+    {
+        Interlocked.Increment(ref nearMissEligibleCount);
+        Increment(nearMissEligibleByPrize, prizeKey);
+        if (result.Plan.NonWinTargets.Count > 0)
+            Increment(nearMissHitByPrize, prizeKey);
+    }
     if (HasAnyTicketFeature(ticket, settings)) Interlocked.Increment(ref featureTicketCount);
     if (ticket.WinInfo.TotalSpins == settings.MAX_SPINS) Interlocked.Increment(ref maxTurnCount);
 
@@ -118,7 +128,8 @@ sw.Stop();
 Console.WriteLine(
     $"volume tickets={count}, seed={seed}, failures={failureCount}, warnings={warningCount}, " +
     $"winning={winningCount}, noWin={noWinCount}, plannedNearMiss={nearMissTicketCount}, " +
-    $"featureTickets={featureTicketCount}, maxTurns={maxTurnCount}, elapsed={sw.Elapsed:hh\\:mm\\:ss}");
+    $"nearMissEligible={nearMissEligibleCount}, featureTickets={featureTicketCount}, " +
+    $"maxTurns={maxTurnCount}, elapsed={sw.Elapsed:hh\\:mm\\:ss}");
 Console.WriteLine(
     $"stage totals: input={inputStage.Elapsed:hh\\:mm\\:ss\\.fff}, generation={Elapsed(generationTicks):hh\\:mm\\:ss\\.fff}, " +
     $"checker={Elapsed(checkerTicks):hh\\:mm\\:ss\\.fff}");
@@ -126,6 +137,7 @@ PrintDistribution("prize cases", prizeCaseCounts);
 PrintDistribution("spins", spinCounts);
 PrintDistribution("win symbol counts", winSymbolCounts);
 PrintDistribution("planned near-miss symbol counts", nearMissSymbolCounts);
+PrintNearMissCoverage("near-miss eligible coverage by prize", nearMissEligibleByPrize, nearMissHitByPrize);
 PrintDistribution("push values", pushCounts);
 PrintDistribution("features", featureCounts);
 PrintDistribution("wheel stack values", wheelStackCounts);
@@ -203,6 +215,9 @@ static string FirstFailures(TicketChecker.Report report) =>
 static bool HasAnyTicketFeature(TicketSerializer.TicketDto ticket, Settings settings) =>
     ticket.Turns.Any(turn => HasAnyTurnFeature(turn, settings));
 
+static bool HasEligibleNearMissSymbol(GamePlan plan, Settings settings) =>
+    plan.FillSyms.Any(symbol => settings.SymbolFillCap(symbol) > settings.NONWIN_MIN_TARGET);
+
 static bool HasAnyTurnFeature(TicketSerializer.TurnDto turn, Settings settings) =>
     turn.Spawns.Any(spawn => spawn.Feature != null)
     || turn.Pushers.Any(pusher => pusher.FeatureId == settings.F_FLUSH_ID);
@@ -244,6 +259,21 @@ static void PrintDistribution<TKey>(string label, ConcurrentDictionary<TKey, int
     var text = string.Join(", ", dictionary
         .OrderBy(kv => kv.Key)
         .Select(kv => $"{kv.Key}={kv.Value}"));
+    Console.WriteLine($"{label}: {text}");
+}
+
+static void PrintNearMissCoverage(
+    string label,
+    ConcurrentDictionary<string, int> eligible,
+    ConcurrentDictionary<string, int> hits)
+{
+    var text = string.Join(", ", eligible
+        .OrderBy(kv => kv.Key)
+        .Select(kv =>
+        {
+            var hit = hits.GetValueOrDefault(kv.Key);
+            return $"{kv.Key}={hit}/{kv.Value}";
+        }));
     Console.WriteLine($"{label}: {text}");
 }
 

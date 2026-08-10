@@ -134,7 +134,7 @@ internal sealed class ForwardTicketBuilder
 
         var frames = new ForwardTurnFramePlanner(
             _settings,
-            SeedFor("frames")).Plan(budget.Budget, intents.Plan);
+            SeedFor("frames")).Plan(budget.Budget, intents.Plan, objectives.Objectives);
         if (!frames.IsValid)
         {
             return Fail(

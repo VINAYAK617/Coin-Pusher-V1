@@ -99,7 +99,7 @@ public sealed class Settings
     public double PNoWinExtraGoOptional { get; init; } = Probability("COINPUSHER_P_NOWIN_EXTRA_GO_OPTIONAL", 1.0 / 30.0);
 
     public double PWheelOptional { get; init; } = Probability("COINPUSHER_P_WHEEL_OPTIONAL", 0.30);
-    public double PFlushOptional { get; init; } = Probability("COINPUSHER_P_FLUSH_OPTIONAL", 0.35);
+    public double PFlushOptional { get; init; } = Probability("COINPUSHER_P_FLUSH_OPTIONAL", 0.40);
     public double PNonWinWheel { get; init; } = Probability("COINPUSHER_P_NONWIN_WHEEL", 0.0);
     public double PNonWinPrizeUpgrade { get; init; } = Probability("COINPUSHER_P_NONWIN_PRIZE_UPGRADE", 1.0);
 
@@ -110,8 +110,7 @@ public sealed class Settings
 
     public (double P, int Min, int Max, int MaxSymbols)[] NonWinTargetProfiles { get; init; } =
     {
-        (0.05, 0, 0, 0),
-        (0.95, 10, 19, 5),
+        (1.0, 10, 19, 5),
     };
 
     public double[] NonWinCountWeights { get; init; } =
@@ -129,6 +128,9 @@ public sealed class Settings
 
     public double PFeatureRetriggerChain { get; init; } = Probability("COINPUSHER_P_FEATURE_RETRIGGER_CHAIN", 0.25);
     public double PFeatureLatePlacement { get; init; } = Probability("COINPUSHER_P_FEATURE_LATE_PLACEMENT", 0.90);
+    public double WPusherLowPop { get; init; } = Weight("COINPUSHER_W_PUSHER_LOW_POP", 0.25);
+    public double WPusherMidPop { get; init; } = Weight("COINPUSHER_W_PUSHER_MID_POP", 0.50);
+    public double WPusherHighPop { get; init; } = Weight("COINPUSHER_W_PUSHER_HIGH_POP", 0.25);
     public int[] FeatureRetriggerBridgeIds { get; init; } =
     {
         12,
