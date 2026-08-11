@@ -1968,6 +1968,33 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
+    public void ForwardFeatureBudgetPlannerCanAddDedicatedOptionalWheel()
+    {
+        var settings = new Settings
+        {
+            PNoWinExtraGoOptional = 0.0,
+            POptionalFeatureTicket = 0.0,
+            PWheelOptional = 1.0,
+            PFlushOptional = 0.0,
+        };
+        var input = new MathInput
+        {
+            Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
+            Required = new Dictionary<string, int>(),
+            BaseSpins = settings.BASE_SPINS,
+            PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
+            MaxSym = settings.PrizeLadderRows.Count,
+        };
+        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 135).Objectives;
+
+        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 136);
+
+        Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
+        Assert.AreEqual(1, result.Budget!.WheelCount);
+        Assert.IsTrue(result.Budget.HasOptionalFeatures);
+    }
+
+    [TestMethod]
     public void ForwardFeatureBudgetPlannerSkipsOptionalFlushWithoutSafeFiller()
     {
         var settings = new Settings
@@ -3026,7 +3053,7 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
-    public void ForwardTicketGeneratorReturnsCheckedTicketJsonFromPrizeAmounts()
+    public void ForwardTicketGeneratorReturnsTicketJsonFromPrizeAmounts()
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
 
@@ -3035,7 +3062,6 @@ public sealed class EngineAndHelperTests
         Assert.AreEqual(ForwardTicketGenerationStatus.Valid, result.Status, result.Detail);
         Assert.IsNotNull(result.Ticket);
         Assert.IsFalse(string.IsNullOrWhiteSpace(result.Json));
-        Assert.IsTrue(result.CheckerReport!.IsValid);
         Assert.AreEqual(result.Ticket!.WinInfo.TotalSpins, result.Ticket.Turns.Length);
         Assert.AreEqual(settings.SymbolFillCap(1), result.Ticket.WinInfo.WinSymbols.Single().Target);
 
@@ -3059,11 +3085,10 @@ public sealed class EngineAndHelperTests
         Assert.IsNull(result.AdaptedPlan);
         Assert.IsNull(result.Ticket);
         Assert.IsNull(result.Json);
-        Assert.IsNull(result.CheckerReport);
     }
 
     [TestMethod]
-    public void CoinPusherTicketGeneratorPublicFacadeReturnsCheckedTicket()
+    public void CoinPusherTicketGeneratorPublicFacadeReturnsTicketForPluginValidation()
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
 
@@ -3075,7 +3100,6 @@ public sealed class EngineAndHelperTests
         Assert.IsNotNull(result.Ticket);
         Assert.IsNotNull(result.Plan);
         Assert.IsTrue(result.Plan!.Verified);
-        Assert.IsTrue(result.CheckerPassCount > 0);
 
         var reparsed = JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(result.Json!);
         var report = TicketChecker.CheckTicket(reparsed);
@@ -3201,7 +3225,6 @@ public sealed class EngineAndHelperTests
         CollectionAssert.AreEqual(new decimal[] { 1m }, result.Audit.RequestedPrizeAmounts.ToArray());
         CollectionAssert.AreEqual(new decimal[] { 1m }, result.Audit.CoveredPrizeAmounts.ToArray());
         Assert.AreEqual(0, result.Audit.SkippedPrizeAmounts.Count);
-        Assert.IsTrue(result.Audit.CheckerPassCount > 0);
     }
 
     [TestMethod]
@@ -3216,7 +3239,7 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
-    public void CoinPusherTicketGenerationGuardReturnsOnlyFullyAuditedTicket()
+    public void CoinPusherTicketGenerationGuardReturnsAuditedGenerationMetadata()
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
 
@@ -3248,7 +3271,7 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
-    public void CoinPusherTicketJsonGeneratorReturnsCheckedJson()
+    public void CoinPusherTicketJsonGeneratorReturnsJsonForPluginValidation()
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
 
@@ -4121,6 +4144,7 @@ public sealed class EngineAndHelperTests
         {
             PNoWinExtraGoOptional = 0.0,
             POptionalFeatureTicket = 0.0,
+            PWheelOptional = 0.0,
             PFlushOptional = 0.0,
         };
 
@@ -4129,6 +4153,7 @@ public sealed class EngineAndHelperTests
         {
             PNoWinExtraGoOptional = 0.0,
             POptionalFeatureTicket = 0.0,
+            PWheelOptional = 0.0,
             PFlushOptional = 0.0,
             NonWinTargetProfiles = new[] { (1.0, 0, 0, 0) },
         };

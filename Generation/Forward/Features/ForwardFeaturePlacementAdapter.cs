@@ -74,7 +74,8 @@ internal sealed class ForwardFeaturePlacementAdapter
         IReadOnlyDictionary<ForwardFeatureKind, int>? remainingFeatureCapacity,
         SymbolLedger? symbolLedger,
         ForwardExtraSpinLedger? extraSpinLedger,
-        ForwardPrizeUpgradeLedger? prizeUpgradeLedger)
+        ForwardPrizeUpgradeLedger? prizeUpgradeLedger,
+        Cell?[,]? boardAfterPushRotate = null)
     {
         if (turn <= 0 || plannedTotalTurns <= 0 || turn > plannedTotalTurns)
             return Fail(ForwardFeaturePlacementStatus.InvalidTurn, $"turn={turn}, plannedTotalTurns={plannedTotalTurns}");
@@ -127,6 +128,7 @@ internal sealed class ForwardFeaturePlacementAdapter
         var trialSymbolLedger = symbolLedger.Clone();
         var trialRequests = new List<ForwardFeatureSpawnRequest>();
         var reservations = new List<ConvertReservation>();
+        var sameTurnWheelSymbols = new HashSet<int>();
         foreach (var intent in boardIntents)
         {
             var placed = TryPlaceIntent(
@@ -134,12 +136,19 @@ internal sealed class ForwardFeaturePlacementAdapter
                 available,
                 futureTurns,
                 objectives,
-                trialSymbolLedger);
+                trialSymbolLedger,
+                boardAfterPushRotate,
+                sameTurnWheelSymbols);
             if (!placed.IsValid)
                 return placed.Result!;
 
             trialSymbolLedger = placed.SymbolLedger!;
             trialRequests.Add(placed.Request!.Value);
+            if (placed.Request.Value.Kind == ForwardFeatureKind.Wheel
+                && placed.Request.Value.WheelSymbol.HasValue)
+            {
+                sameTurnWheelSymbols.Add(placed.Request.Value.WheelSymbol.Value);
+            }
             reservations.Add(placed.Reservation!.Value);
             available.Remove((placed.Request.Value.Row, placed.Request.Value.Col));
         }
@@ -205,7 +214,9 @@ internal sealed class ForwardFeaturePlacementAdapter
         IReadOnlyList<(int r, int c)> available,
         IReadOnlyList<ForwardFutureTurn> futureTurns,
         ForwardObjectives objectives,
-        SymbolLedger currentTrialLedger)
+        SymbolLedger currentTrialLedger,
+        Cell?[,]? boardAfterPushRotate,
+        IReadOnlySet<int> sameTurnWheelSymbols)
     {
         foreach (var position in OrderedCandidatePositions(available, intent, futureTurns))
         {
@@ -215,17 +226,18 @@ internal sealed class ForwardFeaturePlacementAdapter
                 position,
                 futureTurns,
                 objectives,
-                CreateSelector(objectives, candidateLedger));
+                CreateSelector(
+                    objectives,
+                    candidateLedger,
+                    intent.Kind == ForwardTimedFeatureKind.Wheel
+                        ? null
+                        : sameTurnWheelSymbols));
             if (!convert.IsValid)
                 continue;
 
-            var request = BuildRequest(intent, position, convert.ConvertSymbol);
+            var request = BuildRequest(intent, position, convert.ConvertSymbol, boardAfterPushRotate, futureTurns, objectives);
             if (!request.HasValue)
-            {
-                return FeatureSlotAttempt.Fail(Fail(
-                    ForwardFeaturePlacementStatus.FeatureSpawnInvalid,
-                    $"cannot build feature spawn request for {intent.Kind}"));
-            }
+                continue;
 
             return FeatureSlotAttempt.Ok(
                 request.Value,
@@ -328,15 +340,19 @@ internal sealed class ForwardFeaturePlacementAdapter
     private ForwardFeatureSpawnRequest? BuildRequest(
         ForwardFeatureIntent intent,
         (int r, int c) position,
-        int convertSymbol) =>
+        int convertSymbol,
+        Cell?[,]? boardAfterPushRotate,
+        IReadOnlyList<ForwardFutureTurn> futureTurns,
+        ForwardObjectives objectives) =>
         intent.Kind switch
         {
-            ForwardTimedFeatureKind.Wheel => ForwardFeatureSpawnRequest.Wheel(
-                position.r,
-                position.c,
+            ForwardTimedFeatureKind.Wheel => BuildWheelRequest(
+                intent,
+                position,
                 convertSymbol,
-                intent.WheelSymbol!.Value,
-                intent.ResultingWheelStack!.Value),
+                boardAfterPushRotate,
+                futureTurns,
+                objectives),
             ForwardTimedFeatureKind.ExtraGo => ForwardFeatureSpawnRequest.ExtraGo(
                 position.r,
                 position.c,
@@ -350,9 +366,82 @@ internal sealed class ForwardFeaturePlacementAdapter
             _ => null,
         };
 
+    private ForwardFeatureSpawnRequest? BuildWheelRequest(
+        ForwardFeatureIntent intent,
+        (int r, int c) position,
+        int convertSymbol,
+        Cell?[,]? boardAfterPushRotate,
+        IReadOnlyList<ForwardFutureTurn> futureTurns,
+        ForwardObjectives objectives)
+    {
+        var wheelSymbol = SafeWheelSymbol(intent, boardAfterPushRotate, futureTurns, objectives);
+        if (wheelSymbol <= 0)
+            return null;
+
+        return ForwardFeatureSpawnRequest.Wheel(
+            position.r,
+            position.c,
+            convertSymbol,
+            wheelSymbol,
+            intent.ResultingWheelStack!.Value);
+    }
+
+    private int SafeWheelSymbol(
+        ForwardFeatureIntent intent,
+        Cell?[,]? boardAfterPushRotate,
+        IReadOnlyList<ForwardFutureTurn> futureTurns,
+        ForwardObjectives objectives)
+    {
+        var candidates = objectives.FillSymbols
+            .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
+            .Where(symbol => !objectives.NearMissTargets.ContainsKey(symbol))
+            .Concat(objectives.NearMissTargets.Keys)
+            .Concat(objectives.WinSymbols)
+            .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol))
+            .Distinct()
+            .OrderBy(symbol => symbol == intent.WheelSymbol ? 0 : 1)
+            .ThenBy(symbol => objectives.WinTargets.ContainsKey(symbol) ? 2 : objectives.NearMissTargets.ContainsKey(symbol) ? 1 : 0)
+            .ThenBy(symbol => symbol)
+            .ToArray();
+
+        foreach (var symbol in candidates)
+        {
+            if (WheelSymbolSafeOnCurrentBoard(symbol, boardAfterPushRotate, futureTurns))
+                return symbol;
+        }
+
+        return 0;
+    }
+
+    private bool WheelSymbolSafeOnCurrentBoard(
+        int symbol,
+        Cell?[,]? boardAfterPushRotate,
+        IReadOnlyList<ForwardFutureTurn> futureTurns)
+    {
+        if (boardAfterPushRotate == null)
+            return true;
+
+        for (var row = 0; row < _settings.ROWS; row++)
+        {
+            for (var col = 0; col < _settings.COLS; col++)
+            {
+                var cell = boardAfterPushRotate[row, col];
+                if (cell == null || cell.IsFeat || cell.Sym != symbol)
+                    continue;
+
+                var fate = _fateAnalyzer.Analyze(row, col, futureTurns);
+                if (!fate.IsValid || fate.IsCollected)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
     private ForwardSymbolSelector CreateSelector(
         ForwardObjectives objectives,
-        SymbolLedger ledger) =>
+        SymbolLedger ledger,
+        IReadOnlySet<int>? blockedCollectSymbols = null) =>
         new(
             ledger,
             objectives.WinTargets,
@@ -360,7 +449,8 @@ internal sealed class ForwardFeaturePlacementAdapter
             objectives.FillSymbols,
             objectives.MaxSymbol,
             _settings,
-            new Random(_rng.Next()));
+            new Random(_rng.Next()),
+            blockedCollectSymbols);
 
     private bool ValidSymbol(int symbol, ForwardObjectives objectives) =>
         symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol);

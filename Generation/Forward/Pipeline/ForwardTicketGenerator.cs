@@ -8,7 +8,6 @@ internal enum ForwardTicketGenerationStatus
     BuildFailed,
     AdaptFailed,
     SerializationFailed,
-    TicketCheckFailed,
 }
 
 internal sealed class ForwardTicketGenerationResult
@@ -19,8 +18,7 @@ internal sealed class ForwardTicketGenerationResult
         ForwardTicketBuildResult? build,
         ForwardGamePlanAdapterResult? adaptedPlan,
         TicketSerializer.TicketDto? ticket,
-        string? json,
-        TicketChecker.Report? checkerReport)
+        string? json)
     {
         Status = status;
         Detail = detail;
@@ -28,7 +26,6 @@ internal sealed class ForwardTicketGenerationResult
         AdaptedPlan = adaptedPlan;
         Ticket = ticket;
         Json = json;
-        CheckerReport = checkerReport;
     }
 
     internal ForwardTicketGenerationStatus Status { get; }
@@ -37,7 +34,6 @@ internal sealed class ForwardTicketGenerationResult
     internal ForwardGamePlanAdapterResult? AdaptedPlan { get; }
     internal TicketSerializer.TicketDto? Ticket { get; }
     internal string? Json { get; }
-    internal TicketChecker.Report? CheckerReport { get; }
     internal bool IsValid => Status == ForwardTicketGenerationStatus.Valid;
 }
 
@@ -94,35 +90,13 @@ internal sealed class ForwardTicketGenerator
                 adapted);
         }
 
-        var report = TicketChecker.CheckTicket(ticket);
-        if (!report.IsValid)
-        {
-            return new ForwardTicketGenerationResult(
-                ForwardTicketGenerationStatus.TicketCheckFailed,
-                FirstFailure(report),
-                build,
-                adapted,
-                ticket,
-                json,
-                report);
-        }
-
         return new ForwardTicketGenerationResult(
             ForwardTicketGenerationStatus.Valid,
             "ok",
             build,
             adapted,
             ticket,
-            json,
-            report);
-    }
-
-    private static string FirstFailure(TicketChecker.Report report)
-    {
-        var first = report.Checks.FirstOrDefault(check => check.Result == TicketChecker.Status.Fail);
-        return first == null
-            ? "ticket checker failed without a failing check item"
-            : $"{first.Category}/{first.Name}: {first.Detail}";
+            json);
     }
 
     private static ForwardTicketGenerationResult Fail(
@@ -135,7 +109,6 @@ internal sealed class ForwardTicketGenerator
             detail,
             build,
             adaptedPlan,
-            null,
             null,
             null);
 }

@@ -18,9 +18,7 @@ public sealed class CoinPusherTicketGenerationResult
         GamePlan? plan,
         IReadOnlyList<decimal> requestedPrizeAmounts,
         IReadOnlyList<decimal> coveredPrizeAmounts,
-        IReadOnlyList<decimal> skippedPrizeAmounts,
-        int checkerPassCount,
-        int checkerWarningCount)
+        IReadOnlyList<decimal> skippedPrizeAmounts)
     {
         Status = status;
         Detail = detail;
@@ -31,8 +29,6 @@ public sealed class CoinPusherTicketGenerationResult
         RequestedPrizeAmounts = requestedPrizeAmounts;
         CoveredPrizeAmounts = coveredPrizeAmounts;
         SkippedPrizeAmounts = skippedPrizeAmounts;
-        CheckerPassCount = checkerPassCount;
-        CheckerWarningCount = checkerWarningCount;
     }
 
     public CoinPusherTicketGenerationStatus Status { get; }
@@ -44,8 +40,6 @@ public sealed class CoinPusherTicketGenerationResult
     public IReadOnlyList<decimal> RequestedPrizeAmounts { get; }
     public IReadOnlyList<decimal> CoveredPrizeAmounts { get; }
     public IReadOnlyList<decimal> SkippedPrizeAmounts { get; }
-    public int CheckerPassCount { get; }
-    public int CheckerWarningCount { get; }
     public bool IsValid => Status == CoinPusherTicketGenerationStatus.Valid;
 }
 
@@ -84,9 +78,7 @@ public sealed class CoinPusherTicketGenerator
                 null,
                 prizeAmounts?.ToArray() ?? Array.Empty<decimal>(),
                 Array.Empty<decimal>(),
-                Array.Empty<decimal>(),
-                0,
-                0);
+                Array.Empty<decimal>());
         }
 
         var actualSeed = seed ?? NextSeed();
@@ -121,9 +113,7 @@ public sealed class CoinPusherTicketGenerator
                 generated.AdaptedPlan?.Plan,
                 requestedPrizeAmounts,
                 generated.Build?.MathInput?.Bundle?.Covered.ToArray() ?? Array.Empty<decimal>(),
-                generated.Build?.MathInput?.Bundle?.Skipped.ToArray() ?? Array.Empty<decimal>(),
-                generated.CheckerReport?.PassCount ?? 0,
-                generated.CheckerReport?.WarningCount ?? 0);
+                generated.Build?.MathInput?.Bundle?.Skipped.ToArray() ?? Array.Empty<decimal>());
         }
 
         var detail = lastGeneration == null
@@ -141,9 +131,7 @@ public sealed class CoinPusherTicketGenerator
             null,
             requestedPrizeAmounts,
             lastGeneration?.Build?.MathInput?.Bundle?.Covered.ToArray() ?? Array.Empty<decimal>(),
-            lastGeneration?.Build?.MathInput?.Bundle?.Skipped.ToArray() ?? Array.Empty<decimal>(),
-            lastGeneration?.CheckerReport?.PassCount ?? 0,
-            lastGeneration?.CheckerReport?.WarningCount ?? 0);
+            lastGeneration?.Build?.MathInput?.Bundle?.Skipped.ToArray() ?? Array.Empty<decimal>());
     }
 
     private static int NextSeed()

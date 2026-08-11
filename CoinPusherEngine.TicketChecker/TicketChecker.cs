@@ -388,6 +388,15 @@ public static class TicketChecker
         else
             Add("Feature", "No board feature on final spin", Status.Pass, "ok");
 
+        var finalFlush = (finalTurn.Pushers ?? Array.Empty<PusherDto>())
+            .Select((pusher, col) => (pusher, col))
+            .FirstOrDefault(item => item.pusher.FeatureId == Settings.Default.F_FLUSH_ID);
+        if (finalFlush.pusher != null)
+            Add("Feature", "No FLUSH/PUSH on final spin", Status.Fail,
+                $"final turn contains FLUSH/PUSH pusher at col {finalFlush.col}");
+        else
+            Add("Feature", "No FLUSH/PUSH on final spin", Status.Pass, "ok");
+
         // ── 11. PRIZE_UPGRADE TIER CONSISTENCY ──────────────────────────────
         // Declared tiers can come from EITHER WinInfo.PrizeTiers (winning
         // symbols) OR a near-miss symbol's own NonWinSymbolDto.PrizeTier field.
@@ -563,7 +572,7 @@ public static class TicketChecker
 
         CheckMax("WHEEL", wheelTokenCount, Settings.Default.FeatureConfig("WHEEL").Max);
         CheckMax("EXTRA_SPIN", extraSpinTokenCount, Settings.Default.MAX_SPINS - Settings.Default.BASE_SPINS);
-        CheckMax("FLUSH/PUSH", flushPusherCount, Settings.Default.COLS - 1);
+        CheckMax("FLUSH/PUSH", flushPusherCount, Settings.Default.FeatureConfig("FLUSH").Max);
 
         void CheckMax(string feature, int actual, int max)
         {

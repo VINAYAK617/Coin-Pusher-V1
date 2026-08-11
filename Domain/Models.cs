@@ -123,7 +123,6 @@ public sealed class GamePlan
     public IReadOnlyDictionary<int, int> NonWinTargets { get; init; } = new Dictionary<int, int>();
     public IReadOnlyDictionary<int, int> NonWinPrizeTiers { get; init; } = new Dictionary<int, int>();
     public bool                          Verified   { get; set; }
-    public List<string>                  Log        { get; init; } = new();
     internal List<SpinPlan>              Spins      { get; init; } = new();
 }
 

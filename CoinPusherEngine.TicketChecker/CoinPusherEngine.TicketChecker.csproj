@@ -1,14 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <TargetFramework>net5.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**;CoinPusherEngine.Tests/**;CoinPusherEngine.Tests - Copy/**;CoinPusherEngine.VolumeAudit/**;CoinPusherEngine.TicketChecker/**</DefaultItemExcludes>
   </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CoinPusherEngine.csproj" />
   </ItemGroup>
 </Project>

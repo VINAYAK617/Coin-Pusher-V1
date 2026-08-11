@@ -9,6 +9,7 @@ var progressEvery = Math.Max(1, ArgInt(args, 2, Math.Max(1, count / 20)));
 var maxFailures = Math.Max(1, ArgInt(args, 3, 20));
 var degreeOfParallelism = Math.Max(1, ArgInt(args, 4, Environment.ProcessorCount));
 var settings = new Settings();
+var checker = new CoinPusherTicketCheckerPlugin();
 
 var rng = new Random(seed);
 var sw = Stopwatch.StartNew();
@@ -71,7 +72,7 @@ Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = degreeOfPa
 
     var ticket = result.Ticket;
     var checkerStage = Stopwatch.StartNew();
-    var report = TicketChecker.CheckTicket(ticket);
+    var report = checker.CheckTicket(ticket);
     checkerStage.Stop();
     Interlocked.Add(ref checkerTicks, checkerStage.ElapsedTicks);
     if (!report.IsValid)

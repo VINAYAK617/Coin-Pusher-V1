@@ -134,7 +134,8 @@ internal sealed class ForwardTurnAssembler
             remainingFeatureCapacity,
             trialSymbolLedger,
             trialExtraLedger,
-            trialPrizeLedger);
+            trialPrizeLedger,
+            preview.BoardAfterPushRotate);
         if (!featurePlacement.IsValid)
         {
             return Fail(
@@ -167,7 +168,9 @@ internal sealed class ForwardTurnAssembler
             new ForwardCellFateAnalyzer(_settings),
             _settings).Plan(
                 normalRequests.Requests,
-                futureTurns);
+                futureTurns,
+                turn,
+                featurePlacement.WheelImpacts);
         if (!normalSpawns.IsValid)
         {
             return Fail(
@@ -240,45 +243,49 @@ internal sealed class ForwardTurnAssembler
         var collected = fates
             .Where(item => item.Fate.IsCollected)
             .OrderBy(item => item.Fate.CollectedTurn)
-            .ThenBy(item => item.Position.r)
-            .ThenBy(item => item.Position.c)
+            .ThenBy(_ => _rng.Next())
             .Select(item => item.Position)
             .ToList();
         var residue = fates
             .Where(item => !item.Fate.IsCollected)
-            .OrderBy(item => item.Position.r)
-            .ThenBy(item => item.Position.c)
+            .OrderBy(_ => _rng.Next())
             .Select(item => item.Position)
             .ToList();
 
         var requests = new List<ForwardSpawnCellRequest>(intents.Count);
-        foreach (var intent in intents.Where(intent => intent.RequiresCollected))
+        foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresCollected)))
         {
             if (collected.Count == 0)
                 return CannotPlace(intent, "requires a future-collected cell");
-            AddRequest(requests, collected[0], intent);
-            collected.RemoveAt(0);
+            var index = _rng.Next(collected.Count);
+            AddRequest(requests, collected[index], intent);
+            collected.RemoveAt(index);
         }
 
-        foreach (var intent in intents.Where(intent => intent.RequiresResidue))
+        foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresResidue)))
         {
             if (residue.Count == 0)
                 return CannotPlace(intent, "requires a residue cell");
-            AddRequest(requests, residue[0], intent);
-            residue.RemoveAt(0);
+            var index = _rng.Next(residue.Count);
+            AddRequest(requests, residue[index], intent);
+            residue.RemoveAt(index);
         }
 
-        foreach (var intent in intents.Where(intent => !intent.RequiresCollected && !intent.RequiresResidue))
+        foreach (var intent in Shuffled(intents.Where(intent => !intent.RequiresCollected && !intent.RequiresResidue)))
         {
             var targetList = collected.Count > 0 ? collected : residue;
             if (targetList.Count == 0)
                 return CannotPlace(intent, "has no remaining cell");
-            AddRequest(requests, targetList[0], intent);
-            targetList.RemoveAt(0);
+            var index = _rng.Next(targetList.Count);
+            AddRequest(requests, targetList[index], intent);
+            targetList.RemoveAt(index);
         }
 
         return NormalRequestBuildResult.Ok(requests);
     }
+
+    private IReadOnlyList<ForwardNormalSpawnIntent> Shuffled(IEnumerable<ForwardNormalSpawnIntent> intents) =>
+        intents.OrderBy(_ => _rng.Next()).ToArray();
 
     private static void AddRequest(
         List<ForwardSpawnCellRequest> requests,

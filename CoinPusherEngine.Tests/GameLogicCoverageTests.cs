@@ -373,6 +373,18 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
+    public void CheckerPluginValidatesGeneratedJsonAfterGeneration()
+    {
+        var generated = new CoinPusherTicketJsonGenerator()
+            .Generate(new decimal[] { 1m, 2m, 5m }, seed: 30301);
+
+        Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, generated.Status, generated.Detail);
+        var result = new CoinPusherTicketCheckerPlugin().CheckJson(generated.Json!);
+
+        Assert.IsTrue(result.IsValid, string.Join(Environment.NewLine, result.Errors));
+    }
+
+    [TestMethod]
     public void CheckerAcceptsFullFrameworkTicketObject()
     {
         var gameData = PlanTicket(new MathInput
@@ -747,6 +759,86 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
+    public void CheckerMutationWallRejectsSingleFieldCorruptions()
+    {
+        var valid = FeatureRichTicket(seed: 92929);
+        AssertValid(valid);
+
+        var mutations = new (string Name, Action<TicketSerializer.TicketDto> Mutate, string? Category)[]
+        {
+            ("normal spawn id changed", ChangeNormalSpawnId, null),
+            ("spawn removed", RemoveOneSpawn, "Geometry"),
+            ("spawn moved onto occupied cell", MoveSpawnOntoOccupiedCell, "Replay"),
+            ("normal pusher value changed", IncreaseNormalPusherValue, "Geometry"),
+            ("board feature placed on final spin", AddFinalBoardFeature, "Feature"),
+            ("FLUSH/PUSH placed on final spin", AddFinalFlushPusher, "Feature"),
+            ("WHEEL stack outside configured range", BreakWheelStackValue, "Schema"),
+            ("PRIZE_UPGRADE payload missing prize value", BreakPrizeUpgradePayload, "Schema"),
+            ("collected non-winning symbol removed from WinInfo", RemoveCollectedNonWinDeclaration, "WinInfo"),
+            ("TotalSpins does not match turns", BreakTotalSpins, "SpinCount"),
+        };
+
+        foreach (var mutation in mutations)
+        {
+            var ticket = CloneTicket(valid);
+            mutation.Mutate(ticket);
+
+            var report = TicketChecker.CheckTicket(ticket);
+
+            AssertRejected(report, mutation.Name, mutation.Category);
+        }
+    }
+
+    [TestMethod]
+    public void CheckerRejectsFrameworkEnvelopeCorruptions()
+    {
+        var gameData = FeatureRichTicket(seed: 93939);
+        var cashWin = ExpectedTicketCashWin(gameData);
+        var cases = new (string Name, Action<Ticket> Mutate, string NameContains)[]
+        {
+            ("cash win", ticket => ticket.Game!.PublicState!.Game!.Parameters!.CashWin += 1m, "CashWin matches declared ladder prizes"),
+            ("stake multiplier", ticket => ticket.Game!.PublicState!.Game!.Parameters!.StakeMultiplier += 1m, "StakeMultiplier matches CashWin / Stake"),
+            ("winner flag", ticket => ticket.Game!.PublicState!.Game!.Parameters!.IsWinner = false, "IsWinner matches CashWin"),
+            ("pending cash win", ticket => ticket.Game!.PrivateState!.PendingCashWin += 1m, "PendingCashWin matches CashWin"),
+        };
+
+        foreach (var testCase in cases)
+        {
+            var ticket = FrameworkTicket(CloneTicket(gameData), cashWin);
+            testCase.Mutate(ticket);
+
+            var result = TicketChecker.CheckObject(ticket);
+
+            Assert.IsFalse(result.IsValid, testCase.Name);
+            Assert.IsTrue(result.Errors.Any(error => error.Contains(testCase.NameContains)),
+                $"{testCase.Name} mutation was not caught. Errors: {string.Join(" | ", result.Errors)}");
+        }
+    }
+
+    [TestMethod]
+    public void CheckerAcceptsConfiguredMaximumFlushPushers()
+    {
+        var settings = Settings.Default;
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int> { [2] = settings.SymbolFillCap(2) },
+            Required = new Dictionary<string, int>
+            {
+                ["FLUSH"] = settings.FeatureConfig("FLUSH").Max,
+                ["EXTRA_SPIN"] = 2,
+            },
+            BaseSpins = settings.BASE_SPINS,
+            PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
+            MaxSym = settings.PrizeLadderRows.Count,
+        }, seed: 94949);
+
+        Assert.AreEqual(
+            settings.FeatureConfig("FLUSH").Max,
+            ticket.Turns.Sum(turn => turn.Pushers.Count(pusher => pusher.FeatureId == settings.F_FLUSH_ID)));
+        AssertValid(ticket);
+    }
+
+    [TestMethod]
     public void SerializerDoesNotCreateCrossTurnRetriggerChains()
     {
         var settings = new Settings { PFeatureRetriggerChain = 1.0 };
@@ -871,6 +963,183 @@ public sealed class GameLogicCoverageTests
             check.Result == TicketChecker.Status.Warning &&
             check.Category == "Experience" &&
             check.Name.Contains("Pusher bag variety")));
+    }
+
+    private static TicketSerializer.TicketDto FeatureRichTicket(int seed) =>
+        PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int>
+            {
+                [2] = Settings.Default.SymbolFillCap(2),
+                [4] = Settings.Default.SymbolFillCap(4),
+            },
+            BaseSpins = Settings.Default.BASE_SPINS,
+            Required = new Dictionary<string, int>
+            {
+                ["WHEEL"] = 1,
+                ["FLUSH"] = 1,
+                ["EXTRA_SPIN"] = 1,
+                ["PRIZE_UPGRADE"] = 1,
+            },
+            PrizeTiers = new Dictionary<int, int> { [2] = 1 },
+            PrizeValues = PrizeValues(Settings.Default.PrizeLadderRows.Count, tiers: 3),
+            MaxSym = Settings.Default.PrizeLadderRows.Count,
+        }, seed);
+
+    private static TicketSerializer.TicketDto CloneTicket(TicketSerializer.TicketDto ticket) =>
+        JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(
+            JsonConvert.SerializeObject(ticket))!;
+
+    private static void ChangeNormalSpawnId(TicketSerializer.TicketDto ticket)
+    {
+        var spawn = FirstNormalSpawn(ticket, spawn => spawn.Id != Settings.Default.F_COIN);
+        spawn.Id = Settings.Default.F_COIN;
+    }
+
+    private static void RemoveOneSpawn(TicketSerializer.TicketDto ticket)
+    {
+        var turn = ticket.Turns.First(t => t.Spawns.Length > 0);
+        turn.Spawns = turn.Spawns.Skip(1).ToArray();
+    }
+
+    private static void MoveSpawnOntoOccupiedCell(TicketSerializer.TicketDto ticket)
+    {
+        var turn = ticket.Turns[0];
+        var emptyAfterPush = turn.Spawns.Select(spawn => spawn.Pos).ToHashSet();
+        var occupiedPosition = Enumerable.Range(0, Settings.Default.ROWS * Settings.Default.COLS)
+            .First(pos => !emptyAfterPush.Contains(pos));
+
+        turn.Spawns[0].Pos = occupiedPosition;
+    }
+
+    private static void IncreaseNormalPusherValue(TicketSerializer.TicketDto ticket)
+    {
+        var pusher = ticket.Turns
+            .SelectMany(turn => turn.Pushers)
+            .First(p => p.FeatureId == null && p.PushValue < Settings.Default.MAX_PUSH);
+
+        pusher.PushValue++;
+    }
+
+    private static void AddFinalBoardFeature(TicketSerializer.TicketDto ticket)
+    {
+        var spawn = ticket.Turns[^1].Spawns.First(s => s.Feature == null);
+        var convertToId = spawn.Id;
+
+        spawn.Id = Settings.Default.F_WHEEL;
+        spawn.Feature = new TicketSerializer.FeatureDto
+        {
+            FeatureId = Settings.Default.F_WHEEL,
+            ConvertToId = convertToId,
+            WheelSymbolId = ticket.WinInfo.WinSymbols.FirstOrDefault()?.Id ?? Settings.Default.F_COIN,
+            WheelStackValue = Settings.Default.MIN_WHEEL_STACK_VALUE,
+            ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
+        };
+    }
+
+    private static void AddFinalFlushPusher(TicketSerializer.TicketDto ticket)
+    {
+        var pusher = ticket.Turns[^1].Pushers.First(p => p.FeatureId == null);
+        pusher.PushValue = Settings.Default.ROWS;
+        pusher.FeatureId = Settings.Default.F_FLUSH_ID;
+    }
+
+    private static void BreakWheelStackValue(TicketSerializer.TicketDto ticket)
+    {
+        var wheel = FirstFeature(ticket, Settings.Default.F_WHEEL);
+        wheel.WheelStackValue = Settings.Default.MAX_WHEEL_STACK_VALUE + 1;
+    }
+
+    private static void BreakPrizeUpgradePayload(TicketSerializer.TicketDto ticket)
+    {
+        var prizeUpgrade = FirstFeature(ticket, Settings.Default.F_PRUP);
+        prizeUpgrade.UpgradePrizeValue = null;
+    }
+
+    private static void RemoveCollectedNonWinDeclaration(TicketSerializer.TicketDto ticket)
+    {
+        Assert.IsTrue(ticket.WinInfo.NonWinSymbols.Length > 0, "test ticket must contain non-winning declarations");
+        ticket.WinInfo.NonWinSymbols = ticket.WinInfo.NonWinSymbols.Skip(1).ToArray();
+    }
+
+    private static void BreakTotalSpins(TicketSerializer.TicketDto ticket)
+    {
+        ticket.WinInfo.TotalSpins++;
+    }
+
+    private static TicketSerializer.SpawnDto FirstNormalSpawn(
+        TicketSerializer.TicketDto ticket,
+        Func<TicketSerializer.SpawnDto, bool>? predicate = null)
+    {
+        var spawn = ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .FirstOrDefault(spawn => spawn.Feature == null && (predicate == null || predicate(spawn)));
+
+        Assert.IsNotNull(spawn, "test ticket must contain a matching normal spawn");
+        return spawn!;
+    }
+
+    private static TicketSerializer.FeatureDto FirstFeature(
+        TicketSerializer.TicketDto ticket,
+        int featureId)
+    {
+        foreach (var feature in ticket.Turns
+                     .SelectMany(turn => turn.Spawns)
+                     .Select(spawn => spawn.Feature)
+                     .Where(feature => feature != null))
+        {
+            var found = FindFeature(feature!, featureId);
+            if (found != null) return found;
+        }
+
+        Assert.Fail($"test ticket must contain feature {featureId}");
+        throw new InvalidOperationException($"missing feature {featureId}");
+    }
+
+    private static TicketSerializer.FeatureDto? FindFeature(
+        TicketSerializer.FeatureDto feature,
+        int featureId)
+    {
+        if (feature.FeatureId == featureId) return feature;
+        foreach (var child in feature.ReTrigger ?? Array.Empty<TicketSerializer.FeatureDto>())
+        {
+            var found = FindFeature(child, featureId);
+            if (found != null) return found;
+        }
+
+        return null;
+    }
+
+    private static void AssertRejected(
+        TicketChecker.Report report,
+        string mutationName,
+        string? expectedCategory)
+    {
+        var failures = report.Checks
+            .Where(check => check.Result == TicketChecker.Status.Fail)
+            .ToArray();
+
+        Assert.IsTrue(failures.Length > 0,
+            $"{mutationName} mutation unexpectedly passed TicketChecker");
+
+        if (expectedCategory != null)
+        {
+            Assert.IsTrue(failures.Any(check => check.Category == expectedCategory),
+                $"{mutationName} mutation failed, but not in expected category {expectedCategory}. " +
+                $"Failures: {string.Join(" | ", failures.Select(check => $"{check.Category}/{check.Name}: {check.Detail}"))}");
+        }
+    }
+
+    private static decimal ExpectedTicketCashWin(TicketSerializer.TicketDto ticket)
+    {
+        var tiers = (ticket.WinInfo.PrizeTiers ?? Array.Empty<TicketSerializer.PrizeTierDto>())
+            .ToDictionary(tier => tier.SymId, tier => tier.Tier);
+
+        return ticket.WinInfo.WinSymbols.Sum(win =>
+        {
+            var tier = tiers.GetValueOrDefault(win.Id);
+            return Settings.Default.PrizeLadderRows[win.Id - 1].Tiers[tier];
+        });
     }
 
     private static TicketSerializer.TicketDto PlanTicket(MathInput input, int seed)

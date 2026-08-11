@@ -201,7 +201,8 @@ internal sealed class ForwardTurnFramePlanner
             + (normalColumns * _settings.MIN_PUSH);
         var maxPopped = (flushColumns.Count * _settings.ROWS)
             + (normalColumns * _settings.MAX_PUSH);
-        var pressureMode = totalTurns >= _settings.MAX_SPINS;
+        var pressureMode = objectives != null
+            && IsPressureTurnPlan(budget, objectives);
         var preferredPoppedCells = pressureMode && objectives != null
             ? PressurePreferredPoppedCells(budget, objectives, minPopped, maxPopped)
             : (int?)null;
@@ -230,6 +231,22 @@ internal sealed class ForwardTurnFramePlanner
             : (int)Math.Ceiling(required / (double)budget.TotalTurns);
 
         return Math.Clamp(averageDemand, minPopped, maxPopped);
+    }
+
+    private bool IsPressureTurnPlan(
+        ForwardFeatureBudget budget,
+        ForwardObjectives objectives)
+    {
+        if (budget.TotalTurns >= _settings.MAX_SPINS)
+            return true;
+
+        var required = objectives.WinTargets.Values.Sum()
+            + objectives.NearMissTargets.Values.Sum();
+        if (budget.TotalTurns <= 0)
+            return false;
+
+        var averageDemand = required / (double)budget.TotalTurns;
+        return averageDemand >= _settings.MixedPushCapacity(_settings.COLS);
     }
 
     private static ForwardTurnFrameResult Ok() =>

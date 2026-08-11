@@ -71,7 +71,9 @@ internal sealed class ForwardSpawnPlanner
 
     internal ForwardSpawnPlanResult Plan(
         IReadOnlyList<ForwardSpawnCellRequest>? cells,
-        IReadOnlyList<ForwardFutureTurn> futureTurns)
+        IReadOnlyList<ForwardFutureTurn> futureTurns,
+        int spawnTurn = 0,
+        IReadOnlyList<ForwardWheelImpact>? wheelImpacts = null)
     {
         if (cells == null)
             return Fail(ForwardSpawnPlanStatus.MissingCellRequests, "cell request list is null");
@@ -94,7 +96,14 @@ internal sealed class ForwardSpawnPlanner
             }
 
             var selection = fate.IsCollected
-                ? _selector.ChooseAndCollect(cell.CollectIntent, cell.LedgerCollectionValue)
+                ? _selector.ChooseAndCollect(
+                    cell.CollectIntent,
+                    symbol => EffectiveCollectionValue(
+                        symbol,
+                        cell.LedgerCollectionValue,
+                        spawnTurn,
+                        fate.CollectedTurn,
+                        wheelImpacts))
                 : _selector.ChooseResidue();
 
             if (!selection.IsValid)
@@ -116,6 +125,29 @@ internal sealed class ForwardSpawnPlanner
             ForwardSpawnPlanStatus.Valid,
             $"planned {spawns.Count} normal spawn(s)",
             spawns);
+    }
+
+    private int EffectiveCollectionValue(
+        int symbol,
+        int baseValue,
+        int spawnTurn,
+        int? collectionTurn,
+        IReadOnlyList<ForwardWheelImpact>? wheelImpacts)
+    {
+        if (!collectionTurn.HasValue || wheelImpacts == null || wheelImpacts.Count == 0)
+            return baseValue;
+
+        var value = baseValue;
+        foreach (var wheel in wheelImpacts)
+        {
+            if (wheel.Symbol != symbol) continue;
+            if (wheel.FireTurn < spawnTurn) continue;
+            if (wheel.FireTurn >= collectionTurn.Value) continue;
+
+            value = Math.Min(_settings.MAX_COIN_STACK, value + wheel.StackAdd);
+        }
+
+        return value;
     }
 
     private ForwardSpawnPlanResult ValidateCell(

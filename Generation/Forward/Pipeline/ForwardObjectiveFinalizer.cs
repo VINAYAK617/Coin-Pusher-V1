@@ -111,17 +111,19 @@ internal sealed class ForwardObjectiveFinalizer
         int availableCollectionSlots)
     {
         var winRequired = objectives.WinTargets.Values.Sum();
-        var usableCollectionSlots = Math.Min(
+        var wheelWinBonus = WheelWinBonus(objectives, framePlan);
+        var usableBaseSlots = Math.Min(
             availableCollectionSlots,
             NormalProgressCapacity(framePlan) + NoSafeFillerCapacityAllowance(objectives));
-        if (usableCollectionSlots < winRequired)
+        var normalWinNeed = Math.Max(0, winRequired - wheelWinBonus);
+        if (usableBaseSlots < normalWinNeed)
         {
             return BalanceResult.Fail(Fail(
                 ForwardObjectiveFinalizationStatus.WinCollectionsExceedCapacity,
-                $"winning targets need {winRequired}, but only {usableCollectionSlots} normal progress slot(s) are available"));
+                $"winning targets need {winRequired}, WHEEL bonus={wheelWinBonus}, normal progress slots={usableBaseSlots}"));
         }
 
-        var rawNearMissCapacity = Math.Max(0, usableCollectionSlots - winRequired);
+        var rawNearMissCapacity = Math.Max(0, usableBaseSlots - normalWinNeed);
         var nearMissBudget = Math.Max(0, rawNearMissCapacity - TemporalReserve(framePlan));
         if (objectives.NearMissTargets.Count > 0
             && nearMissBudget < _settings.NONWIN_MIN_TARGET
@@ -200,6 +202,31 @@ internal sealed class ForwardObjectiveFinalizer
         }
 
         return total;
+    }
+
+    private int WheelWinBonus(
+        ForwardObjectives objectives,
+        ForwardTurnFramePlan framePlan)
+    {
+        var bonus = 0;
+        foreach (var intent in framePlan.Frames
+                     .SelectMany(frame => frame.FeatureIntents)
+                     .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel)
+                     .Where(intent => intent.WheelSymbol.HasValue && intent.ResultingWheelStack.HasValue))
+        {
+            var symbol = intent.WheelSymbol!.Value;
+            if (!objectives.WinTargets.TryGetValue(symbol, out var target))
+                continue;
+
+            var stack = Math.Min(_settings.MAX_COIN_STACK, intent.ResultingWheelStack!.Value);
+            if (stack <= 1)
+                continue;
+
+            var zone = Math.Max(0, Math.Min(target / stack, _settings.COLS - 1) - 1);
+            bonus += zone * (stack - 1);
+        }
+
+        return bonus;
     }
 
     private int NoSafeFillerCapacityAllowance(ForwardObjectives objectives) =>

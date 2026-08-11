@@ -9,5 +9,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CoinPusherEngine.csproj" />
+    <ProjectReference Include="..\CoinPusherEngine.TicketChecker\CoinPusherEngine.TicketChecker.csproj" />
   </ItemGroup>
 </Project>

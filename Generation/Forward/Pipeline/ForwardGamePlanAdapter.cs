@@ -81,10 +81,6 @@ internal sealed class ForwardGamePlanAdapter
             NonWinPrizeTiers = featurePlan.EffectiveNonWinPrizeTiers.ToDictionary(kv => kv.Key, kv => kv.Value),
             Spins = spins,
             Verified = false,
-            Log = new List<string>
-            {
-                "fresh forward pipeline adapted to GamePlan",
-            },
         };
 
         var replay = Sim.Run(plan);
@@ -96,7 +92,6 @@ internal sealed class ForwardGamePlanAdapter
             return Fail(ForwardGamePlanAdapterStatus.ReplayMismatch, mismatch);
 
         plan.Verified = true;
-        plan.Log.Add("fresh GamePlan replay matched pipeline actual collections");
         return new ForwardGamePlanAdapterResult(
             ForwardGamePlanAdapterStatus.Valid,
             "ok",

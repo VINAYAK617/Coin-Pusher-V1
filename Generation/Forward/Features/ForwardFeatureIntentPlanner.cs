@@ -262,7 +262,7 @@ internal sealed class ForwardFeatureIntentPlanner
         if (symbol <= 0)
             return IntentBuildResult.Fail(Fail(ForwardFeatureIntentStatus.NoWheelTargetSymbol, "no normal symbol is available for WHEEL"));
 
-        var stackValue = PickWheelStackValue();
+        var stackValue = PickWheelStackValue(objectives);
         if (stackValue <= 0)
             return IntentBuildResult.Fail(Fail(ForwardFeatureIntentStatus.InvalidWheelStackConfig, "no legal WHEEL stack value is configured"));
 
@@ -271,20 +271,56 @@ internal sealed class ForwardFeatureIntentPlanner
 
     private int PickWheelSymbol(ForwardObjectives objectives)
     {
-        var candidates = objectives.NearMissTargets.Keys
-            .Concat(objectives.WinSymbols)
-            .Concat(objectives.FillSymbols)
+        if (ShouldCompressWithWheel(objectives))
+        {
+            var winCandidates = objectives.WinTargets
+                .Where(kv => kv.Key >= 1 && kv.Key <= objectives.MaxSymbol && !_settings.IsFeat(kv.Key))
+                .OrderByDescending(kv => kv.Value)
+                .ThenBy(kv => kv.Key)
+                .Select(kv => kv.Key)
+                .ToArray();
+            if (winCandidates.Length > 0)
+                return PickWeightedWheelSymbol(winCandidates, objectives);
+        }
+
+        var pureFiller = objectives.FillSymbols
+            .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
+            .Where(symbol => !objectives.NearMissTargets.ContainsKey(symbol))
             .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol))
             .Distinct()
             .OrderBy(symbol => symbol)
             .ToArray();
+        if (pureFiller.Length > 0)
+            return PickWeightedWheelSymbol(pureFiller, objectives);
+
+        var nonWinning = objectives.NearMissTargets.Keys
+            .Concat(objectives.FillSymbols)
+            .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
+            .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol))
+            .Distinct()
+            .OrderBy(symbol => symbol)
+            .ToArray();
+        var candidates = nonWinning.Length > 0
+            ? nonWinning
+            : objectives.WinSymbols
+                .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol))
+                .Distinct()
+                .OrderBy(symbol => symbol)
+                .ToArray();
         if (candidates.Length == 0) return 0;
 
+        return PickWeightedWheelSymbol(candidates, objectives);
+    }
+
+    private int PickWeightedWheelSymbol(
+        IReadOnlyList<int> candidates,
+        ForwardObjectives objectives)
+    {
         var weighted = candidates
             .Select(symbol => (Symbol: symbol, Weight: WheelSymbolWeight(symbol, objectives)))
             .Where(item => item.Weight > 0)
             .ToArray();
-        if (weighted.Length == 0) return candidates[_rng.Next(candidates.Length)];
+        if (weighted.Length == 0) return candidates[_rng.Next(candidates.Count)];
 
         var total = weighted.Sum(item => item.Weight);
         var roll = _rng.NextDouble() * total;
@@ -302,19 +338,23 @@ internal sealed class ForwardFeatureIntentPlanner
     {
         var weight = 1.0;
         if (objectives.NearMissTargets.TryGetValue(symbol, out var nearMissTarget))
-            weight += 3.0 + (nearMissTarget / 10.0);
+            weight += 5.0 + (nearMissTarget / 8.0);
+        else if (!objectives.WinTargets.ContainsKey(symbol))
+            weight += 3.0;
         if (objectives.WinTargets.TryGetValue(symbol, out var winTarget))
-            weight += 2.0 + (winTarget / 15.0);
+            weight += 0.25 + (winTarget / 60.0);
         if (symbol == objectives.TopPrizeSymbol && symbol > 0)
             weight += 1.0;
         return weight;
     }
 
-    private int PickWheelStackValue()
+    private int PickWheelStackValue(ForwardObjectives objectives)
     {
         var maxValue = Math.Min(_settings.MAX_WHEEL_STACK_VALUE, _settings.MAX_COIN_STACK - 1);
         var minValue = Math.Max(1, _settings.MIN_WHEEL_STACK_VALUE);
         if (minValue > maxValue) return 0;
+        if (ShouldCompressWithWheel(objectives))
+            return maxValue;
 
         var values = Enumerable.Range(minValue, maxValue - minValue + 1)
             .Select(value => (Value: value, Weight: WheelStackWeight(value)))
@@ -341,6 +381,13 @@ internal sealed class ForwardFeatureIntentPlanner
             2 => _settings.PWheelStackValue2,
             _ => Math.Max(0.0, 1.0 - _settings.PWheelStackValue1 - _settings.PWheelStackValue2),
         };
+
+    private static bool ShouldCompressWithWheel(ForwardObjectives objectives) =>
+        objectives.WinTargets.Count > 0
+        && objectives.FillSymbols.Count(symbol =>
+            !objectives.WinTargets.ContainsKey(symbol)
+            && !objectives.NearMissTargets.ContainsKey(symbol)) >= 2
+        && objectives.WinTargets.Values.Sum() + objectives.NearMissTargets.Values.Sum() >= 80;
 
     private IntentBuildResult BuildPrizeUpgradeIntent(
         int turn,

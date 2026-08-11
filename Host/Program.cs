@@ -23,11 +23,24 @@ internal static class Program
 
     private static (IReadOnlyList<decimal> PrizeList, int? Seed) ParseArgs(string[] args)
     {
-        return (ParsePrizeList("prizeListText"), null);
+        var prizeList = args.Length > 0
+            ? ParsePrizeList(args[0])
+            : new List<decimal>();
+        var seed = args.Length > 1 && int.TryParse(args[1], out var parsedSeed)
+            ? parsedSeed
+            : (int?)null;
+
+        return (prizeList, seed);
     }
 
     private static List<decimal> ParsePrizeList(string value)
     {
-        return new() { 25 };
+        if (string.IsNullOrWhiteSpace(value) || value.Trim() == "0")
+            return new List<decimal>();
+
+        return value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => decimal.Parse(part.Trim()))
+            .ToList();
     }
 }

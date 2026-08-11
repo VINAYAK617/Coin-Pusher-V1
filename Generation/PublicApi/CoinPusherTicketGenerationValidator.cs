@@ -9,11 +9,9 @@ internal enum CoinPusherTicketGenerationValidationStatus
     MissingTicket,
     MissingAdaptedPlan,
     MissingBuildResult,
-    MissingCheckerReport,
     PlanNotVerified,
     SpinCountMismatch,
     PrizeCoverageMismatch,
-    TicketCheckerFailed,
     PusherPatternTooRepetitive,
 }
 
@@ -50,8 +48,6 @@ internal sealed class CoinPusherTicketGenerationValidator
             return Fail(CoinPusherTicketGenerationValidationStatus.MissingAdaptedPlan, "adapted GamePlan is missing");
         if (generated.Build == null)
             return Fail(CoinPusherTicketGenerationValidationStatus.MissingBuildResult, "build result is missing");
-        if (generated.CheckerReport == null)
-            return Fail(CoinPusherTicketGenerationValidationStatus.MissingCheckerReport, "ticket checker report is missing");
 
         if (!generated.AdaptedPlan.Plan.Verified)
             return Fail(CoinPusherTicketGenerationValidationStatus.PlanNotVerified, "adapted GamePlan is not verified");
@@ -67,15 +63,6 @@ internal sealed class CoinPusherTicketGenerationValidator
         var pusherVariety = ValidatePusherVariety(generated.Ticket);
         if (pusherVariety != null)
             return pusherVariety;
-
-        if (!generated.CheckerReport.IsValid)
-        {
-            var first = generated.CheckerReport.Checks
-                .FirstOrDefault(check => check.Result == TicketChecker.Status.Fail);
-            return Fail(
-                CoinPusherTicketGenerationValidationStatus.TicketCheckerFailed,
-                first == null ? "ticket checker failed" : $"{first.Category}/{first.Name}: {first.Detail}");
-        }
 
         return new CoinPusherTicketGenerationValidationResult(
             CoinPusherTicketGenerationValidationStatus.Valid,

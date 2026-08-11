@@ -91,14 +91,7 @@ internal sealed class ForwardStartingBoardPlanner
         var ordered = OrderPositionsByFate(positions, futureTurns);
         if (!ordered.IsValid) return ordered.Result!;
 
-        var requests = ordered.Positions
-            .Zip(intents.Intents, (position, intent) => new ForwardSpawnCellRequest(
-                position.r,
-                position.c,
-                intent.CollectIntent,
-                intent.LedgerCollectionValue,
-                intent.SpawnStack))
-            .ToArray();
+        var requests = BuildRequests(ordered.Positions, intents.Intents);
 
         var spawns = new ForwardSpawnPlanner(
             new ForwardSymbolSelector(
@@ -175,6 +168,50 @@ internal sealed class ForwardStartingBoardPlanner
 
         return OrderedPositionResult.Ok(ordered);
     }
+
+    private IReadOnlyList<ForwardSpawnCellRequest> BuildRequests(
+        IReadOnlyList<(int r, int c)> positions,
+        IReadOnlyList<ForwardNormalSpawnIntent> intents)
+    {
+        var collecting = positions
+            .Take(intents.Count(intent => intent.RequiresCollected)
+                + intents.Count(intent => !intent.RequiresCollected && !intent.RequiresResidue))
+            .OrderBy(_ => _rng.Next())
+            .ToList();
+        var residue = positions
+            .Skip(collecting.Count)
+            .OrderBy(_ => _rng.Next())
+            .ToList();
+        var requests = new List<ForwardSpawnCellRequest>(intents.Count);
+
+        foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresCollected)))
+            AddRequest(requests, collecting, intent);
+        foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresResidue)))
+            AddRequest(requests, residue, intent);
+        foreach (var intent in Shuffled(intents.Where(intent => !intent.RequiresCollected && !intent.RequiresResidue)))
+            AddRequest(requests, collecting.Count > 0 ? collecting : residue, intent);
+
+        return requests;
+    }
+
+    private void AddRequest(
+        List<ForwardSpawnCellRequest> requests,
+        List<(int r, int c)> positions,
+        ForwardNormalSpawnIntent intent)
+    {
+        var index = _rng.Next(positions.Count);
+        var position = positions[index];
+        positions.RemoveAt(index);
+        requests.Add(new ForwardSpawnCellRequest(
+            position.r,
+            position.c,
+            intent.CollectIntent,
+            intent.LedgerCollectionValue,
+            intent.SpawnStack));
+    }
+
+    private IReadOnlyList<ForwardNormalSpawnIntent> Shuffled(IEnumerable<ForwardNormalSpawnIntent> intents) =>
+        intents.OrderBy(_ => _rng.Next()).ToArray();
 
     private Cell?[,]? BuildBoard(IReadOnlyList<ForwardSpawn> spawns)
     {

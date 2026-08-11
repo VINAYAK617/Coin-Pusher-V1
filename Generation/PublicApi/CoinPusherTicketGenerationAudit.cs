@@ -25,9 +25,7 @@ public sealed class CoinPusherTicketGenerationAudit
         int stackedNormalSpawnCount,
         IReadOnlyList<decimal> requestedPrizeAmounts,
         IReadOnlyList<decimal> coveredPrizeAmounts,
-        IReadOnlyList<decimal> skippedPrizeAmounts,
-        int checkerPassCount,
-        int checkerWarningCount)
+        IReadOnlyList<decimal> skippedPrizeAmounts)
     {
         Seed = seed;
         TotalSpins = totalSpins;
@@ -43,8 +41,6 @@ public sealed class CoinPusherTicketGenerationAudit
         RequestedPrizeAmounts = requestedPrizeAmounts;
         CoveredPrizeAmounts = coveredPrizeAmounts;
         SkippedPrizeAmounts = skippedPrizeAmounts;
-        CheckerPassCount = checkerPassCount;
-        CheckerWarningCount = checkerWarningCount;
     }
 
     public int Seed { get; }
@@ -61,8 +57,6 @@ public sealed class CoinPusherTicketGenerationAudit
     public IReadOnlyList<decimal> RequestedPrizeAmounts { get; }
     public IReadOnlyList<decimal> CoveredPrizeAmounts { get; }
     public IReadOnlyList<decimal> SkippedPrizeAmounts { get; }
-    public int CheckerPassCount { get; }
-    public int CheckerWarningCount { get; }
     public bool HasWin => WinSymbolCount > 0;
     public bool HasFeature => FeatureSpawnCount > 0 || FlushPusherCount > 0;
 }
@@ -133,9 +127,7 @@ public sealed class CoinPusherTicketGenerationAuditor
             normalSpawns.Count(spawn => spawn.Stack.HasValue && spawn.Stack.Value > 1),
             result.RequestedPrizeAmounts.ToArray(),
             result.CoveredPrizeAmounts.ToArray(),
-            result.SkippedPrizeAmounts.ToArray(),
-            result.CheckerPassCount,
-            result.CheckerWarningCount);
+            result.SkippedPrizeAmounts.ToArray());
 
         return new CoinPusherTicketGenerationAuditResult(
             CoinPusherTicketGenerationAuditStatus.Valid,

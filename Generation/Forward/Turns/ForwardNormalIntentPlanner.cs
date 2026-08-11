@@ -64,7 +64,8 @@ internal sealed class ForwardNormalIntentPlanner
         ForwardObjectives? objectives,
         IReadOnlyList<(int r, int c)>? availablePositions,
         IReadOnlyList<ForwardFutureTurn>? futureTurns,
-        SymbolLedger? symbolLedger)
+        SymbolLedger? symbolLedger,
+        IReadOnlyList<ForwardWheelImpact>? wheelImpacts = null)
     {
         if (turn <= 0)
             return Fail(ForwardNormalIntentStatus.InvalidTurn, $"turn={turn} must be positive");
@@ -88,11 +89,12 @@ internal sealed class ForwardNormalIntentPlanner
         var futureCapacities = FutureCollectionCapacities(futureTurns);
         var futureCapacity = futureCapacities.Sum();
 
-        if (totalRequired > collectingSlots + futureCapacity)
+        var wheelBonus = WheelBonus(objectives, wheelImpacts, collectingSlots);
+        if (totalRequired > collectingSlots + wheelBonus + futureCapacity)
         {
             return Fail(
                 ForwardNormalIntentStatus.InsufficientCollectionCapacity,
-                $"remaining required collections={totalRequired}, current collecting slots={collectingSlots}, future capacity={futureCapacity}",
+                $"remaining required collections={totalRequired}, current collecting slots={collectingSlots}, WHEEL bonus={wheelBonus}, future capacity={futureCapacity}",
                 collectingSlots,
                 residueSlots);
         }
@@ -168,14 +170,42 @@ internal sealed class ForwardNormalIntentPlanner
         return capacities;
     }
 
+    private int WheelBonus(
+        ForwardObjectives objectives,
+        IReadOnlyList<ForwardWheelImpact>? wheelImpacts,
+        int collectingSlots)
+    {
+        if (wheelImpacts == null || wheelImpacts.Count == 0 || collectingSlots <= 0)
+            return 0;
+
+        var remainingSlots = collectingSlots;
+        var bonus = 0;
+        foreach (var wheel in wheelImpacts
+                     .Where(wheel => objectives.WinTargets.ContainsKey(wheel.Symbol))
+                     .OrderByDescending(wheel => wheel.StackAdd))
+        {
+            if (remainingSlots <= 0)
+                break;
+
+            var usableCells = Math.Min(remainingSlots, _settings.COLS - 2);
+            if (usableCells <= 0)
+                continue;
+
+            bonus += usableCells * wheel.StackAdd;
+            remainingSlots -= usableCells;
+        }
+
+        return bonus;
+    }
+
     private int DesiredCurrentCollections(
         int totalRequired,
         int collectingCapacity,
         int requiredNow,
         IReadOnlyList<int> futureCapacities)
     {
-        _ = requiredNow;
         _ = futureCapacities;
+        _ = requiredNow;
         return totalRequired <= 0 || collectingCapacity <= 0
             ? 0
             : Math.Min(collectingCapacity, totalRequired);

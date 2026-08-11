@@ -88,7 +88,10 @@ internal sealed class ForwardTicketEnvelopeValidator
         var required = objectives.WinTargets.Values.Sum()
             + objectives.NearMissTargets.Values.Sum();
         var noSafeFillerAllowance = NoSafeFillerCapacityAllowance(objectives);
-        var available = capacity.StartingBoardSlots + capacity.SpawnSlots + noSafeFillerAllowance;
+        var available = capacity.StartingBoardSlots
+            + capacity.SpawnSlots
+            + noSafeFillerAllowance
+            + WheelWinBonus(objectives, framePlan);
         if (required > available)
         {
             return new ForwardTicketEnvelopeResult(
@@ -115,6 +118,31 @@ internal sealed class ForwardTicketEnvelopeValidator
         HasGuaranteedSafeFiller(objectives) || objectives.NearMissTargets.Count > 0
             ? 0
             : _settings.COLS;
+
+    private int WheelWinBonus(
+        ForwardObjectives objectives,
+        ForwardTurnFramePlan framePlan)
+    {
+        var bonus = 0;
+        foreach (var intent in framePlan.Frames
+                     .SelectMany(frame => frame.FeatureIntents)
+                     .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel)
+                     .Where(intent => intent.WheelSymbol.HasValue && intent.ResultingWheelStack.HasValue))
+        {
+            var symbol = intent.WheelSymbol!.Value;
+            if (!objectives.WinTargets.TryGetValue(symbol, out var target))
+                continue;
+
+            var stack = Math.Min(_settings.MAX_COIN_STACK, intent.ResultingWheelStack!.Value);
+            if (stack <= 1)
+                continue;
+
+            var zone = Math.Max(0, Math.Min(target / stack, _settings.COLS - 1) - 1);
+            bonus += zone * (stack - 1);
+        }
+
+        return bonus;
+    }
 
     private static bool HasGuaranteedSafeFiller(ForwardObjectives objectives) =>
         objectives.FillSymbols.Any(symbol =>
