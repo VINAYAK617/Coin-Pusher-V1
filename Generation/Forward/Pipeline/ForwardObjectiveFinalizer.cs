@@ -32,13 +32,6 @@ internal sealed class ForwardObjectiveFinalizationResult
 
 internal sealed class ForwardObjectiveFinalizer
 {
-    private readonly Settings _settings;
-
-    internal ForwardObjectiveFinalizer(Settings settings)
-    {
-        _settings = settings;
-    }
-
     internal ForwardObjectiveFinalizationResult Finalize(
         ForwardObjectives? objectives,
         ForwardFeatureIntentPlan? featureIntents,
@@ -57,7 +50,7 @@ internal sealed class ForwardObjectiveFinalizer
             featureIntents.EffectivePrizeTiers,
             featureIntents.EffectiveNonWinPrizeTiers);
 
-        var envelope = new ForwardTicketEnvelopeValidator(_settings).Validate(withEffectiveTiers, framePlan);
+        var envelope = new ForwardTicketEnvelopeValidator().Validate(withEffectiveTiers, framePlan, featureIntents);
         if (!envelope.IsValid
             && envelope.Status != ForwardTicketEnvelopeStatus.InsufficientCollectionCapacity)
         {
@@ -85,7 +78,7 @@ internal sealed class ForwardObjectiveFinalizer
                 .Where(kv => balance.Targets.ContainsKey(kv.Key))
                 .ToDictionary(kv => kv.Key, kv => kv.Value));
 
-        var finalEnvelope = new ForwardTicketEnvelopeValidator(_settings).Validate(balanced, framePlan);
+        var finalEnvelope = new ForwardTicketEnvelopeValidator().Validate(balanced, framePlan, featureIntents);
         if (!finalEnvelope.IsValid)
         {
             return Fail(
@@ -111,25 +104,24 @@ internal sealed class ForwardObjectiveFinalizer
         int availableCollectionSlots)
     {
         var winRequired = objectives.WinTargets.Values.Sum();
-        var wheelWinBonus = WheelWinBonus(objectives, framePlan);
         var usableBaseSlots = Math.Min(
             availableCollectionSlots,
-            NormalProgressCapacity(framePlan) + NoSafeFillerCapacityAllowance(objectives));
-        var normalWinNeed = Math.Max(0, winRequired - wheelWinBonus);
-        if (usableBaseSlots < normalWinNeed)
+            NormalProgressCapacity(framePlan)
+                + NoSafeFillerCapacityAllowance(objectives));
+        if (usableBaseSlots < winRequired)
         {
             return BalanceResult.Fail(Fail(
                 ForwardObjectiveFinalizationStatus.WinCollectionsExceedCapacity,
-                $"winning targets need {winRequired}, WHEEL bonus={wheelWinBonus}, normal progress slots={usableBaseSlots}"));
+                $"winning targets need {winRequired}, normal progress slots={usableBaseSlots}"));
         }
 
-        var rawNearMissCapacity = Math.Max(0, usableBaseSlots - normalWinNeed);
+        var rawNearMissCapacity = Math.Max(0, usableBaseSlots - winRequired);
         var nearMissBudget = Math.Max(0, rawNearMissCapacity - TemporalReserve(framePlan));
         if (objectives.NearMissTargets.Count > 0
-            && nearMissBudget < _settings.NONWIN_MIN_TARGET
-            && rawNearMissCapacity >= _settings.NONWIN_MIN_TARGET)
+            && nearMissBudget < Settings.NONWIN_MIN_TARGET
+            && rawNearMissCapacity >= Settings.NONWIN_MIN_TARGET)
         {
-            nearMissBudget = _settings.NONWIN_MIN_TARGET;
+            nearMissBudget = Settings.NONWIN_MIN_TARGET;
         }
 
         var protectedSymbols = featureIntents.EffectiveNonWinPrizeTiers.Keys
@@ -183,12 +175,12 @@ internal sealed class ForwardObjectiveFinalizer
     {
         var boardFeatureCount = framePlan.Frames
             .Sum(frame => frame.FeatureIntents.Count(intent => intent.IsBoardFeature));
-        return _settings.COLS + (framePlan.TotalTurns * 2) + _settings.NONWIN_MIN_TARGET + boardFeatureCount;
+        return Settings.COLS + (framePlan.TotalTurns * 2) + Settings.NONWIN_MIN_TARGET + boardFeatureCount;
     }
 
     private int NormalProgressCapacity(ForwardTurnFramePlan framePlan)
     {
-        var analyzer = new ForwardCellFateAnalyzer(_settings);
+        var analyzer = new ForwardCellFateAnalyzer();
         var total = AllPositions()
             .Count(position => analyzer.Analyze(position.r, position.c, framePlan.FutureTurnsAfter(0)).IsCollected);
 
@@ -197,42 +189,16 @@ internal sealed class ForwardObjectiveFinalizer
             var futureTurns = framePlan.FutureTurnsAfter(frame.Turn);
             var collectingSpawnSlots = EmptyPositionsAfterPushRotate(frame.Shape)
                 .Count(position => analyzer.Analyze(position.r, position.c, futureTurns).IsCollected);
-            var boardFeatureCount = frame.FeatureIntents.Count(intent => intent.IsBoardFeature);
-            total += Math.Max(0, collectingSpawnSlots - boardFeatureCount);
+            total += collectingSpawnSlots;
         }
 
         return total;
     }
 
-    private int WheelWinBonus(
-        ForwardObjectives objectives,
-        ForwardTurnFramePlan framePlan)
-    {
-        var bonus = 0;
-        foreach (var intent in framePlan.Frames
-                     .SelectMany(frame => frame.FeatureIntents)
-                     .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel)
-                     .Where(intent => intent.WheelSymbol.HasValue && intent.ResultingWheelStack.HasValue))
-        {
-            var symbol = intent.WheelSymbol!.Value;
-            if (!objectives.WinTargets.TryGetValue(symbol, out var target))
-                continue;
-
-            var stack = Math.Min(_settings.MAX_COIN_STACK, intent.ResultingWheelStack!.Value);
-            if (stack <= 1)
-                continue;
-
-            var zone = Math.Max(0, Math.Min(target / stack, _settings.COLS - 1) - 1);
-            bonus += zone * (stack - 1);
-        }
-
-        return bonus;
-    }
-
     private int NoSafeFillerCapacityAllowance(ForwardObjectives objectives) =>
         HasGuaranteedSafeFiller(objectives) || objectives.NearMissTargets.Count > 0
             ? 0
-            : _settings.COLS;
+            : Settings.COLS;
 
     private static bool HasGuaranteedSafeFiller(ForwardObjectives objectives) =>
         objectives.FillSymbols.Any(symbol =>
@@ -241,29 +207,29 @@ internal sealed class ForwardObjectiveFinalizer
 
     private IReadOnlyList<(int r, int c)> EmptyPositionsAfterPushRotate(ForwardTurnShape shape)
     {
-        var board = new Cell?[_settings.ROWS, _settings.COLS];
-        for (var row = 0; row < _settings.ROWS; row++)
+        var board = new Cell?[Settings.ROWS, Settings.COLS];
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < _settings.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
                 board[row, col] = Grid.Norm(1);
         }
 
-        return new ForwardBoardState(board, _settings)
+        return new ForwardBoardState(board)
             .PreviewAfterPushRotate(shape)
             .EmptyPositions;
     }
 
     private IEnumerable<(int r, int c)> AllPositions()
     {
-        for (var row = 0; row < _settings.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < _settings.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
                 yield return (row, col);
         }
     }
 
     private int MinimumTarget(int requestedTarget) =>
-        Math.Max(1, _settings.NONWIN_MIN_TARGET);
+        Math.Max(1, Settings.NONWIN_MIN_TARGET);
 
     private static ForwardObjectives Copy(
         ForwardObjectives source,
@@ -283,7 +249,8 @@ internal sealed class ForwardObjectiveFinalizer
             nonWinPrizeTiers.ToDictionary(kv => kv.Key, kv => kv.Value),
             source.MaxSymbol,
             source.IsNoWin,
-            source.TopPrizeSymbol);
+            source.TopPrizeSymbol,
+            source.WinCompletionTurn);
 
     private static ForwardObjectiveFinalizationResult Ok(
         string detail,

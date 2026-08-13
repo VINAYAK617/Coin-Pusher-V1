@@ -38,12 +38,10 @@ internal sealed class ForwardTurnCycleResult
 
 internal sealed class ForwardTurnCycleExecutor
 {
-    private readonly Settings _settings;
     private readonly int _seed;
 
-    internal ForwardTurnCycleExecutor(Settings settings, int seed)
+    internal ForwardTurnCycleExecutor(int seed)
     {
-        _settings = settings;
         _seed = seed;
     }
 
@@ -69,7 +67,7 @@ internal sealed class ForwardTurnCycleExecutor
         if (startBoardCheck != null)
             return Fail(ForwardTurnCycleStatus.BoardHasUnfiredFeatureCells, startBoardCheck);
 
-        var trialBoard = new ForwardBoardState(boardState.Snapshot(), _settings);
+        var trialBoard = new ForwardBoardState(boardState.Snapshot());
         var trialSymbolLedger = symbolLedger.Clone();
         var trialExtraLedger = extraSpinLedger.Clone();
         var trialPrizeLedger = prizeUpgradeLedger.Clone();
@@ -92,7 +90,7 @@ internal sealed class ForwardTurnCycleExecutor
                 trialRealization);
         }
 
-        var trialFire = new ForwardFeatureFireIntegrator(_settings).FireCurrentBoard(trialBoard);
+        var trialFire = new ForwardFeatureFireIntegrator().FireCurrentBoard(trialBoard);
         if (!trialFire.IsValid)
         {
             return Fail(
@@ -130,7 +128,7 @@ internal sealed class ForwardTurnCycleExecutor
                 realization);
         }
 
-        var featureFire = new ForwardFeatureFireIntegrator(_settings).FireCurrentBoard(boardState);
+        var featureFire = new ForwardFeatureFireIntegrator().FireCurrentBoard(boardState);
         if (!featureFire.IsValid)
         {
             return Fail(
@@ -179,7 +177,7 @@ internal sealed class ForwardTurnCycleExecutor
             if (!eventByPosition.TryAdd((fireEvent.Row, fireEvent.Col), fireEvent))
                 return $"feature fire event ({fireEvent.Row},{fireEvent.Col}) appears more than once";
 
-            if (fireEvent.FeatureSymbol == _settings.F_WHEEL)
+            if (fireEvent.FeatureSymbol == Settings.F_WHEEL)
             {
                 wheelSeen = true;
                 continue;
@@ -225,7 +223,7 @@ internal sealed class ForwardTurnCycleExecutor
             return $"feature ({spawn.Row},{spawn.Col}) ConvertToId fired {fireEvent.ConvertToSymbol}, expected {cell.CvtSym}";
         }
 
-        if (cell.Sym == _settings.F_WHEEL)
+        if (cell.Sym == Settings.F_WHEEL)
         {
             if (fireEvent.WheelSymbol != cell.Fp?.WheelSym || fireEvent.WheelStack != cell.Fp?.WheelStack)
             {
@@ -239,7 +237,7 @@ internal sealed class ForwardTurnCycleExecutor
             return null;
         }
 
-        if (cell.Sym == _settings.F_PRUP)
+        if (cell.Sym == Settings.F_PRUP)
         {
             if (fireEvent.UpgradeSymbol != cell.Fp?.PrupSym || fireEvent.UpgradeTier != cell.Fp?.PrupTier)
             {
@@ -253,7 +251,7 @@ internal sealed class ForwardTurnCycleExecutor
             return null;
         }
 
-        if (cell.Sym == _settings.F_XSPIN)
+        if (cell.Sym == Settings.F_XSPIN)
         {
             if (fireEvent.ExtraGoAward != 1)
                 return $"EXTRA_GO ({spawn.Row},{spawn.Col}) fired ExtraGoAward={fireEvent.ExtraGoAward}, expected 1";
@@ -269,9 +267,9 @@ internal sealed class ForwardTurnCycleExecutor
 
     private string? ValidateNoFeatureCells(Cell?[,] board)
     {
-        for (var row = 0; row < _settings.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < _settings.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
             {
                 var cell = board[row, col];
                 if (cell?.IsFeat == true)
@@ -283,7 +281,7 @@ internal sealed class ForwardTurnCycleExecutor
     }
 
     private ForwardTurnRealizer CreateRealizer(int turn) =>
-        new(_settings, SeedForTurn(turn));
+        new(SeedForTurn(turn));
 
     private int SeedForTurn(int turn)
     {

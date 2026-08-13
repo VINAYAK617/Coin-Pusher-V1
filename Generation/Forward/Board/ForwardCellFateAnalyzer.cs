@@ -16,14 +16,19 @@ internal enum ForwardCellFateKind
 
 internal readonly struct ForwardFutureTurn
 {
-    internal ForwardFutureTurn(int turnNumber, ForwardTurnShape shape)
+    internal ForwardFutureTurn(
+        int turnNumber,
+        ForwardTurnShape shape,
+        IReadOnlyList<ForwardFeatureIntent>? featureIntents = null)
     {
         TurnNumber = turnNumber;
         Shape = shape;
+        FeatureIntents = featureIntents ?? Array.Empty<ForwardFeatureIntent>();
     }
 
     internal int TurnNumber { get; }
     internal ForwardTurnShape Shape { get; }
+    internal IReadOnlyList<ForwardFeatureIntent> FeatureIntents { get; }
 }
 
 internal readonly struct ForwardCellFate
@@ -62,19 +67,12 @@ internal readonly struct ForwardCellFate
 
 internal sealed class ForwardCellFateAnalyzer
 {
-    private readonly Settings _settings;
-
-    internal ForwardCellFateAnalyzer(Settings settings)
-    {
-        _settings = settings;
-    }
-
     internal ForwardCellFate Analyze(
         int row,
         int col,
         IReadOnlyList<ForwardFutureTurn> futureTurns)
     {
-        if (row < 0 || row >= _settings.ROWS || col < 0 || col >= _settings.COLS)
+        if (row < 0 || row >= Settings.ROWS || col < 0 || col >= Settings.COLS)
         {
             return new ForwardCellFate(
                 ForwardCellFateStatus.InvalidStartPosition,
@@ -121,12 +119,12 @@ internal sealed class ForwardCellFateAnalyzer
 
             previousTurn = future.TurnNumber;
             var pusher = future.Shape.Pushers[currentCol];
-            if (pusher.IsFlush(_settings))
+            if (pusher.IsFlush())
             {
                 return Collected(row, col, currentRow, currentCol, future.TurnNumber);
             }
 
-            if (currentRow >= _settings.ROWS - pusher.PushValue)
+            if (currentRow >= Settings.ROWS - pusher.PushValue)
             {
                 return Collected(row, col, currentRow, currentCol, future.TurnNumber);
             }
@@ -163,5 +161,5 @@ internal sealed class ForwardCellFateAnalyzer
             $"collected on turn {turn} at ({row},{col})");
 
     private (int row, int col) RotateClockwise(int row, int col) =>
-        (col, _settings.ROWS - 1 - row);
+        (col, Settings.ROWS - 1 - row);
 }

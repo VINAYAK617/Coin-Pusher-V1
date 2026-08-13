@@ -83,22 +83,22 @@ internal sealed class ForwardFeatureTimingResult
 
 internal sealed class ForwardFeatureTimingPlanner
 {
-    private readonly Settings _settings;
     private readonly Random _rng;
 
-    internal ForwardFeatureTimingPlanner(Settings settings, int seed)
+    internal ForwardFeatureTimingPlanner(int seed)
     {
-        _settings = settings;
         _rng = new Random(seed);
     }
 
-    internal ForwardFeatureTimingResult Plan(ForwardFeatureBudget? budget)
+    internal ForwardFeatureTimingResult Plan(
+        ForwardFeatureBudget? budget,
+        ForwardObjectives? objectives = null)
     {
         if (budget == null)
             return Fail(ForwardFeatureTimingStatus.MissingBudget, "feature budget is missing");
-        if (budget.BaseTurns != _settings.BASE_SPINS
+        if (budget.BaseTurns != Settings.BASE_SPINS
             || budget.TotalTurns < budget.BaseTurns
-            || budget.TotalTurns > _settings.MAX_SPINS
+            || budget.TotalTurns > Settings.MAX_SPINS
             || budget.TotalTurns != budget.BaseTurns + budget.ExtraGoCount)
         {
             return Fail(
@@ -108,14 +108,25 @@ internal sealed class ForwardFeatureTimingPlanner
 
         var events = new List<ForwardTimedFeature>();
 
-        var extra = ScheduleExtraGo(budget);
+        var extra = ScheduleExtraGo(budget, objectives);
         if (!extra.IsValid) return extra.Result!;
         events.AddRange(extra.Events.Select(turn => new ForwardTimedFeature(ForwardTimedFeatureKind.ExtraGo, turn)));
 
-        var wheel = AddSimpleFeatures(events, ForwardTimedFeatureKind.Wheel, budget.WheelCount, budget.TotalTurns, _settings.WheelFeatureConfig);
+        var wheel = AddSimpleFeatures(
+            events,
+            ForwardTimedFeatureKind.Wheel,
+            budget.WheelCount,
+            budget.TotalTurns,
+            Settings.WheelFeatureConfig,
+            objectives);
         if (!wheel.IsValid) return wheel;
 
-        var flush = AddSimpleFeatures(events, ForwardTimedFeatureKind.Flush, budget.FlushCount, budget.TotalTurns, _settings.FlushFeatureConfig);
+        var flush = AddSimpleFeatures(
+            events,
+            ForwardTimedFeatureKind.Flush,
+            budget.FlushCount,
+            budget.TotalTurns,
+            Settings.FlushFeatureConfig);
         if (!flush.IsValid) return flush;
 
         var prizeUpgrade = AddSimpleFeatures(
@@ -123,7 +134,8 @@ internal sealed class ForwardFeatureTimingPlanner
             ForwardTimedFeatureKind.PrizeUpgrade,
             budget.PrizeUpgradeCount,
             budget.TotalTurns,
-            _settings.PrizeUpgradeFeatureConfig);
+            Settings.PrizeUpgradeFeatureConfig,
+            objectives);
         if (!prizeUpgrade.IsValid) return prizeUpgrade;
 
         var finalCheck = ValidateFinalSchedule(events, budget);
@@ -140,7 +152,9 @@ internal sealed class ForwardFeatureTimingPlanner
                     .ToArray()));
     }
 
-    private ExtraGoScheduleResult ScheduleExtraGo(ForwardFeatureBudget budget)
+    private ExtraGoScheduleResult ScheduleExtraGo(
+        ForwardFeatureBudget budget,
+        ForwardObjectives? objectives)
     {
         if (budget.ExtraGoCount == 0)
         {
@@ -150,7 +164,8 @@ internal sealed class ForwardFeatureTimingPlanner
                 : ExtraGoScheduleResult.Fail(baseOnly);
         }
 
-        var late = _rng.NextDouble() < _settings.PFeatureLatePlacement;
+        var late = !RequiresTailCapacity(objectives)
+            && _rng.NextDouble() < Settings.PFeatureLatePlacement;
         var primary = TryExtraGoTurns(budget, late);
         if (primary.IsValid) return primary;
 
@@ -205,8 +220,8 @@ internal sealed class ForwardFeatureTimingPlanner
     }
 
     private bool LegalExtraGoTurn(ForwardFeatureBudget budget, int turn) =>
-        turn >= Math.Max(1, _settings.ExtraSpinFeatureConfig.MinS)
-        && turn <= Math.Min(_settings.ExtraSpinFeatureConfig.MaxS, budget.TotalTurns - 1)
+        turn >= Math.Max(1, Settings.ExtraSpinFeatureConfig.MinS)
+        && turn <= Math.Min(Settings.ExtraSpinFeatureConfig.MaxS, budget.TotalTurns - 1)
         && turn < budget.TotalTurns;
 
     private ForwardFeatureTimingResult ValidateExtraGoTimeline(
@@ -216,7 +231,7 @@ internal sealed class ForwardFeatureTimingPlanner
         var extraByTurn = extraGoTurns
             .GroupBy(turn => turn)
             .ToDictionary(group => group.Key, group => group.Count());
-        var ledger = new ForwardExtraSpinLedger(budget.TotalTurns, _settings);
+        var ledger = new ForwardExtraSpinLedger(budget.TotalTurns);
 
         for (var turn = 1; turn <= budget.TotalTurns; turn++)
         {
@@ -240,11 +255,12 @@ internal sealed class ForwardFeatureTimingPlanner
         ForwardTimedFeatureKind kind,
         int count,
         int totalTurns,
-        (double P, int Max, int MinS, int MaxS, int Ord) config)
+        (double P, int Max, int MinS, int MaxS, int Ord) config,
+        ForwardObjectives? objectives = null)
     {
         for (var i = 0; i < count; i++)
         {
-            var turn = PickSimpleFeatureTurn(events, kind, totalTurns, config);
+            var turn = PickSimpleFeatureTurn(events, kind, totalTurns, config, objectives);
             if (turn <= 0)
             {
                 return Fail(
@@ -262,9 +278,14 @@ internal sealed class ForwardFeatureTimingPlanner
         IReadOnlyList<ForwardTimedFeature> events,
         ForwardTimedFeatureKind kind,
         int totalTurns,
-        (double P, int Max, int MinS, int MaxS, int Ord) config)
+        (double P, int Max, int MinS, int MaxS, int Ord) config,
+        ForwardObjectives? objectives)
     {
-        var maxTurn = Math.Min(config.MaxS, totalTurns - 1);
+        var futureTurnReserve = kind == ForwardTimedFeatureKind.Wheel
+            || (RequiresTailCapacity(objectives) && IsBoardSimpleFeature(kind))
+            ? 2
+            : 1;
+        var maxTurn = Math.Min(config.MaxS, totalTurns - futureTurnReserve);
         var minTurn = Math.Max(1, config.MinS);
         if (minTurn > maxTurn) return 0;
 
@@ -279,10 +300,19 @@ internal sealed class ForwardFeatureTimingPlanner
             .ToArray();
         if (legalTurns.Length == 0) return 0;
 
-        var useLate = _rng.NextDouble() < _settings.PFeatureLatePlacement;
+        if (NeedsEarlyCapacityWheel(kind, objectives, minTurn, totalTurns, out var latestCapacityTurn))
+        {
+            var capacityTurns = legalTurns
+                .Where(turn => turn <= latestCapacityTurn)
+                .ToArray();
+            if (capacityTurns.Length > 0)
+                return capacityTurns[_rng.Next(capacityTurns.Length)];
+        }
+
+        var useLate = _rng.NextDouble() < Settings.PFeatureLatePlacement;
         if (useLate)
         {
-            var tailStart = Math.Max(minTurn, maxTurn - Math.Max(1, _settings.WinLateTailSpins) + 1);
+            var tailStart = Math.Max(minTurn, maxTurn - Math.Max(1, Settings.WinLateTailSpins) + 1);
             var lateTurns = legalTurns.Where(turn => turn >= tailStart).ToArray();
             if (lateTurns.Length > 0)
                 return lateTurns[_rng.Next(lateTurns.Length)];
@@ -290,6 +320,40 @@ internal sealed class ForwardFeatureTimingPlanner
 
         return legalTurns[_rng.Next(legalTurns.Length)];
     }
+
+    private bool NeedsEarlyCapacityWheel(
+        ForwardTimedFeatureKind kind,
+        ForwardObjectives? objectives,
+        int minTurn,
+        int totalTurns,
+        out int latestCapacityTurn)
+    {
+        latestCapacityTurn = 0;
+        if (kind != ForwardTimedFeatureKind.Wheel || objectives == null)
+            return false;
+
+        var requiredCollections = objectives.WinTargets.Values.Sum()
+            + objectives.NearMissTargets.Values.Sum();
+        if (objectives.WinTargets.Count == 0 || requiredCollections < 80)
+            return false;
+
+        latestCapacityTurn = Math.Max(
+            minTurn,
+            totalTurns - Math.Max(3, Settings.WinLateTailSpins + 1));
+        return true;
+    }
+
+    private static bool IsBoardSimpleFeature(ForwardTimedFeatureKind kind) =>
+        kind == ForwardTimedFeatureKind.PrizeUpgrade;
+
+    private static bool RequiresTailCapacity(ForwardObjectives? objectives) =>
+        objectives != null
+        && !HasGuaranteedSafeFiller(objectives);
+
+    private static bool HasGuaranteedSafeFiller(ForwardObjectives objectives) =>
+        objectives.FillSymbols.Any(symbol =>
+            !objectives.WinTargets.ContainsKey(symbol)
+            && !objectives.NearMissTargets.ContainsKey(symbol));
 
     private ForwardFeatureTimingResult ValidateFinalSchedule(
         IReadOnlyList<ForwardTimedFeature> events,

@@ -29,7 +29,8 @@ internal sealed class ForwardObjectives
         IReadOnlyDictionary<int, int> nonWinPrizeTiers,
         int maxSymbol,
         bool isNoWin,
-        int topPrizeSymbol)
+        int topPrizeSymbol,
+        int? winCompletionTurn)
     {
         WinTargets = winTargets;
         WinSymbols = winSymbols;
@@ -42,6 +43,7 @@ internal sealed class ForwardObjectives
         MaxSymbol = maxSymbol;
         IsNoWin = isNoWin;
         TopPrizeSymbol = topPrizeSymbol;
+        WinCompletionTurn = winCompletionTurn;
     }
 
     internal IReadOnlyDictionary<int, int> WinTargets { get; }
@@ -55,6 +57,7 @@ internal sealed class ForwardObjectives
     internal int MaxSymbol { get; }
     internal bool IsNoWin { get; }
     internal int TopPrizeSymbol { get; }
+    internal int? WinCompletionTurn { get; }
 }
 
 internal sealed class ForwardObjectiveResult
@@ -77,27 +80,20 @@ internal sealed class ForwardObjectiveResult
 
 internal sealed class ForwardObjectivePlanner
 {
-    private readonly Settings _settings;
-
-    internal ForwardObjectivePlanner(Settings settings)
-    {
-        _settings = settings;
-    }
-
     internal ForwardObjectiveResult Resolve(MathInput? input, int seed)
     {
         if (input == null)
             return Fail(ForwardObjectiveStatus.MissingInput, "MathInput is null");
-        if (_settings.PrizeLadderRows == null || _settings.PrizeLadderRows.Count == 0)
+        if (Settings.PrizeLadderRows == null || Settings.PrizeLadderRows.Count == 0)
             return Fail(ForwardObjectiveStatus.MissingPrizeLadder, "settings.PrizeLadderRows is empty");
         if (input.Targets == null)
             return Fail(ForwardObjectiveStatus.MissingInput, "MathInput.Targets is null");
         if (input.MaxSym < 1)
             return Fail(ForwardObjectiveStatus.InvalidMaxSymbol, $"MaxSym={input.MaxSym} must be positive");
 
-        var maxSymbol = Math.Min(input.MaxSym, _settings.PrizeLadderRows.Count);
+        var maxSymbol = Math.Min(input.MaxSym, Settings.PrizeLadderRows.Count);
         var symbolCaps = Enumerable.Range(1, maxSymbol)
-            .ToDictionary(symbol => symbol, symbol => _settings.SymbolFillCap(symbol));
+            .ToDictionary(symbol => symbol, symbol => Settings.SymbolFillCap(symbol));
         var winTargets = input.Targets
             .OrderBy(kv => kv.Key)
             .ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -199,7 +195,8 @@ internal sealed class ForwardObjectivePlanner
             nonWinPrizeTiers,
             maxSymbol,
             winTargets.Count == 0,
-            TopPrizeSymbol(prizeValues));
+            TopPrizeSymbol(prizeValues),
+            input.WinCompletionTurn);
 
         return new ForwardObjectiveResult(ForwardObjectiveStatus.Valid, "ok", objectives);
     }
@@ -223,11 +220,11 @@ internal sealed class ForwardObjectivePlanner
                     return NearMissResolveResult.Fail(Fail(ForwardObjectiveStatus.NonWinOverlapsWin, $"NonWinTargets symbol {symbol} is also a win symbol"));
 
                 var cap = symbolCaps[symbol];
-                if (target < _settings.NONWIN_MIN_TARGET || target >= cap)
+                if (target < Settings.NONWIN_MIN_TARGET || target >= cap)
                 {
                     return NearMissResolveResult.Fail(Fail(
                         ForwardObjectiveStatus.InvalidNonWinTarget,
-                        $"NonWinTargets symbol {symbol} target {target} must be in {_settings.NONWIN_MIN_TARGET}..{cap - 1}"));
+                        $"NonWinTargets symbol {symbol} target {target} must be in {Settings.NONWIN_MIN_TARGET}..{cap - 1}"));
                 }
 
                 provided[symbol] = target;
@@ -240,7 +237,7 @@ internal sealed class ForwardObjectivePlanner
         if (profile.MaxSymbols <= 0 || profile.Max <= 0)
             return NearMissResolveResult.Ok(new Dictionary<int, int>());
 
-        var minTarget = Math.Max(_settings.NONWIN_MIN_TARGET, profile.Min);
+        var minTarget = Math.Max(Settings.NONWIN_MIN_TARGET, profile.Min);
         var eligible = fillSymbols
             .Where(symbol => symbolCaps[symbol] > minTarget)
             .ToArray();
@@ -264,7 +261,7 @@ internal sealed class ForwardObjectivePlanner
 
     private (double P, int Min, int Max, int MaxSymbols) PickNearMissProfile(Random rng)
     {
-        var profiles = _settings.NonWinTargetProfiles ?? Array.Empty<(double P, int Min, int Max, int MaxSymbols)>();
+        var profiles = Settings.NonWinTargetProfiles ?? Array.Empty<(double P, int Min, int Max, int MaxSymbols)>();
         var total = profiles.Sum(profile => Math.Max(0.0, profile.P));
         if (total <= 0) return (0, 0, 0, 0);
 
@@ -299,7 +296,7 @@ internal sealed class ForwardObjectivePlanner
         };
         min = Math.Min(min, maxSymbols);
 
-        var weights = (_settings.NonWinCountWeights ?? Array.Empty<double>())
+        var weights = (Settings.NonWinCountWeights ?? Array.Empty<double>())
             .Select((weight, index) => new { Count = index + 1, Weight = Math.Max(0.0, weight) })
             .Where(item => item.Count >= min && item.Count <= maxSymbols && item.Weight > 0)
             .ToArray();
@@ -390,13 +387,13 @@ internal sealed class ForwardObjectivePlanner
     private double NearMissBandWeight(int band) =>
         band switch
         {
-            0 => _settings.WNonWinLow,
-            1 => _settings.WNonWinMid,
-            _ => _settings.WNonWinHigh,
+            0 => Settings.WNonWinLow,
+            1 => Settings.WNonWinMid,
+            _ => Settings.WNonWinHigh,
         };
 
     private bool ValidSymbol(int symbol, int maxSymbol) =>
-        symbol >= 1 && symbol <= maxSymbol && !_settings.IsFeat(symbol);
+        symbol >= 1 && symbol <= maxSymbol && !Settings.IsFeat(symbol);
 
     private static Dictionary<int, IReadOnlyDictionary<int, decimal>> ClonePrizeValues(
         IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>>? values) =>

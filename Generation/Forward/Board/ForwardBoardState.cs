@@ -95,16 +95,14 @@ internal readonly struct ForwardBoardAdvanceResult
 
 internal sealed class ForwardBoardState
 {
-    private readonly Settings _settings;
     private Cell?[,] _board;
 
-    internal ForwardBoardState(Cell?[,] board, Settings settings)
+    internal ForwardBoardState(Cell?[,] board)
     {
-        _settings = settings;
-        _board = CloneBoard(board, settings);
+        _board = CloneBoard(board, Settings);
     }
 
-    internal Cell?[,] Snapshot() => CloneBoard(_board, _settings);
+    internal Cell?[,] Snapshot() => CloneBoard(_board, Settings);
 
     internal ForwardBoardFeatureFireApplyResult ApplyFeatureFire(ForwardFeatureExecutor? executor)
     {
@@ -116,7 +114,7 @@ internal sealed class ForwardBoardState
                 Array.Empty<ForwardFeatureFireEvent>());
         }
 
-        var working = CloneBoard(_board, _settings);
+        var working = CloneBoard(_board, Settings);
         var fire = executor.FireAll(working);
 
         if (HasFeatureCells(working))
@@ -155,16 +153,16 @@ internal sealed class ForwardBoardState
         }
 
         var collected = new Dictionary<int, int>();
-        var working = CloneBoard(_board, _settings);
+        var working = CloneBoard(_board, Settings);
         CollectAndShift(working, shape, collected);
-        working = RotateClockwise(working, _settings);
+        working = RotateClockwise(working, Settings);
 
         return new ForwardBoardPreviewResult(
             ForwardBoardAdvanceStatus.Valid,
             "ok",
             collected,
             EmptyPositions(working),
-            CloneBoard(working, _settings));
+            CloneBoard(working, Settings));
     }
 
     internal ForwardBoardAdvanceResult Advance(
@@ -180,10 +178,10 @@ internal sealed class ForwardBoardState
         }
 
         var collected = new Dictionary<int, int>();
-        var working = CloneBoard(_board, _settings);
+        var working = CloneBoard(_board, Settings);
 
         CollectAndShift(working, shape, collected);
-        working = RotateClockwise(working, _settings);
+        working = RotateClockwise(working, Settings);
 
         var empty = CountEmptyCells(working);
         if (spawns.Count != empty)
@@ -197,7 +195,7 @@ internal sealed class ForwardBoardState
         var seen = new HashSet<(int r, int c)>();
         foreach (var spawn in spawns)
         {
-            if (spawn.Row < 0 || spawn.Row >= _settings.ROWS || spawn.Col < 0 || spawn.Col >= _settings.COLS)
+            if (spawn.Row < 0 || spawn.Row >= Settings.ROWS || spawn.Col < 0 || spawn.Col >= Settings.COLS)
             {
                 return new ForwardBoardAdvanceResult(
                     ForwardBoardAdvanceStatus.SpawnOutOfRange,
@@ -242,12 +240,12 @@ internal sealed class ForwardBoardState
 
     private void CollectAndShift(Cell?[,] board, ForwardTurnShape shape, Dictionary<int, int> collected)
     {
-        for (var col = 0; col < _settings.COLS; col++)
+        for (var col = 0; col < Settings.COLS; col++)
         {
             var pusher = shape.Pushers[col];
-            if (pusher.IsFlush(_settings))
+            if (pusher.IsFlush())
             {
-                for (var row = 0; row < _settings.ROWS; row++)
+                for (var row = 0; row < Settings.ROWS; row++)
                 {
                     Acc(collected, board[row, col]);
                     board[row, col] = null;
@@ -256,10 +254,10 @@ internal sealed class ForwardBoardState
             }
 
             var push = pusher.PushValue;
-            for (var row = _settings.ROWS - push; row < _settings.ROWS; row++)
+            for (var row = Settings.ROWS - push; row < Settings.ROWS; row++)
                 Acc(collected, board[row, col]);
 
-            for (var row = _settings.ROWS - 1; row >= 0; row--)
+            for (var row = Settings.ROWS - 1; row >= 0; row--)
             {
                 var source = row - push;
                 board[row, col] = source >= 0 ? board[source, col]?.Clone() : null;
@@ -269,16 +267,16 @@ internal sealed class ForwardBoardState
 
     private void Acc(Dictionary<int, int> collected, Cell? cell)
     {
-        if (cell == null || _settings.IsFeat(cell.Sym)) return;
+        if (cell == null || Settings.IsFeat(cell.Sym)) return;
         collected[cell.Sym] = collected.GetValueOrDefault(cell.Sym) + Math.Max(1, cell.Stack);
     }
 
     private int CountEmptyCells(Cell?[,] board)
     {
         var count = 0;
-        for (var row = 0; row < _settings.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < _settings.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
             {
                 if (board[row, col] == null) count++;
             }
@@ -288,9 +286,9 @@ internal sealed class ForwardBoardState
 
     private bool HasFeatureCells(Cell?[,] board)
     {
-        for (var row = 0; row < _settings.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < _settings.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
             {
                 if (board[row, col]?.IsFeat == true)
                     return true;
@@ -303,9 +301,9 @@ internal sealed class ForwardBoardState
     private IReadOnlyList<(int r, int c)> EmptyPositions(Cell?[,] board)
     {
         var positions = new List<(int r, int c)>();
-        for (var row = 0; row < _settings.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < _settings.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
             {
                 if (board[row, col] == null)
                     positions.Add((row, col));
@@ -315,7 +313,7 @@ internal sealed class ForwardBoardState
         return positions;
     }
 
-    private static Cell?[,] CloneBoard(Cell?[,] source, Settings settings)
+    private static Cell?[,] CloneBoard(Cell?[,] source, GameEngine.ICustomProfileSettings settings)
     {
         var clone = new Cell?[settings.ROWS, settings.COLS];
         for (var row = 0; row < settings.ROWS; row++)
@@ -326,7 +324,7 @@ internal sealed class ForwardBoardState
         return clone;
     }
 
-    private static Cell?[,] RotateClockwise(Cell?[,] source, Settings settings)
+    private static Cell?[,] RotateClockwise(Cell?[,] source, GameEngine.ICustomProfileSettings settings)
     {
         var rotated = new Cell?[settings.ROWS, settings.COLS];
         for (var row = 0; row < settings.ROWS; row++)

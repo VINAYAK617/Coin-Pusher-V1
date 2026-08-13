@@ -57,16 +57,13 @@ internal sealed class ForwardSpawnPlanner
 {
     private readonly ForwardSymbolSelector _selector;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
-    private readonly Settings _settings;
 
     internal ForwardSpawnPlanner(
         ForwardSymbolSelector selector,
-        ForwardCellFateAnalyzer fateAnalyzer,
-        Settings settings)
+        ForwardCellFateAnalyzer fateAnalyzer)
     {
         _selector = selector;
         _fateAnalyzer = fateAnalyzer;
-        _settings = settings;
     }
 
     internal ForwardSpawnPlanResult Plan(
@@ -103,7 +100,8 @@ internal sealed class ForwardSpawnPlanner
                         cell.LedgerCollectionValue,
                         spawnTurn,
                         fate.CollectedTurn,
-                        wheelImpacts))
+                        wheelImpacts),
+                    fate.CollectedTurn)
                 : _selector.ChooseResidue();
 
             if (!selection.IsValid)
@@ -144,7 +142,7 @@ internal sealed class ForwardSpawnPlanner
             if (wheel.FireTurn < spawnTurn) continue;
             if (wheel.FireTurn >= collectionTurn.Value) continue;
 
-            value = Math.Min(_settings.MAX_COIN_STACK, value + wheel.StackAdd);
+            value = Math.Min(Settings.MAX_COIN_STACK, value + wheel.StackAdd);
         }
 
         return value;
@@ -154,7 +152,7 @@ internal sealed class ForwardSpawnPlanner
         ForwardSpawnCellRequest cell,
         HashSet<(int r, int c)> seen)
     {
-        if (cell.Row < 0 || cell.Row >= _settings.ROWS || cell.Col < 0 || cell.Col >= _settings.COLS)
+        if (cell.Row < 0 || cell.Row >= Settings.ROWS || cell.Col < 0 || cell.Col >= Settings.COLS)
         {
             return Fail(
                 ForwardSpawnPlanStatus.InvalidSpawnPosition,

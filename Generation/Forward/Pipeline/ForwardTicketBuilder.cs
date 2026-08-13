@@ -55,18 +55,16 @@ internal sealed class ForwardTicketBuildResult
 
 internal sealed class ForwardTicketBuilder
 {
-    private readonly Settings _settings;
     private readonly int _seed;
 
-    internal ForwardTicketBuilder(Settings settings, int seed)
+    internal ForwardTicketBuilder(int seed)
     {
-        _settings = settings;
         _seed = seed;
     }
 
     internal ForwardTicketBuildResult Build(IReadOnlyList<decimal>? prizeAmounts)
     {
-        var math = new ForwardMathInputResolver(_settings).Resolve(
+        var math = new ForwardMathInputResolver().Resolve(
             prizeAmounts,
             SeedFor("math"));
         if (!math.IsValid)
@@ -77,7 +75,7 @@ internal sealed class ForwardTicketBuilder
                 math);
         }
 
-        var objectives = new ForwardObjectivePlanner(_settings).Resolve(
+        var objectives = new ForwardObjectivePlanner().Resolve(
             math.Bundle!.Input,
             SeedFor("objectives"));
         if (!objectives.IsValid)
@@ -89,7 +87,7 @@ internal sealed class ForwardTicketBuilder
                 objectives);
         }
 
-        var budget = new ForwardFeatureBudgetPlanner(_settings).Plan(
+        var budget = new ForwardFeatureBudgetPlanner().Plan(
             math.Bundle.Input,
             objectives.Objectives,
             SeedFor("budget"));
@@ -104,8 +102,7 @@ internal sealed class ForwardTicketBuilder
         }
 
         var timing = new ForwardFeatureTimingPlanner(
-            _settings,
-            SeedFor("timing")).Plan(budget.Budget);
+            SeedFor("timing")).Plan(budget.Budget, objectives.Objectives);
         if (!timing.IsValid)
         {
             return Fail(
@@ -118,7 +115,6 @@ internal sealed class ForwardTicketBuilder
         }
 
         var intents = new ForwardFeatureIntentPlanner(
-            _settings,
             SeedFor("intents")).Plan(objectives.Objectives, timing.Timing);
         if (!intents.IsValid)
         {
@@ -133,7 +129,6 @@ internal sealed class ForwardTicketBuilder
         }
 
         var frames = new ForwardTurnFramePlanner(
-            _settings,
             SeedFor("frames")).Plan(budget.Budget, intents.Plan, objectives.Objectives);
         if (!frames.IsValid)
         {
@@ -148,7 +143,7 @@ internal sealed class ForwardTicketBuilder
                 frames);
         }
 
-        var finalizedObjectives = new ForwardObjectiveFinalizer(_settings).Finalize(
+        var finalizedObjectives = new ForwardObjectiveFinalizer().Finalize(
             objectives.Objectives,
             intents.Plan,
             frames.Plan);
@@ -170,9 +165,10 @@ internal sealed class ForwardTicketBuilder
             finalizedObjectives.Detail,
             finalizedObjectives.Objectives);
 
-        var envelope = new ForwardTicketEnvelopeValidator(_settings).Validate(
+        var envelope = new ForwardTicketEnvelopeValidator().Validate(
             finalObjectiveResult.Objectives,
-            frames.Plan);
+            frames.Plan,
+            intents.Plan);
         if (!envelope.IsValid)
         {
             return Fail(
@@ -188,7 +184,6 @@ internal sealed class ForwardTicketBuilder
         }
 
         var pipeline = new ForwardTicketPipelineExecutor(
-            _settings,
             SeedFor("pipeline")).Execute(finalObjectiveResult.Objectives, frames.Plan);
         if (!pipeline.IsValid)
         {

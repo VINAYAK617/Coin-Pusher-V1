@@ -21,12 +21,12 @@ using static TicketSerializer;
 ///    When several physical EXTRA_SPIN tokens get folded into one nested
 ///    ReTrigger chain for presentation (see TicketSerializer.BuildTurns), the
 ///    chain-start spawn's OWN ConvertToId is a PLACEHOLDER (literally the
-///    EXTRA_SPIN feature id, Settings.Default.F_XSPIN) meaning "there is more chain to unwrap,
+///    EXTRA_SPIN feature id, Settings.F_XSPIN) meaning "there is more chain to unwrap,
 ///    look inside ReTrigger" — it is NOT "no real target, fall back to filler".
 ///    An earlier version of this checker treated that placeholder as an invalid
-///    convert target and substituted Settings.Default.F_COIN (symbol 1), which silently
+///    convert target and substituted Settings.F_COIN (symbol 1), which silently
 ///    injected a fake extra collection of whichever win symbol happened to
-///    equal Settings.Default.F_COIN's value. Confirmed via direct comparison against Sim.Run
+///    equal Settings.F_COIN's value. Confirmed via direct comparison against Sim.Run
 ///    (the engine's own trusted simulator) across 1000 real tickets — the
 ///    checker was wrong, not the engine. ResolveConvert below now walks the
 ///    ReTrigger chain to its end to find the real eventual symbol.
@@ -89,10 +89,10 @@ public static class TicketChecker
             return result;
         }
 
-        Ticket? ticket;
+        Newtonsoft.Json.Linq.JObject? root;
         try
         {
-            ticket = JsonConvert.DeserializeObject<Ticket>(json);
+            root = JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(json);
         }
         catch (JsonException ex)
         {
@@ -101,7 +101,17 @@ public static class TicketChecker
             return result;
         }
 
-        return CheckTicket(ticket).ToResult();
+        if (root == null)
+        {
+            var result = new TicketCheckResult();
+            result.Errors.Add("Ticket JSON could not be parsed: root object is null.");
+            return result;
+        }
+
+        if (root["WinInfo"] != null || root["StartingBoard"] != null || root["Turns"] != null)
+            return CheckTicket(root.ToObject<TicketDto>()).ToResult();
+
+        return CheckTicket(root.ToObject<Ticket>()).ToResult();
     }
 
     public static TicketCheckResult CheckObject(Ticket? ticket) =>
@@ -139,11 +149,11 @@ public static class TicketChecker
         // ── 1. STRUCTURE ──────────────────────────────────────────────────
         if (t == null) { Add("Structure", "Ticket object present", Status.Fail, "ticket is null"); return report; }
         if (t.WinInfo == null) { Add("Structure", "WinInfo present", Status.Fail, "WinInfo is null"); return report; }
-        if (t.StartingBoard == null || t.StartingBoard.Length != Settings.Default.ROWS)
-        { Add("Structure", "StartingBoard rows", Status.Fail, $"expected {Settings.Default.ROWS} rows, got {t.StartingBoard?.Length ?? 0}"); return report; }
-        for (int r = 0; r < Settings.Default.ROWS; r++)
-            if (t.StartingBoard[r] == null || t.StartingBoard[r].Length != Settings.Default.COLS)
-            { Add("Structure", $"StartingBoard row {r} width", Status.Fail, $"expected {Settings.Default.COLS} cols, got {t.StartingBoard[r]?.Length ?? 0}"); return report; }
+        if (t.StartingBoard == null || t.StartingBoard.Length != Settings.ROWS)
+        { Add("Structure", "StartingBoard rows", Status.Fail, $"expected {Settings.ROWS} rows, got {t.StartingBoard?.Length ?? 0}"); return report; }
+        for (int r = 0; r < Settings.ROWS; r++)
+            if (t.StartingBoard[r] == null || t.StartingBoard[r].Length != Settings.COLS)
+            { Add("Structure", $"StartingBoard row {r} width", Status.Fail, $"expected {Settings.COLS} cols, got {t.StartingBoard[r]?.Length ?? 0}"); return report; }
         Add("Structure", "StartingBoard is 5x5", Status.Pass, "ok");
         CheckStartingBoardCells(t, Add);
 
@@ -154,11 +164,11 @@ public static class TicketChecker
         bool structureOk = true;
         foreach (var (turn, i) in t.Turns.Select((x, i) => (x, i)))
         {
-            if (turn.Pushers == null || turn.Pushers.Length != Settings.Default.COLS)
+            if (turn.Pushers == null || turn.Pushers.Length != Settings.COLS)
             {
                 structureOk = false;
                 Add("Structure", $"Turn {i + 1} pusher count", Status.Fail,
-                    $"expected {Settings.Default.COLS}, got {turn.Pushers?.Length ?? 0}");
+                    $"expected {Settings.COLS}, got {turn.Pushers?.Length ?? 0}");
             }
 
             if (turn.Spawns == null)
@@ -183,13 +193,13 @@ public static class TicketChecker
         else
             Add("SpinCount", "TotalSpins matches Turns.Length", Status.Pass, $"{totalSpins}");
 
-        if (totalSpins < Settings.Default.BASE_SPINS || totalSpins > Settings.Default.MAX_SPINS)
+        if (totalSpins < Settings.BASE_SPINS || totalSpins > Settings.MAX_SPINS)
             Add("SpinCount", "TotalSpins within fixed baseline range", Status.Fail,
-                $"TotalSpins={totalSpins} outside the fixed [{Settings.Default.BASE_SPINS}..{Settings.Default.MAX_SPINS}] range " +
-                $"(BaseSpins is always {Settings.Default.BASE_SPINS}; only EXTRA_SPIN can extend it, up to {Settings.Default.MAX_SPINS} total)");
+                $"TotalSpins={totalSpins} outside the fixed [{Settings.BASE_SPINS}..{Settings.MAX_SPINS}] range " +
+                $"(BaseSpins is always {Settings.BASE_SPINS}; only EXTRA_SPIN can extend it, up to {Settings.MAX_SPINS} total)");
         else
             Add("SpinCount", "TotalSpins within fixed baseline range", Status.Pass,
-                $"{totalSpins} (base {Settings.Default.BASE_SPINS} + {totalSpins - Settings.Default.BASE_SPINS} extra)");
+                $"{totalSpins} (base {Settings.BASE_SPINS} + {totalSpins - Settings.BASE_SPINS} extra)");
 
         CheckWinInfoSchema(t, Add);
 
@@ -202,23 +212,23 @@ public static class TicketChecker
             for (int c = 0; c < turn.Pushers.Length; c++)
             {
                 var p = turn.Pushers[c];
-                bool isFlush = p.FeatureId == Settings.Default.F_FLUSH_ID;
+                bool isFlush = p.FeatureId == Settings.F_FLUSH_ID;
                 if (p.FeatureId.HasValue && !isFlush)
                 {
                     pusherGeometryOk = false;
                     Add("Geometry", $"Turn {i + 1} col {c} pusher feature id", Status.Fail,
-                        $"FeatureId={p.FeatureId} is invalid on a pusher; only FLUSH/PUSH id {Settings.Default.F_FLUSH_ID} is allowed");
+                        $"FeatureId={p.FeatureId} is invalid on a pusher; only FLUSH/PUSH id {Settings.F_FLUSH_ID} is allowed");
                     continue;
                 }
 
-                bool valid = isFlush ? p.PushValue == Settings.Default.ROWS
-                                     : p.PushValue >= Settings.Default.MIN_PUSH && p.PushValue <= Settings.Default.MAX_PUSH;
+                bool valid = isFlush ? p.PushValue == Settings.ROWS
+                                     : p.PushValue >= Settings.MIN_PUSH && p.PushValue <= Settings.MAX_PUSH;
                 if (!valid)
                 {
                     pusherGeometryOk = false;
                     Add("Geometry", $"Turn {i + 1} col {c} push value", Status.Fail,
                         $"PushValue={p.PushValue} FeatureId={p.FeatureId} — not a valid normal push " +
-                        $"({Settings.Default.MIN_PUSH}-{Settings.Default.MAX_PUSH}) or flush ({Settings.Default.ROWS})");
+                        $"({Settings.MIN_PUSH}-{Settings.MAX_PUSH}) or flush ({Settings.ROWS})");
                 }
             }
         }
@@ -246,11 +256,11 @@ public static class TicketChecker
             var seen = new HashSet<int>();
             foreach (var sp in t.Turns[i].Spawns ?? Array.Empty<SpawnDto>())
             {
-                if (sp.Pos < 0 || sp.Pos >= Settings.Default.ROWS * Settings.Default.COLS)
+                if (sp.Pos < 0 || sp.Pos >= Settings.ROWS * Settings.COLS)
                 {
                     spawnPosOk = false;
                     Add("Geometry", $"Turn {i + 1} spawn position range", Status.Fail,
-                        $"Pos={sp.Pos} out of range 0..{Settings.Default.ROWS * Settings.Default.COLS - 1}");
+                        $"Pos={sp.Pos} out of range 0..{Settings.ROWS * Settings.COLS - 1}");
                 }
                 else if (!seen.Add(sp.Pos))
                 {
@@ -329,7 +339,7 @@ public static class TicketChecker
         bool declarationOk = true;
         foreach (var (sym, count) in replay.Totals)
         {
-            if (Settings.Default.IsFeat(sym) || count == 0) continue;
+            if (Settings.IsFeat(sym) || count == 0) continue;
             if (!declaredWin.Contains(sym) && !declaredNonWin.Contains(sym))
             {
                 declarationOk = false;
@@ -366,8 +376,8 @@ public static class TicketChecker
         else
             Add("Feature", "ReTrigger depth at most one", Status.Pass, "ok");
 
-        int extraSpinTokenCount = CountLogicalFeatureSpawns(t, Settings.Default.F_XSPIN);
-        int expectedExtras = totalSpins - Settings.Default.BASE_SPINS;
+        int extraSpinTokenCount = CountLogicalFeatureSpawns(t, Settings.F_XSPIN);
+        int expectedExtras = totalSpins - Settings.BASE_SPINS;
         if (extraSpinTokenCount != expectedExtras)
             Add("Feature", "EXTRA_SPIN token count matches bonus spins", Status.Fail,
                 $"TotalSpins implies {expectedExtras} extra spin(s), but found {extraSpinTokenCount} " +
@@ -390,7 +400,7 @@ public static class TicketChecker
 
         var finalFlush = (finalTurn.Pushers ?? Array.Empty<PusherDto>())
             .Select((pusher, col) => (pusher, col))
-            .FirstOrDefault(item => item.pusher.FeatureId == Settings.Default.F_FLUSH_ID);
+            .FirstOrDefault(item => item.pusher.FeatureId == Settings.F_FLUSH_ID);
         if (finalFlush.pusher != null)
             Add("Feature", "No FLUSH/PUSH on final spin", Status.Fail,
                 $"final turn contains FLUSH/PUSH pusher at col {finalFlush.col}");
@@ -535,9 +545,9 @@ public static class TicketChecker
         Action<string, string, Status, string> add)
     {
         var ok = true;
-        for (var r = 0; r < Settings.Default.ROWS; r++)
+        for (var r = 0; r < Settings.ROWS; r++)
         {
-            for (var c = 0; c < Settings.Default.COLS; c++)
+            for (var c = 0; c < Settings.COLS; c++)
             {
                 var id = t.StartingBoard[r][c].Id;
                 if (id <= 0)
@@ -548,7 +558,7 @@ public static class TicketChecker
                     continue;
                 }
 
-                if (Settings.Default.IsFeat(id) || id == Settings.Default.F_FLUSH_ID)
+                if (Settings.IsFeat(id) || id == Settings.F_FLUSH_ID)
                 {
                     ok = false;
                     add("Schema", $"StartingBoard ({r},{c}) board symbol", Status.Fail,
@@ -565,14 +575,14 @@ public static class TicketChecker
         int extraSpinTokenCount,
         Action<string, string, Status, string> add)
     {
-        var wheelTokenCount = CountLogicalFeatureSpawns(t, Settings.Default.F_WHEEL);
+        var wheelTokenCount = CountLogicalFeatureSpawns(t, Settings.F_WHEEL);
         var flushPusherCount = t.Turns
             .Sum(turn => (turn.Pushers ?? Array.Empty<PusherDto>())
-                .Count(pusher => pusher.FeatureId == Settings.Default.F_FLUSH_ID));
+                .Count(pusher => pusher.FeatureId == Settings.F_FLUSH_ID));
 
-        CheckMax("WHEEL", wheelTokenCount, Settings.Default.FeatureConfig("WHEEL").Max);
-        CheckMax("EXTRA_SPIN", extraSpinTokenCount, Settings.Default.MAX_SPINS - Settings.Default.BASE_SPINS);
-        CheckMax("FLUSH/PUSH", flushPusherCount, Settings.Default.FeatureConfig("FLUSH").Max);
+        CheckMax("WHEEL", wheelTokenCount, Settings.FeatureConfig("WHEEL").Max);
+        CheckMax("EXTRA_SPIN", extraSpinTokenCount, Settings.MAX_SPINS - Settings.BASE_SPINS);
+        CheckMax("FLUSH/PUSH", flushPusherCount, Settings.FeatureConfig("FLUSH").Max);
 
         void CheckMax(string feature, int actual, int max)
         {
@@ -590,7 +600,7 @@ public static class TicketChecker
         Action<string, string, Status, string> add)
     {
         var ok = true;
-        var availableTurns = Settings.Default.BASE_SPINS;
+        var availableTurns = Settings.BASE_SPINS;
 
         for (var turnIndex = 0; turnIndex < t.Turns.Length; turnIndex++)
         {
@@ -607,7 +617,7 @@ public static class TicketChecker
 
             var extrasThisTurn = (turn.Spawns ?? Array.Empty<SpawnDto>())
                 .Where(spawn => spawn.Feature != null)
-                .Sum(spawn => CountFeatureTree(spawn.Feature!, Settings.Default.F_XSPIN));
+                .Sum(spawn => CountFeatureTree(spawn.Feature!, Settings.F_XSPIN));
             var remainingFutureTurns = t.Turns.Length - turnNumber;
 
             if (extrasThisTurn > remainingFutureTurns)
@@ -643,7 +653,7 @@ public static class TicketChecker
     private static decimal ExpectedCashWin(TicketDto gameData, out List<string> errors)
     {
         errors = new List<string>();
-        var settings = Settings.Default;
+        var settings = Settings;
         var total = 0m;
         var tiers = (gameData.WinInfo?.PrizeTiers ?? Array.Empty<PrizeTierDto>())
             .GroupBy(tier => tier.SymId)
@@ -741,7 +751,7 @@ public static class TicketChecker
         var winIds = new HashSet<int>();
         foreach (var win in t.WinInfo.WinSymbols ?? Array.Empty<WinSymbolDto>())
         {
-            if (win.Id <= 0 || Settings.Default.IsFeat(win.Id))
+            if (win.Id <= 0 || Settings.IsFeat(win.Id))
             {
                 ok = false;
                 add("WinInfo", $"Win symbol {win.Id} id", Status.Fail,
@@ -764,7 +774,7 @@ public static class TicketChecker
         var nonWinIds = new HashSet<int>();
         foreach (var nonWin in t.WinInfo.NonWinSymbols ?? Array.Empty<NonWinSymbolDto>())
         {
-            if (nonWin.Id <= 0 || Settings.Default.IsFeat(nonWin.Id))
+            if (nonWin.Id <= 0 || Settings.IsFeat(nonWin.Id))
             {
                 ok = false;
                 add("WinInfo", $"Non-win symbol {nonWin.Id} id", Status.Fail,
@@ -838,16 +848,16 @@ public static class TicketChecker
                     add("Schema", $"{prefix} symbol id", Status.Fail, $"Id={spawn.Id} must be positive");
                 }
 
-                if (spawn.Id == Settings.Default.F_FLUSH_ID)
+                if (spawn.Id == Settings.F_FLUSH_ID)
                 {
                     ok = false;
                     add("Schema", $"{prefix} board symbol", Status.Fail,
-                        $"Id={Settings.Default.F_FLUSH_ID} is FLUSH/PUSH pusher-only and must not appear as a board spawn");
+                        $"Id={Settings.F_FLUSH_ID} is FLUSH/PUSH pusher-only and must not appear as a board spawn");
                 }
 
                 if (spawn.Feature == null)
                 {
-                    if (Settings.Default.IsFeat(spawn.Id))
+                    if (Settings.IsFeat(spawn.Id))
                     {
                         ok = false;
                         add("Schema", $"{prefix} feature payload", Status.Fail,
@@ -873,7 +883,7 @@ public static class TicketChecker
         int depth)
     {
         var ok = true;
-        if (!Settings.Default.IsFeat(feature.FeatureId))
+        if (!Settings.IsFeat(feature.FeatureId))
         {
             ok = false;
             add("Schema", $"{prefix} feature id", Status.Fail,
@@ -887,7 +897,14 @@ public static class TicketChecker
                 $"spawn Id={owningSpawnId} but Feature.FeatureId={feature.FeatureId}");
         }
 
-        if (feature.ConvertToId <= 0 || feature.ConvertToId == Settings.Default.F_FLUSH_ID)
+        if (depth > 0 && feature.FeatureId == Settings.F_WHEEL)
+        {
+            ok = false;
+            add("Schema", $"{prefix} WHEEL ReTrigger payload", Status.Fail,
+                "WHEEL must stay as a physical board feature because its board position controls stack timing");
+        }
+
+        if (feature.ConvertToId <= 0 || feature.ConvertToId == Settings.F_FLUSH_ID)
         {
             ok = false;
             add("Schema", $"{prefix} convert target", Status.Fail,
@@ -908,9 +925,9 @@ public static class TicketChecker
                 $"ConvertToId={feature.ConvertToId} must equal nested FeatureId={feature.ReTrigger[0].FeatureId}");
         }
 
-        if (feature.FeatureId == Settings.Default.F_WHEEL)
+        if (feature.FeatureId == Settings.F_WHEEL)
         {
-            if (!feature.WheelSymbolId.HasValue || feature.WheelSymbolId.Value <= 0 || Settings.Default.IsFeat(feature.WheelSymbolId.Value))
+            if (!feature.WheelSymbolId.HasValue || feature.WheelSymbolId.Value <= 0 || Settings.IsFeat(feature.WheelSymbolId.Value))
             {
                 ok = false;
                 add("Schema", $"{prefix} WHEEL symbol", Status.Fail,
@@ -918,12 +935,12 @@ public static class TicketChecker
             }
 
             if (!feature.WheelStackValue.HasValue
-                || feature.WheelStackValue.Value < Settings.Default.MIN_WHEEL_STACK_VALUE
-                || feature.WheelStackValue.Value > Settings.Default.MAX_WHEEL_STACK_VALUE)
+                || feature.WheelStackValue.Value < Settings.MIN_WHEEL_STACK_VALUE
+                || feature.WheelStackValue.Value > Settings.MAX_WHEEL_STACK_VALUE)
             {
                 ok = false;
                 add("Schema", $"{prefix} WHEEL stack value", Status.Fail,
-                    $"WheelStackValue={feature.WheelStackValue} must be in {Settings.Default.MIN_WHEEL_STACK_VALUE}..{Settings.Default.MAX_WHEEL_STACK_VALUE}");
+                    $"WheelStackValue={feature.WheelStackValue} must be in {Settings.MIN_WHEEL_STACK_VALUE}..{Settings.MAX_WHEEL_STACK_VALUE}");
             }
         }
         else if (feature.WheelSymbolId.HasValue || feature.WheelStackValue.HasValue)
@@ -933,9 +950,9 @@ public static class TicketChecker
                 "WheelSymbolId/WheelStackValue are only valid for WHEEL features");
         }
 
-        if (feature.FeatureId == Settings.Default.F_PRUP)
+        if (feature.FeatureId == Settings.F_PRUP)
         {
-            if (!feature.UpgradeSymbolId.HasValue || feature.UpgradeSymbolId.Value <= 0 || Settings.Default.IsFeat(feature.UpgradeSymbolId.Value))
+            if (!feature.UpgradeSymbolId.HasValue || feature.UpgradeSymbolId.Value <= 0 || Settings.IsFeat(feature.UpgradeSymbolId.Value))
             {
                 ok = false;
                 add("Schema", $"{prefix} PRIZE_UPGRADE symbol", Status.Fail,
@@ -1002,11 +1019,11 @@ public static class TicketChecker
     private static ReplayResult ReplayTicket(TicketDto t)
     {
         var result = new ReplayResult();
-        var board  = new ReplayCell?[Settings.Default.ROWS, Settings.Default.COLS];
+        var board  = new ReplayCell?[Settings.ROWS, Settings.COLS];
 
-        for (int r = 0; r < Settings.Default.ROWS; r++)
+        for (int r = 0; r < Settings.ROWS; r++)
         {
-            for (int c = 0; c < Settings.Default.COLS; c++)
+            for (int c = 0; c < Settings.COLS; c++)
             {
                 board[r, c] = new ReplayCell { Sym = t.StartingBoard[r][c].Id };
             }
@@ -1019,9 +1036,9 @@ public static class TicketChecker
             // Phase 1: FlatStale — any feature cell still sitting around from a
             // previous turn (shouldn't normally happen, but defensive) reverts
             // to its converted symbol before collection.
-            for (int r = 0; r < Settings.Default.ROWS; r++)
+            for (int r = 0; r < Settings.ROWS; r++)
             {
-                for (int c = 0; c < Settings.Default.COLS; c++)
+                for (int c = 0; c < Settings.COLS; c++)
                 {
                     if (board[r, c]?.IsFeat == true)
                         board[r, c] = new ReplayCell { Sym = ResolveConvert(board[r, c]!) };
@@ -1029,13 +1046,13 @@ public static class TicketChecker
             }
 
             // Phase 2: Collect
-            for (int c = 0; c < Settings.Default.COLS; c++)
+            for (int c = 0; c < Settings.COLS; c++)
             {
                 var pusher = turn.Pushers[c];
-                bool isFlush = pusher.FeatureId == Settings.Default.F_FLUSH_ID;
+                bool isFlush = pusher.FeatureId == Settings.F_FLUSH_ID;
                 if (isFlush)
                 {
-                    for (int r = 0; r < Settings.Default.ROWS; r++)
+                    for (int r = 0; r < Settings.ROWS; r++)
                     {
                         if (board[r, c] != null) Acc(result.Totals, board[r, c]!);
                         board[r, c] = null;
@@ -1044,9 +1061,9 @@ public static class TicketChecker
                 else
                 {
                     int push = pusher.PushValue;
-                    for (int r = Settings.Default.ROWS - push; r < Settings.Default.ROWS; r++)
+                    for (int r = Settings.ROWS - push; r < Settings.ROWS; r++)
                         if (board[r, c] != null) Acc(result.Totals, board[r, c]!);
-                    for (int r = Settings.Default.ROWS - 1; r >= 0; r--)
+                    for (int r = Settings.ROWS - 1; r >= 0; r--)
                     {
                         int src = r - push;
                         board[r, c] = src >= 0 ? board[src, c] : null;
@@ -1067,7 +1084,7 @@ public static class TicketChecker
             // Phase 4: ApplySpawns
             foreach (var sp in turn.Spawns ?? Array.Empty<SpawnDto>())
             {
-                int r = sp.Pos / Settings.Default.COLS, c = sp.Pos % Settings.Default.COLS;
+                int r = sp.Pos / Settings.COLS, c = sp.Pos % Settings.COLS;
                 if (board[r, c] != null)
                     spawnBalance.OverwrittenSpawnPositions.Add(sp.Pos);
 
@@ -1089,9 +1106,9 @@ public static class TicketChecker
 
             // Check: no cell left null after spawns
             bool anyMissing = false;
-            for (int r = 0; r < Settings.Default.ROWS; r++)
+            for (int r = 0; r < Settings.ROWS; r++)
             {
-                for (int c = 0; c < Settings.Default.COLS; c++)
+                for (int c = 0; c < Settings.COLS; c++)
                 {
                     if (board[r, c] == null) anyMissing = true;
                 }
@@ -1118,14 +1135,14 @@ public static class TicketChecker
         do
         {
             any = false;
-            for (int r = 0; r < Settings.Default.ROWS; r++)
+            for (int r = 0; r < Settings.ROWS; r++)
             {
-                for (int c = 0; c < Settings.Default.COLS; c++)
+                for (int c = 0; c < Settings.COLS; c++)
                 {
                     var fc = board[r, c];
                     if (fc?.IsFeat != true) continue;
 
-                    var isWheel = fc.FeatureId == Settings.Default.F_WHEEL;
+                    var isWheel = fc.FeatureId == Settings.F_WHEEL;
                     if (isWheel != wheelPass) continue;
 
                     if (isWheel)
@@ -1133,7 +1150,7 @@ public static class TicketChecker
 
                     board[r, c] = fc.ReTrigger is { Length: > 0 }
                         ? FeatureCell(fc.ReTrigger[0])
-                        : new ReplayCell { Sym = ResolveConvert(fc) };
+                        : ConvertCell(fc);
                     any = true;
                 }
             }
@@ -1151,13 +1168,13 @@ public static class TicketChecker
 
         int multiplier = fc.WheelStackValue + 1;
         int sym = fc.WheelSymbolId;
-        for (int rr = 0; rr < Settings.Default.ROWS; rr++)
+        for (int rr = 0; rr < Settings.ROWS; rr++)
         {
-            for (int cc = 0; cc < Settings.Default.COLS; cc++)
+            for (int cc = 0; cc < Settings.COLS; cc++)
             {
                 var cell = board[rr, cc];
                 if (cell != null && !cell.IsFeat && cell.Sym == sym)
-                    cell.Stack = Math.Min(Settings.Default.MAX_COIN_STACK, cell.Stack + multiplier - 1);
+                    cell.Stack = Math.Min(Settings.MAX_COIN_STACK, cell.Stack + multiplier - 1);
             }
         }
 
@@ -1189,24 +1206,38 @@ public static class TicketChecker
     /// </summary>
     private static int ResolveConvert(ReplayCell fc)
     {
-        if (Settings.Default.IsFeat(fc.ConvertToId) && fc.ReTrigger.Length > 0)
+        if (Settings.IsFeat(fc.ConvertToId) && fc.ReTrigger.Length > 0)
         {
             var link = fc.ReTrigger[0];
             while (link.ReTrigger is { Length: > 0 })
                 link = link.ReTrigger[0];
-            return link.ConvertToId > 0 ? link.ConvertToId : Settings.Default.F_COIN;
+            return link.ConvertToId > 0 ? link.ConvertToId : Settings.F_COIN;
         }
-        return fc.ConvertToId > 0 ? fc.ConvertToId : Settings.Default.F_COIN;
+        return fc.ConvertToId > 0 ? fc.ConvertToId : Settings.F_COIN;
+    }
+
+    private static ReplayCell ConvertCell(ReplayCell fc)
+    {
+        var convertTo = ResolveConvert(fc);
+        var converted = new ReplayCell { Sym = convertTo, Stack = 1 };
+        if (fc.FeatureId == Settings.F_WHEEL && fc.WheelSymbolId == convertTo)
+        {
+            converted.Stack = Math.Min(
+                Settings.MAX_COIN_STACK,
+                Math.Max(1, fc.WheelStackValue + 1));
+        }
+
+        return converted;
     }
 
     private static bool BoardHasFeatureCell(ReplayCell?[,] board, bool wheelPass)
     {
-        for (int r = 0; r < Settings.Default.ROWS; r++)
+        for (int r = 0; r < Settings.ROWS; r++)
         {
-            for (int c = 0; c < Settings.Default.COLS; c++)
+            for (int c = 0; c < Settings.COLS; c++)
             {
                 var cell = board[r, c];
-                if (cell?.IsFeat == true && (cell.FeatureId == Settings.Default.F_WHEEL) == wheelPass)
+                if (cell?.IsFeat == true && (cell.FeatureId == Settings.F_WHEEL) == wheelPass)
                     return true;
             }
         }
@@ -1216,9 +1247,9 @@ public static class TicketChecker
     private static int CountEmptyCells(ReplayCell?[,] board)
     {
         int count = 0;
-        for (int r = 0; r < Settings.Default.ROWS; r++)
+        for (int r = 0; r < Settings.ROWS; r++)
         {
-            for (int c = 0; c < Settings.Default.COLS; c++)
+            for (int c = 0; c < Settings.COLS; c++)
             {
                 if (board[r, c] == null) count++;
             }
@@ -1228,19 +1259,19 @@ public static class TicketChecker
 
     private static void Acc(Dictionary<int, int> totals, ReplayCell cell)
     {
-        if (Settings.Default.IsFeat(cell.Sym)) return;
+        if (Settings.IsFeat(cell.Sym)) return;
         totals.TryGetValue(cell.Sym, out int existing);
         totals[cell.Sym] = existing + cell.Stack;
     }
 
     private static ReplayCell?[,] RotCW(ReplayCell?[,] b)
     {
-        var r = new ReplayCell?[Settings.Default.ROWS, Settings.Default.COLS];
-        for (int row = 0; row < Settings.Default.ROWS; row++)
+        var r = new ReplayCell?[Settings.ROWS, Settings.COLS];
+        for (int row = 0; row < Settings.ROWS; row++)
         {
-            for (int col = 0; col < Settings.Default.COLS; col++)
+            for (int col = 0; col < Settings.COLS; col++)
             {
-                r[col, Settings.Default.ROWS - 1 - row] = b[row, col];
+                r[col, Settings.ROWS - 1 - row] = b[row, col];
             }
         }
         return r;
@@ -1265,7 +1296,7 @@ public static class TicketChecker
 
     private static void AccumulatePrizeUpgradeTokens(FeatureDto feature, ReplayResult result)
     {
-        if (feature.FeatureId == Settings.Default.F_PRUP && feature.UpgradeSymbolId.HasValue)
+        if (feature.FeatureId == Settings.F_PRUP && feature.UpgradeSymbolId.HasValue)
         {
             // PRIZE_UPGRADE doesn't carry an explicit tier number in the
             // public schema — tier is inferred by COUNTING how many

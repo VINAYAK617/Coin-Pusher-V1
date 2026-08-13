@@ -14,6 +14,7 @@ public enum CoinPusherTicketGenerationRequestStatus
     InvalidPrizeLadderRow,
     InvalidFeatureIds,
     InvalidFeatureConfig,
+    InvalidPpsConfig,
 }
 
 public sealed class CoinPusherTicketGenerationRequestValidationResult
@@ -33,18 +34,6 @@ public sealed class CoinPusherTicketGenerationRequestValidationResult
 
 public sealed class CoinPusherTicketGenerationRequestValidator
 {
-    private readonly Settings _settings;
-
-    public CoinPusherTicketGenerationRequestValidator()
-        : this(new Settings())
-    {
-    }
-
-    public CoinPusherTicketGenerationRequestValidator(Settings settings)
-    {
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-    }
-
     public CoinPusherTicketGenerationRequestValidationResult Validate(
         IReadOnlyList<decimal>? prizeAmounts)
     {
@@ -73,35 +62,35 @@ public sealed class CoinPusherTicketGenerationRequestValidator
 
     private CoinPusherTicketGenerationRequestValidationResult ValidateSettings()
     {
-        if (_settings.ROWS <= 0 || _settings.COLS <= 0)
+        if (Settings.ROWS <= 0 || Settings.COLS <= 0)
         {
             return Fail(
                 CoinPusherTicketGenerationRequestStatus.InvalidGridShape,
-                $"grid must be positive, found ROWS={_settings.ROWS}, COLS={_settings.COLS}");
+                $"grid must be positive, found ROWS={Settings.ROWS}, COLS={Settings.COLS}");
         }
 
-        if (_settings.MIN_PUSH < 1 || _settings.MAX_PUSH < _settings.MIN_PUSH || _settings.MAX_PUSH >= _settings.ROWS)
+        if (Settings.MIN_PUSH < 1 || Settings.MAX_PUSH < Settings.MIN_PUSH || Settings.MAX_PUSH >= Settings.ROWS)
         {
             return Fail(
                 CoinPusherTicketGenerationRequestStatus.InvalidPushRange,
-                $"normal push range must be 1..ROWS-1, found MIN_PUSH={_settings.MIN_PUSH}, MAX_PUSH={_settings.MAX_PUSH}, ROWS={_settings.ROWS}");
+                $"normal push range must be 1..ROWS-1, found MIN_PUSH={Settings.MIN_PUSH}, MAX_PUSH={Settings.MAX_PUSH}, ROWS={Settings.ROWS}");
         }
 
-        if (_settings.BASE_SPINS < 1 || _settings.MAX_SPINS < _settings.BASE_SPINS)
+        if (Settings.BASE_SPINS < 1 || Settings.MAX_SPINS < Settings.BASE_SPINS)
         {
             return Fail(
                 CoinPusherTicketGenerationRequestStatus.InvalidSpinRange,
-                $"spin range invalid, found BASE_SPINS={_settings.BASE_SPINS}, MAX_SPINS={_settings.MAX_SPINS}");
+                $"spin range invalid, found BASE_SPINS={Settings.BASE_SPINS}, MAX_SPINS={Settings.MAX_SPINS}");
         }
 
-        if (_settings.MAX_COIN_STACK < 1
-            || _settings.MIN_WHEEL_STACK_VALUE < 1
-            || _settings.MAX_WHEEL_STACK_VALUE < _settings.MIN_WHEEL_STACK_VALUE
-            || _settings.MAX_WHEEL_STACK_VALUE > _settings.MAX_COIN_STACK)
+        if (Settings.MAX_COIN_STACK < 1
+            || Settings.MIN_WHEEL_STACK_VALUE < 1
+            || Settings.MAX_WHEEL_STACK_VALUE < Settings.MIN_WHEEL_STACK_VALUE
+            || Settings.MAX_WHEEL_STACK_VALUE > Settings.MAX_COIN_STACK)
         {
             return Fail(
                 CoinPusherTicketGenerationRequestStatus.InvalidStackRange,
-                $"stack range invalid, found MAX_COIN_STACK={_settings.MAX_COIN_STACK}, wheel={_settings.MIN_WHEEL_STACK_VALUE}..{_settings.MAX_WHEEL_STACK_VALUE}");
+                $"stack range invalid, found MAX_COIN_STACK={Settings.MAX_COIN_STACK}, wheel={Settings.MIN_WHEEL_STACK_VALUE}..{Settings.MAX_WHEEL_STACK_VALUE}");
         }
 
         var ladderCheck = ValidatePrizeLadder();
@@ -112,17 +101,21 @@ public sealed class CoinPusherTicketGenerationRequestValidator
         if (!featureIdCheck.IsValid)
             return featureIdCheck;
 
-        return ValidateFeatureConfig();
+        var featureConfig = ValidateFeatureConfig();
+        if (!featureConfig.IsValid)
+            return featureConfig;
+
+        return ValidatePpsConfig();
     }
 
     private CoinPusherTicketGenerationRequestValidationResult ValidatePrizeLadder()
     {
-        if (_settings.PrizeLadderRows == null || _settings.PrizeLadderRows.Count == 0)
+        if (Settings.PrizeLadderRows == null || Settings.PrizeLadderRows.Count == 0)
             return Fail(CoinPusherTicketGenerationRequestStatus.MissingPrizeLadder, "settings.PrizeLadderRows is empty");
 
-        for (var index = 0; index < _settings.PrizeLadderRows.Count; index++)
+        for (var index = 0; index < Settings.PrizeLadderRows.Count; index++)
         {
-            var row = _settings.PrizeLadderRows[index];
+            var row = Settings.PrizeLadderRows[index];
             if (row.Target <= 0)
             {
                 return Fail(
@@ -162,12 +155,12 @@ public sealed class CoinPusherTicketGenerationRequestValidator
 
     private CoinPusherTicketGenerationRequestValidationResult ValidateFeatureIds()
     {
-        var ids = new[] { _settings.F_WHEEL, _settings.F_XSPIN, _settings.F_PRUP, _settings.F_FLUSH_ID };
-        if (ids.Any(id => id <= 0) || ids.Distinct().Count() != ids.Length || ids.Contains(_settings.F_COIN))
+        var ids = new[] { Settings.F_WHEEL, Settings.F_XSPIN, Settings.F_PRUP, Settings.F_FLUSH_ID };
+        if (ids.Any(id => id <= 0) || ids.Distinct().Count() != ids.Length || ids.Contains(Settings.F_COIN))
         {
             return Fail(
                 CoinPusherTicketGenerationRequestStatus.InvalidFeatureIds,
-                $"feature ids must be positive, unique, and different from F_COIN={_settings.F_COIN}");
+                $"feature ids must be positive, unique, and different from F_COIN={Settings.F_COIN}");
         }
 
         return new CoinPusherTicketGenerationRequestValidationResult(
@@ -179,10 +172,10 @@ public sealed class CoinPusherTicketGenerationRequestValidator
     {
         var configs = new[]
         {
-            ("WHEEL", _settings.WheelFeatureConfig),
-            ("FLUSH", _settings.FlushFeatureConfig),
-            ("EXTRA_SPIN", _settings.ExtraSpinFeatureConfig),
-            ("PRIZE_UPGRADE", _settings.PrizeUpgradeFeatureConfig),
+            ("WHEEL", Settings.WheelFeatureConfig),
+            ("FLUSH", Settings.FlushFeatureConfig),
+            ("EXTRA_SPIN", Settings.ExtraSpinFeatureConfig),
+            ("PRIZE_UPGRADE", Settings.PrizeUpgradeFeatureConfig),
         };
 
         foreach (var config in configs)
@@ -202,17 +195,100 @@ public sealed class CoinPusherTicketGenerationRequestValidator
             }
         }
 
-        if (_settings.ExtraSpinFeatureConfig.Max > _settings.MAX_SPINS - _settings.BASE_SPINS)
+        if (Settings.ExtraSpinFeatureConfig.Max > Settings.MAX_SPINS - Settings.BASE_SPINS)
         {
             return Fail(
                 CoinPusherTicketGenerationRequestStatus.InvalidFeatureConfig,
-                $"EXTRA_SPIN max {_settings.ExtraSpinFeatureConfig.Max} exceeds available extra turns {_settings.MAX_SPINS - _settings.BASE_SPINS}");
+                $"EXTRA_SPIN max {Settings.ExtraSpinFeatureConfig.Max} exceeds available extra turns {Settings.MAX_SPINS - Settings.BASE_SPINS}");
         }
 
         return new CoinPusherTicketGenerationRequestValidationResult(
             CoinPusherTicketGenerationRequestStatus.Valid,
             "ok");
     }
+
+    private CoinPusherTicketGenerationRequestValidationResult ValidatePpsConfig()
+    {
+        if (Settings.PpsCombinations == null || Settings.PpsCombinations.Count == 0)
+            return Ok();
+
+        if (Settings.PpsSpinRules == null || Settings.PpsSpinRules.Count == 0)
+            return Fail(CoinPusherTicketGenerationRequestStatus.InvalidPpsConfig, "PPS combinations are configured but PPS spin rules are empty");
+
+        foreach (var rule in Settings.PpsSpinRules)
+        {
+            if (rule.MinWinInclusive < 0m
+                || (rule.MaxWinExclusive.HasValue && rule.MaxWinExclusive.Value <= rule.MinWinInclusive)
+                || rule.MinExtraGo < 0
+                || rule.MaxExtraGo < rule.MinExtraGo
+                || rule.MaxExtraGo > Settings.MAX_SPINS - Settings.BASE_SPINS
+                || rule.MaxExtraGo > Settings.ExtraSpinFeatureConfig.Max)
+            {
+                return Fail(
+                    CoinPusherTicketGenerationRequestStatus.InvalidPpsConfig,
+                    $"invalid PPS spin rule for win range {rule.MinWinInclusive}..{rule.MaxWinExclusive?.ToString() ?? "max"}");
+            }
+
+            if (rule.MinWinningTurn.HasValue != rule.MaxWinningTurn.HasValue
+                || (rule.MinWinningTurn.HasValue && rule.MaxWinningTurn!.Value < rule.MinWinningTurn.Value))
+            {
+                return Fail(
+                    CoinPusherTicketGenerationRequestStatus.InvalidPpsConfig,
+                    $"invalid PPS winning-turn range for win range {rule.MinWinInclusive}..{rule.MaxWinExclusive?.ToString() ?? "max"}");
+            }
+        }
+
+        foreach (var combination in Settings.PpsCombinations)
+        {
+            var check = ValidatePpsCombination(combination);
+            if (!check.IsValid)
+                return check;
+        }
+
+        return Ok();
+    }
+
+    private CoinPusherTicketGenerationRequestValidationResult ValidatePpsCombination(
+        PpsPrizeCombination combination)
+    {
+        if (combination.Id <= 0 || combination.TotalPrize <= 0m)
+        {
+            return Fail(
+                CoinPusherTicketGenerationRequestStatus.InvalidPpsConfig,
+                $"PPS combination #{combination.Id} has invalid id or total prize {combination.TotalPrize}");
+        }
+
+        if (combination.Components == null || combination.Components.Count == 0)
+            return Fail(CoinPusherTicketGenerationRequestStatus.InvalidPpsConfig, $"PPS combination #{combination.Id} has no components");
+
+        var duplicate = combination.Components
+            .GroupBy(component => component.SymbolId)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate != null)
+            return Fail(CoinPusherTicketGenerationRequestStatus.InvalidPpsConfig, $"PPS combination #{combination.Id} repeats symbol {duplicate.Key}");
+
+        var total = 0m;
+        foreach (var component in combination.Components)
+        {
+            if (component.SymbolId < 1 || component.SymbolId > Settings.PrizeLadderRows.Count)
+                return Fail(CoinPusherTicketGenerationRequestStatus.InvalidPpsConfig, $"PPS combination #{combination.Id} references symbol {component.SymbolId}");
+
+            var row = Settings.PrizeLadderRows[component.SymbolId - 1];
+            if (component.Tier < 0 || component.Tier >= row.Tiers.Count)
+                return Fail(CoinPusherTicketGenerationRequestStatus.InvalidPpsConfig, $"PPS combination #{combination.Id} references symbol {component.SymbolId} tier {component.Tier}");
+
+            total += row.Tiers[component.Tier];
+        }
+
+        return total == combination.TotalPrize
+            ? Ok()
+            : Fail(
+                CoinPusherTicketGenerationRequestStatus.InvalidPpsConfig,
+                $"PPS combination #{combination.Id} components total {total}, expected {combination.TotalPrize}");
+    }
+
+    private static CoinPusherTicketGenerationRequestValidationResult Ok() =>
+        new(CoinPusherTicketGenerationRequestStatus.Valid, "ok");
 
     private static CoinPusherTicketGenerationRequestValidationResult Fail(
         CoinPusherTicketGenerationRequestStatus status,

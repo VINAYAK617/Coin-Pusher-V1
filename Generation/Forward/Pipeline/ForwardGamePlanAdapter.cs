@@ -31,13 +31,6 @@ internal sealed class ForwardGamePlanAdapterResult
 
 internal sealed class ForwardGamePlanAdapter
 {
-    private readonly Settings _settings;
-
-    internal ForwardGamePlanAdapter(Settings settings)
-    {
-        _settings = settings;
-    }
-
     internal ForwardGamePlanAdapterResult Adapt(ForwardTicketBuildResult? build)
     {
         if (build == null)
@@ -102,20 +95,20 @@ internal sealed class ForwardGamePlanAdapter
         ForwardRecordedTurn turn,
         Cell?[,] startingBoard)
     {
-        if (turn.Pushers.Count != _settings.COLS)
+        if (turn.Pushers.Count != Settings.COLS)
         {
             return SpinBuildResult.Fail(Fail(
                 ForwardGamePlanAdapterStatus.InvalidRecordedTurn,
-                $"turn {turn.Turn}: expected {_settings.COLS} pushers, got {turn.Pushers.Count}"));
+                $"turn {turn.Turn}: expected {Settings.COLS} pushers, got {turn.Pushers.Count}"));
         }
 
-        var push = new int[_settings.COLS];
-        var flush = new bool[_settings.COLS];
-        for (var col = 0; col < _settings.COLS; col++)
+        var push = new int[Settings.COLS];
+        var flush = new bool[Settings.COLS];
+        for (var col = 0; col < Settings.COLS; col++)
         {
             var pusher = turn.Pushers[col];
-            flush[col] = pusher.FeatureId == _settings.F_FLUSH_ID;
-            if (pusher.FeatureId.HasValue && pusher.FeatureId.Value != _settings.F_FLUSH_ID)
+            flush[col] = pusher.FeatureId == Settings.F_FLUSH_ID;
+            if (pusher.FeatureId.HasValue && pusher.FeatureId.Value != Settings.F_FLUSH_ID)
             {
                 return SpinBuildResult.Fail(Fail(
                     ForwardGamePlanAdapterStatus.InvalidRecordedTurn,
@@ -130,7 +123,7 @@ internal sealed class ForwardGamePlanAdapter
         var tokenSlots = new List<(int r, int c)>();
         foreach (var spawn in turn.Spawns)
         {
-            if (spawn.Row < 0 || spawn.Row >= _settings.ROWS || spawn.Col < 0 || spawn.Col >= _settings.COLS)
+            if (spawn.Row < 0 || spawn.Row >= Settings.ROWS || spawn.Col < 0 || spawn.Col >= Settings.COLS)
             {
                 return SpinBuildResult.Fail(Fail(
                     ForwardGamePlanAdapterStatus.InvalidRecordedTurn,
@@ -154,8 +147,8 @@ internal sealed class ForwardGamePlanAdapter
         return SpinBuildResult.Ok(new SpinPlan
         {
             Spin = turn.Turn,
-            IsExtra = turn.Turn > _settings.BASE_SPINS,
-            Board = turn.Turn == 1 ? CloneBoard(startingBoard) : new Cell?[_settings.ROWS, _settings.COLS],
+            IsExtra = turn.Turn > Settings.BASE_SPINS,
+            Board = turn.Turn == 1 ? CloneBoard(startingBoard) : new Cell?[Settings.ROWS, Settings.COLS],
             Push = push,
             Flush = flush,
             Spawns = spawns,
@@ -167,18 +160,18 @@ internal sealed class ForwardGamePlanAdapter
 
     private string FeatureName(int symbol)
     {
-        if (symbol == _settings.F_WHEEL) return "WHEEL";
-        if (symbol == _settings.F_XSPIN) return "EXTRA_SPIN";
-        if (symbol == _settings.F_PRUP) return "PRIZE_UPGRADE";
+        if (symbol == Settings.F_WHEEL) return "WHEEL";
+        if (symbol == Settings.F_XSPIN) return "EXTRA_SPIN";
+        if (symbol == Settings.F_PRUP) return "PRIZE_UPGRADE";
         return "";
     }
 
     private Cell?[,] CloneBoard(Cell?[,] board)
     {
-        var clone = new Cell?[_settings.ROWS, _settings.COLS];
-        for (var row = 0; row < _settings.ROWS; row++)
+        var clone = new Cell?[Settings.ROWS, Settings.COLS];
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < _settings.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
                 clone[row, col] = board[row, col]?.Clone();
         }
 
@@ -192,7 +185,7 @@ internal sealed class ForwardGamePlanAdapter
     {
         var symbols = replay.Keys
             .Concat(expected.Keys)
-            .Where(symbol => symbol >= 1 && symbol <= maxSymbol && !_settings.IsFeat(symbol))
+            .Where(symbol => symbol >= 1 && symbol <= maxSymbol && !Settings.IsFeat(symbol))
             .Distinct()
             .OrderBy(symbol => symbol);
 

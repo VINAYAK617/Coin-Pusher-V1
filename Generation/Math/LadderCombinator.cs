@@ -93,14 +93,12 @@ public sealed class LadderCombinator
     private readonly List<PrizeLadderRow>                _rows;
     private readonly Dictionary<decimal, List<LadderCandidate>> _lookup;
     private readonly Random                              _rng;
-    private readonly Settings                            _settings;
 
-    public LadderCombinator(IReadOnlyList<PrizeLadderRow> rows, int? seed = null, Settings? settings = null)
+    public LadderCombinator(IReadOnlyList<PrizeLadderRow> rows, int? seed = null)
     {
         _rows   = rows.ToList();
         _lookup = BuildLookup(_rows);
         _rng    = seed.HasValue ? new Random(seed.Value) : new Random();
-        _settings = settings ?? Settings.Default;
     }
 
     /// <summary>All amounts that have at least one candidate, sorted ascending.</summary>
@@ -392,7 +390,7 @@ public sealed class LadderCombinator
         if (list.Count == 0) return false;
         var targets = list.ToDictionary(e => e.Sym, e => e.Target);
         var requiredPrizeUpgrades = list.Sum(e => Math.Max(0, e.Tier));
-        if (requiredPrizeUpgrades > _settings.PrizeUpgradeFeatureConfig.Max)
+        if (requiredPrizeUpgrades > Settings.PrizeUpgradeFeatureConfig.Max)
             return false;
 
         var maxSym = SymbolPoolSizeFor(list.Count);
@@ -401,9 +399,9 @@ public sealed class LadderCombinator
             .ToArray();
         if (fillSymbols.Length < 2) return false;
 
-        var maxWheels = Math.Min(_settings.WheelFeatureConfig.Max, list.Count);
-        var maxFlushes = Math.Min(_settings.FlushFeatureConfig.Max, _settings.COLS - 1);
-        var maxExtras = Math.Min(_settings.ExtraSpinFeatureConfig.Max, _settings.MAX_SPINS - _settings.BASE_SPINS);
+        var maxWheels = Math.Min(Settings.WheelFeatureConfig.Max, list.Count);
+        var maxFlushes = Math.Min(Settings.FlushFeatureConfig.Max, Settings.COLS);
+        var maxExtras = Math.Min(Settings.ExtraSpinFeatureConfig.Max, Settings.MAX_SPINS - Settings.BASE_SPINS);
 
         for (var wheels = 0; wheels <= maxWheels; wheels++)
         {
@@ -411,7 +409,7 @@ public sealed class LadderCombinator
             {
                 for (var extras = 0; extras <= maxExtras; extras++)
                 {
-                    var totalSpins = Settings.Default.BASE_SPINS + extras;
+                    var totalSpins = Settings.BASE_SPINS + extras;
                     var wheelFireSpins = Math.Min(wheels, Math.Max(0, totalSpins - 2));
                     var physWins = CapacityAnalyzer.PhysicalWins(targets, wheels);
                     var tokenLoad = wheels + extras + requiredPrizeUpgrades;
@@ -565,7 +563,7 @@ public sealed class LadderCombinator
         new()
         {
             Targets = new Dictionary<int, int>(),
-            BaseSpins = _settings.BASE_SPINS,
+            BaseSpins = Settings.BASE_SPINS,
             Required = new Dictionary<string, int>(),
             PrizeTiers = null,
             PrizeValues = BuildPrizeValues(Enumerable.Range(1, _rows.Count)),
@@ -608,7 +606,7 @@ public sealed class LadderCombinator
     }
 
     /// <summary>
-    /// BaseSpins is always fixed at Settings.Default.BASE_SPINS (=5) — never computed from physWins
+    /// BaseSpins is always fixed at Settings.BASE_SPINS (=5) — never computed from physWins
     /// or filler capacity. Any additional spin capacity needed comes from the
     /// EXTRA_SPIN feature (decided later, in Planner.ResolveFeatures, alongside
     /// WHEEL/FLUSH), not from this method.
@@ -617,7 +615,7 @@ public sealed class LadderCombinator
     {
         _ = target;
         _ = tier;
-        return _settings.BASE_SPINS;
+        return Settings.BASE_SPINS;
     }
 
     /// <summary>Same fixed baseline for bundled multi-symbol tickets.</summary>
@@ -626,7 +624,7 @@ public sealed class LadderCombinator
         _ = physWins;
         _ = tier;
         _ = fillSymCount;
-        return _settings.BASE_SPINS;
+        return Settings.BASE_SPINS;
     }
 
     private int SymbolPoolSizeFor(int targetCount) =>

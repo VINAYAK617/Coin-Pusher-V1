@@ -77,13 +77,6 @@ internal sealed class ForwardFeatureBudgetPlanner
     private const string ExtraSpin = "EXTRA_SPIN";
     private const string PrizeUpgrade = "PRIZE_UPGRADE";
 
-    private readonly Settings _settings;
-
-    internal ForwardFeatureBudgetPlanner(Settings settings)
-    {
-        _settings = settings;
-    }
-
     internal ForwardFeatureBudgetResult Plan(
         MathInput? input,
         ForwardObjectives? objectives,
@@ -95,11 +88,11 @@ internal sealed class ForwardFeatureBudgetPlanner
             return Fail(ForwardFeatureBudgetStatus.MissingInput, "MathInput.Required is null");
         if (objectives == null)
             return Fail(ForwardFeatureBudgetStatus.MissingObjectives, "forward objectives are missing");
-        if (input.BaseSpins != _settings.BASE_SPINS)
+        if (input.BaseSpins != Settings.BASE_SPINS)
         {
             return Fail(
                 ForwardFeatureBudgetStatus.InvalidBaseSpins,
-                $"BaseSpins={input.BaseSpins}, expected configured base {_settings.BASE_SPINS}");
+                $"BaseSpins={input.BaseSpins}, expected configured base {Settings.BASE_SPINS}");
         }
 
         var requiredCheck = RequiredCounts(input.Required);
@@ -136,10 +129,17 @@ internal sealed class ForwardFeatureBudgetPlanner
             wheelCount,
             flushCount,
             extraGoCount,
-            requiredPrizeUpgradeCount);
+            requiredPrizeUpgradeCount,
+            input.LockExtraGoCount);
         wheelCount = capacityExpansion.WheelCount;
         flushCount = capacityExpansion.FlushCount;
         extraGoCount = capacityExpansion.ExtraGoCount;
+        if (!input.LockExtraGoCount)
+        {
+            extraGoCount = Math.Max(
+                extraGoCount,
+                MinimumExtraGoForVisualBreathing(objectives, input.BaseSpins));
+        }
 
         capCheck = CheckCaps(
             wheelCount,
@@ -153,22 +153,23 @@ internal sealed class ForwardFeatureBudgetPlanner
         var hasOptional = false;
 
         if (objectives.IsNoWin
+            && !input.LockExtraGoCount
             && extraGoCount < MaxExtraGo(input.BaseSpins)
-            && rng.NextDouble() < _settings.PNoWinExtraGoOptional)
+            && rng.NextDouble() < Settings.PNoWinExtraGoOptional)
         {
             extraGoCount++;
             hasOptional = true;
         }
 
         if (CanAddOptionalFlush(objectives)
-            && flushCount < _settings.FlushFeatureConfig.Max
-            && rng.NextDouble() < _settings.PFlushOptional)
+            && flushCount < Settings.FlushFeatureConfig.Max
+            && rng.NextDouble() < Settings.PFlushOptional)
         {
             flushCount++;
             hasOptional = true;
         }
 
-        var optionalFeatureTicket = rng.NextDouble() < _settings.POptionalFeatureTicket;
+        var optionalFeatureTicket = rng.NextDouble() < Settings.POptionalFeatureTicket;
         if (!optionalFeatureTicket
             && CanAddOptionalWheel(
                 objectives,
@@ -177,7 +178,7 @@ internal sealed class ForwardFeatureBudgetPlanner
                 flushCount,
                 extraGoCount,
                 requiredPrizeUpgradeCount)
-            && rng.NextDouble() < _settings.PWheelOptional)
+            && rng.NextDouble() < Settings.PWheelOptional)
         {
             wheelCount++;
             hasOptional = true;
@@ -192,23 +193,23 @@ internal sealed class ForwardFeatureBudgetPlanner
                     flushCount,
                     extraGoCount,
                     requiredPrizeUpgradeCount + optionalPrizeUpgradeCount)
-                && rng.NextDouble() < _settings.POptionalTicketWheel)
+                && rng.NextDouble() < Settings.POptionalTicketWheel)
             {
                 wheelCount++;
                 hasOptional = true;
             }
 
             if (CanAddOptionalFlush(objectives)
-                && flushCount < _settings.FlushFeatureConfig.Max
-                && rng.NextDouble() < _settings.POptionalTicketFlush)
+                && flushCount < Settings.FlushFeatureConfig.Max
+                && rng.NextDouble() < Settings.POptionalTicketFlush)
             {
                 flushCount++;
                 hasOptional = true;
             }
 
-            if (requiredPrizeUpgradeCount + optionalPrizeUpgradeCount < _settings.PrizeUpgradeFeatureConfig.Max
+            if (requiredPrizeUpgradeCount + optionalPrizeUpgradeCount < Settings.PrizeUpgradeFeatureConfig.Max
                 && CanAddOptionalPrizeUpgrade(objectives)
-                && rng.NextDouble() < _settings.POptionalTicketPrizeUpgrade)
+                && rng.NextDouble() < Settings.POptionalTicketPrizeUpgrade)
             {
                 optionalPrizeUpgradeCount++;
                 hasOptional = true;
@@ -262,20 +263,36 @@ internal sealed class ForwardFeatureBudgetPlanner
         int prizeUpgradeCount,
         int baseTurns)
     {
-        if (wheelCount > _settings.WheelFeatureConfig.Max)
-            return Exceeds(Wheel, wheelCount, _settings.WheelFeatureConfig.Max);
-        if (flushCount > _settings.FlushFeatureConfig.Max)
-            return Exceeds(Flush, flushCount, _settings.FlushFeatureConfig.Max);
+        if (wheelCount > Settings.WheelFeatureConfig.Max)
+            return Exceeds(Wheel, wheelCount, Settings.WheelFeatureConfig.Max);
+        if (flushCount > Settings.FlushFeatureConfig.Max)
+            return Exceeds(Flush, flushCount, Settings.FlushFeatureConfig.Max);
         if (extraGoCount > MaxExtraGo(baseTurns))
             return Exceeds(ExtraSpin, extraGoCount, MaxExtraGo(baseTurns));
-        if (prizeUpgradeCount > _settings.PrizeUpgradeFeatureConfig.Max)
-            return Exceeds(PrizeUpgrade, prizeUpgradeCount, _settings.PrizeUpgradeFeatureConfig.Max);
+        if (prizeUpgradeCount > Settings.PrizeUpgradeFeatureConfig.Max)
+            return Exceeds(PrizeUpgrade, prizeUpgradeCount, Settings.PrizeUpgradeFeatureConfig.Max);
 
         return Ok();
     }
 
     private int MaxExtraGo(int baseTurns) =>
-        Math.Min(_settings.ExtraSpinFeatureConfig.Max, _settings.MAX_SPINS - baseTurns);
+        Math.Min(Settings.ExtraSpinFeatureConfig.Max, Settings.MAX_SPINS - baseTurns);
+
+    private int MinimumExtraGoForVisualBreathing(
+        ForwardObjectives objectives,
+        int baseTurns)
+    {
+        var requiredCollections = objectives.WinTargets.Values.Sum()
+            + objectives.NearMissTargets.Values.Sum();
+        if (requiredCollections < MaxPressureVisualThreshold())
+            return 0;
+
+        var targetTurns = Math.Min(Settings.MAX_SPINS, Settings.BASE_SPINS + 4);
+        return Math.Min(MaxExtraGo(baseTurns), Math.Max(0, targetTurns - baseTurns));
+    }
+
+    private int MaxPressureVisualThreshold() =>
+        Settings.PrizeLadderRows.Sum(row => row.Target);
 
     private CapacityExpansion ExpandRequiredCollectionCapacity(
         ForwardObjectives objectives,
@@ -283,48 +300,51 @@ internal sealed class ForwardFeatureBudgetPlanner
         int wheelCount,
         int flushCount,
         int extraGoCount,
-        int prizeUpgradeCount)
+        int prizeUpgradeCount,
+        bool lockExtraGoCount)
     {
         var requiredCollections = objectives.WinTargets.Values.Sum()
             + objectives.NearMissTargets.Values.Sum();
         if (requiredCollections <= 0)
             return new CapacityExpansion(wheelCount, flushCount, extraGoCount);
+        var targetCapacity = requiredCollections + CollectionCapacityReserve(objectives);
 
         while (CanUseWheelForCapacity(objectives)
-            && wheelCount < _settings.WheelFeatureConfig.Max
+            && wheelCount < Settings.WheelFeatureConfig.Max
             && EstimatedCollectionCapacity(
                 objectives,
                 baseTurns,
                 wheelCount,
                 flushCount,
                 extraGoCount,
-                prizeUpgradeCount) < requiredCollections)
+                prizeUpgradeCount) < targetCapacity)
         {
             wheelCount++;
         }
 
         while (CanUseFlushForCapacity(objectives)
-            && flushCount < _settings.FlushFeatureConfig.Max
+            && flushCount < Settings.FlushFeatureConfig.Max
             && EstimatedCollectionCapacity(
                 objectives,
                 baseTurns,
                 wheelCount,
                 flushCount,
                 extraGoCount,
-                prizeUpgradeCount) < requiredCollections)
+                prizeUpgradeCount) < targetCapacity)
         {
             flushCount++;
         }
 
         var maxExtraGo = MaxExtraGo(baseTurns);
-        while (extraGoCount < maxExtraGo
+        while (!lockExtraGoCount
+            && extraGoCount < maxExtraGo
             && EstimatedCollectionCapacity(
                 objectives,
                 baseTurns,
                 wheelCount,
                 flushCount,
                 extraGoCount,
-                prizeUpgradeCount) < requiredCollections)
+                prizeUpgradeCount) < targetCapacity)
         {
             extraGoCount++;
         }
@@ -341,13 +361,9 @@ internal sealed class ForwardFeatureBudgetPlanner
         int prizeUpgradeCount)
     {
         var totalTurns = baseTurns + extraGoCount;
-        var startingBoardCapacity = _settings.ROWS * _settings.COLS;
+        var startingBoardCapacity = Settings.ROWS * Settings.COLS;
         var nonFinalSpawnTurns = Math.Max(0, totalTurns - 1);
-        var pressureTurnCapacity = CanUseDenseCollectionCapacity(objectives)
-            ? Math.Min(
-                _settings.MAX_PUSH * _settings.COLS,
-                _settings.MixedPushCapacity(_settings.COLS) + 3)
-            : _settings.MixedPushCapacity(_settings.COLS);
+        var pressureTurnCapacity = PressureTurnCapacity(objectives);
         var plannedTurnCapacity = nonFinalSpawnTurns * pressureTurnCapacity;
         var flushBonus = flushCount;
         var wheelBonus = EstimatedWheelBonus(objectives, wheelCount);
@@ -361,22 +377,9 @@ internal sealed class ForwardFeatureBudgetPlanner
 
     private int EstimatedWheelBonus(ForwardObjectives objectives, int wheelCount)
     {
-        if (wheelCount <= 0 || objectives.WinTargets.Count == 0)
-            return 0;
-
-        var stack = Math.Min(_settings.MAX_COIN_STACK, _settings.MAX_WHEEL_STACK_VALUE + 1);
-        if (stack <= 1)
-            return 0;
-
-        return objectives.WinTargets
-            .OrderByDescending(kv => kv.Value)
-            .ThenBy(kv => kv.Key)
-            .Take(wheelCount)
-            .Sum(kv =>
-            {
-                var zone = Math.Max(0, Math.Min(kv.Value / stack, _settings.COLS - 1) - 1);
-                return zone * (stack - 1);
-            });
+        _ = objectives;
+        _ = wheelCount;
+        return 0;
     }
 
     private static bool CanAddOptionalPrizeUpgrade(ForwardObjectives objectives) =>
@@ -389,7 +392,7 @@ internal sealed class ForwardFeatureBudgetPlanner
 
     private static bool CanUseWheelForCapacity(ForwardObjectives objectives) =>
         objectives.WinTargets.Count > 0
-        && PureFillerCount(objectives) >= 2
+        && HasGuaranteedSafeFiller(objectives)
         && objectives.WinTargets.Values.Sum() + objectives.NearMissTargets.Values.Sum() >= 80;
 
     private static int PureFillerCount(ForwardObjectives objectives) =>
@@ -400,6 +403,13 @@ internal sealed class ForwardFeatureBudgetPlanner
     private static bool CompressionPressure(ForwardObjectives objectives) =>
         objectives.WinTargets.Count > 0
         && objectives.WinTargets.Values.Sum() + objectives.NearMissTargets.Values.Sum() >= 80;
+
+    private int CollectionCapacityReserve(ForwardObjectives objectives) =>
+        !HasGuaranteedSafeFiller(objectives) && objectives.NearMissTargets.Count == 0
+            ? 0
+            : CompressionPressure(objectives)
+            ? Settings.COLS * 2
+            : Settings.COLS;
 
     private static bool CanUseFlushForCapacity(ForwardObjectives objectives)
     {
@@ -429,7 +439,7 @@ internal sealed class ForwardFeatureBudgetPlanner
         int extraGoCount,
         int prizeUpgradeCount)
     {
-        if (wheelCount >= _settings.WheelFeatureConfig.Max)
+        if (wheelCount >= Settings.WheelFeatureConfig.Max)
             return false;
         if (!HasOptionalWheelTarget(objectives))
             return false;
@@ -457,15 +467,26 @@ internal sealed class ForwardFeatureBudgetPlanner
             .Where(symbol => !objectives.NearMissTargets.ContainsKey(symbol))
             .Any(symbol => symbol >= 1
                 && symbol <= objectives.MaxSymbol
-                && !_settings.IsFeat(symbol));
+                && !Settings.IsFeat(symbol));
 
     private static bool HasGuaranteedSafeFiller(ForwardObjectives objectives) =>
         objectives.FillSymbols.Any(symbol =>
             !objectives.WinTargets.ContainsKey(symbol)
             && !objectives.NearMissTargets.ContainsKey(symbol));
 
-    private static bool CanUseDenseCollectionCapacity(ForwardObjectives objectives) =>
-        HasGuaranteedSafeFiller(objectives);
+    private int PressureTurnCapacity(ForwardObjectives objectives)
+    {
+        if (CompressionPressure(objectives))
+            return Math.Min(
+                Settings.MAX_PUSH * Settings.COLS,
+                Settings.MixedPushCapacity(Settings.COLS) + 3);
+
+        return HasGuaranteedSafeFiller(objectives)
+            ? Math.Min(
+                Settings.MAX_PUSH * Settings.COLS,
+                Settings.MixedPushCapacity(Settings.COLS) + 3)
+            : Settings.MixedPushCapacity(Settings.COLS);
+    }
 
     private static bool KnownFeature(string feature) =>
         feature == Wheel

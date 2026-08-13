@@ -48,18 +48,11 @@ public sealed class CoinPusherTicketGenerator
     private static readonly Random SeedRng = new();
     private static readonly object SeedLock = new();
 
-    private readonly Settings _settings;
     private readonly CoinPusherTicketGenerationRequestValidator _requestValidator;
 
     public CoinPusherTicketGenerator()
-        : this(new Settings())
     {
-    }
-
-    public CoinPusherTicketGenerator(Settings settings)
-    {
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _requestValidator = new CoinPusherTicketGenerationRequestValidator(_settings);
+        _requestValidator = new CoinPusherTicketGenerationRequestValidator();
     }
 
     public CoinPusherTicketGenerationResult Generate(
@@ -83,7 +76,7 @@ public sealed class CoinPusherTicketGenerator
 
         var actualSeed = seed ?? NextSeed();
         var requestedPrizeAmounts = prizeAmounts!.ToArray();
-        var maxAttempts = Math.Min(_settings.MaxPlanAttempts, 8);
+        var maxAttempts = Settings.MaxPlanAttempts;
         ForwardTicketGenerationResult? lastGeneration = null;
         string? lastValidationDetail = null;
         var lastSeed = actualSeed;
@@ -92,7 +85,7 @@ public sealed class CoinPusherTicketGenerator
         {
             var attemptSeed = SeedForAttempt(actualSeed, attempt);
             lastSeed = attemptSeed;
-            var generated = new ForwardTicketGenerator(_settings, attemptSeed).Generate(requestedPrizeAmounts);
+            var generated = new ForwardTicketGenerator(attemptSeed).Generate(requestedPrizeAmounts);
             lastGeneration = generated;
             if (!generated.IsValid)
                 continue;

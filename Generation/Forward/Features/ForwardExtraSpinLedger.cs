@@ -38,25 +38,21 @@ internal readonly struct ForwardExtraSpinCheck
 
 internal sealed class ForwardExtraSpinLedger
 {
-    private readonly Settings _settings;
     private readonly int _plannedTotalTurns;
     private int _earnedTurns;
     private int _logicalExtraGoAwards;
 
-    internal ForwardExtraSpinLedger(int plannedTotalTurns, Settings settings)
+    internal ForwardExtraSpinLedger(int plannedTotalTurns)
     {
-        _settings = settings;
         _plannedTotalTurns = plannedTotalTurns;
-        _earnedTurns = settings.BASE_SPINS;
+        _earnedTurns = Settings.BASE_SPINS;
     }
 
     private ForwardExtraSpinLedger(
         int plannedTotalTurns,
-        Settings settings,
         int earnedTurns,
         int logicalExtraGoAwards)
     {
-        _settings = settings;
         _plannedTotalTurns = plannedTotalTurns;
         _earnedTurns = earnedTurns;
         _logicalExtraGoAwards = logicalExtraGoAwards;
@@ -66,7 +62,7 @@ internal sealed class ForwardExtraSpinLedger
     internal int LogicalExtraGoAwards => _logicalExtraGoAwards;
 
     internal ForwardExtraSpinLedger Clone() =>
-        new(_plannedTotalTurns, _settings, _earnedTurns, _logicalExtraGoAwards);
+        new(_plannedTotalTurns, _earnedTurns, _logicalExtraGoAwards);
 
     internal void ReplaceWith(ForwardExtraSpinLedger other)
     {
@@ -76,20 +72,20 @@ internal sealed class ForwardExtraSpinLedger
 
     internal ForwardExtraSpinCheck ValidatePlanBounds()
     {
-        if (_plannedTotalTurns < _settings.BASE_SPINS)
+        if (_plannedTotalTurns < Settings.BASE_SPINS)
         {
             return Fail(
                 ForwardExtraSpinStatus.PlannedTotalBelowBase,
                 0,
-                $"planned total turns {_plannedTotalTurns} is below base {_settings.BASE_SPINS}");
+                $"planned total turns {_plannedTotalTurns} is below base {Settings.BASE_SPINS}");
         }
 
-        if (_plannedTotalTurns > _settings.MAX_SPINS)
+        if (_plannedTotalTurns > Settings.MAX_SPINS)
         {
             return Fail(
                 ForwardExtraSpinStatus.PlannedTotalAboveMax,
                 0,
-                $"planned total turns {_plannedTotalTurns} is above max {_settings.MAX_SPINS}");
+                $"planned total turns {_plannedTotalTurns} is above max {Settings.MAX_SPINS}");
         }
 
         return Ok(0);

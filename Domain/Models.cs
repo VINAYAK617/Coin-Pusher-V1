@@ -21,6 +21,10 @@ public sealed class MathInput
     public IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>>? PrizeValues { get; init; }
     public IReadOnlyDictionary<int, int>?         NonWinTargets { get; init; }
     public IReadOnlyDictionary<int, int>?         NonWinPrizeTiers { get; init; }
+    public int?                                   WinCompletionTurn { get; init; }
+    public bool                                   LockExtraGoCount { get; init; }
+    public int?                                   PpsCombinationId { get; init; }
+    public decimal?                               PpsTotalPrize { get; init; }
 
     /// <summary>
     /// The highest valid SYMBOL id in this game's config (e.g. 6 for a 6-symbol game).
@@ -88,12 +92,11 @@ internal sealed class PlaceCtx
     internal int                       MinSpin { get; init; }
     internal HashSet<(int, int)>       Used    { get; init; } = new();
     internal TicketExperienceProfile   ExperienceProfile { get; init; } = TicketExperienceProfile.Balanced;
-    internal Settings                  Settings { get; init; } = new();
 }
 
 internal sealed class FireCtx
 {
-    internal Cell?[,] Board { get; init; } = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
+    internal Cell?[,] Board { get; init; } = new Cell?[Settings.ROWS, Settings.COLS];
     internal int      Col   { get; init; }
     internal FP       Fp    { get; init; } = new();
 }
@@ -102,9 +105,9 @@ internal sealed class SpinPlan
 {
     internal int                               Spin    { get; init; }
     internal bool                              IsExtra { get; init; }
-    internal Cell?[,]                          Board   { get; init; } = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
-    internal int[]                             Push    { get; init; } = new int[Settings.Default.COLS];
-    internal bool[]                            Flush   { get; init; } = new bool[Settings.Default.COLS];
+    internal Cell?[,]                          Board   { get; init; } = new Cell?[Settings.ROWS, Settings.COLS];
+    internal int[]                             Push    { get; init; } = new int[Settings.COLS];
+    internal bool[]                            Flush   { get; init; } = new bool[Settings.COLS];
     internal Dictionary<(int, int), Cell>      Spawns  { get; init; } = new();
     internal List<(string Id, int Col, FP Fp)> Tokens  { get; init; } = new();
     internal List<(int r, int c)>              TokenSlots { get; init; } = new();
@@ -171,17 +174,14 @@ internal sealed class FillTracker
     private readonly int[] _fills;
     private readonly Dictionary<int, int> _used = new();
     private readonly Dictionary<int, int> _collectedUsed = new();
-    private readonly Settings _settings;
     private int _cursor;
     private int _collectedCursor;
 
     internal FillTracker(
         int[] fills,
-        IReadOnlyDictionary<int, int>? collectedReserve = null,
-        Settings? settings = null)
+        IReadOnlyDictionary<int, int>? collectedReserve = null)
     {
         _fills = fills;
-        _settings = settings ?? new Settings();
         foreach (var f in fills) _used[f] = 0;
         foreach (var f in fills)
             _collectedUsed[f] = collectedReserve?.GetValueOrDefault(f) ?? 0;
@@ -216,7 +216,7 @@ internal sealed class FillTracker
             int idx = (_collectedCursor + i) % _fills.Length;
             int sym = _fills[idx];
             int cnt = _collectedUsed[sym];
-            if (cnt >= _settings.SymbolFillCap(sym) - 1) continue;
+            if (cnt >= Settings.SymbolFillCap(sym) - 1) continue;
             if (cnt < bestCount) { bestCount = cnt; best = sym; }
         }
 

@@ -16,9 +16,9 @@ namespace CoinPusherEngine;
 ///   PRIZE_UPGRADE -> { FeatureId, ConvertToId, UpgradeSymbolId, UpgradePrizeValue }
 ///
 /// ReTrigger chaining: with configurable probability, a same-turn cosmetic
-/// PRIZE_UPGRADE or WHEEL token may be folded into another feature token's ReTrigger array.
-/// EXTRA_SPIN always stays physical because TotalSpins is load-bearing. WHEEL may
-/// be nested only as a same-turn child so stack timing remains replayable.
+/// PRIZE_UPGRADE token may be folded into another feature token's ReTrigger array.
+/// EXTRA_SPIN always stays physical because TotalSpins is load-bearing. WHEEL also
+/// stays physical because its board position affects which symbols receive stack.
 /// ReTrigger depth is intentionally capped at one nested feature.
 ///
 /// Pos field: every spawn carries "Pos": row*5+col (flat index), per the established schema.
@@ -87,10 +87,10 @@ public static class TicketSerializer
 
     /// <summary>Build the plain object graph (no JSON string yet) for a verified GamePlan.</summary>
     public static TicketDto ToTicketObject(GamePlan plan) =>
-        ToTicketObject(plan, new Settings());
+        ToTicketObject(plan, Settings);
 
     /// <summary>Build the plain object graph (no JSON string yet) for a verified GamePlan.</summary>
-    public static TicketDto ToTicketObject(GamePlan plan, Settings settings)
+    public static TicketDto ToTicketObject(GamePlan plan, GameEngine.ICustomProfileSettings settings)
     {
         var board = plan.Spins[0].Board;
         var startingBoard = Enumerable.Range(0, settings.ROWS).Select(r =>
@@ -117,7 +117,7 @@ public static class TicketSerializer
     private static NonWinSymbolDto[] BuildNonWinSymbols(
         GamePlan plan,
         IReadOnlyDictionary<int, int> collectedTotals,
-        Settings settings)
+        GameEngine.ICustomProfileSettings settings)
     {
         var ids = plan.NonWinTargets.Keys
             .Concat(collectedTotals
@@ -147,20 +147,19 @@ public static class TicketSerializer
 
     /// <summary>Serialize a verified GamePlan straight to an indented JSON string.</summary>
     public static string ToJson(GamePlan plan) =>
-        ToJson(plan, new Settings());
+        ToJson(plan, Settings);
 
     /// <summary>Serialize a verified GamePlan straight to an indented JSON string.</summary>
-    public static string ToJson(GamePlan plan, Settings settings) =>
+    public static string ToJson(GamePlan plan, GameEngine.ICustomProfileSettings settings) =>
         JsonConvert.SerializeObject(ToTicketObject(plan, settings), new JsonSerializerSettings
         {
             Formatting = Formatting.None,
-            NullValueHandling = NullValueHandling.Ignore,
-            DefaultValueHandling = DefaultValueHandling.Ignore
+            NullValueHandling = NullValueHandling.Ignore
         });
 
     // ── Turn / spawn assembly ───────────────────────────────────────────────────
 
-    private static TurnDto[] BuildTurns(GamePlan plan, Settings settings)
+    private static TurnDto[] BuildTurns(GamePlan plan, GameEngine.ICustomProfileSettings settings)
     {
         var allFeatureTokens = plan.Spins
             .SelectMany(sp => sp.Spawns
@@ -224,7 +223,7 @@ public static class TicketSerializer
     private static FeatureChainPlan BuildFeatureChainPlan(
         GamePlan plan,
         IReadOnlyList<(int Spin, (int, int) Pos, Cell Cell)> featureTokens,
-        Settings settings)
+        GameEngine.ICustomProfileSettings settings)
     {
         if (featureTokens.Count == 0) return FeatureChainPlan.Empty;
 
@@ -269,16 +268,16 @@ public static class TicketSerializer
         return new FeatureChainPlan(start, new[] { payload }, nested);
     }
 
-    private static bool IsNoBoardEffectFeature(Cell cell, Settings settings) =>
+    private static bool IsNoBoardEffectFeature(Cell cell, GameEngine.ICustomProfileSettings settings) =>
         cell.Sym == settings.F_XSPIN || cell.Sym == settings.F_PRUP;
 
-    private static bool IsReTriggerChainStart(Cell cell, Settings settings) =>
+    private static bool IsReTriggerChainStart(Cell cell, GameEngine.ICustomProfileSettings settings) =>
         IsNoBoardEffectFeature(cell, settings);
 
     private static bool IsTimingSafeReTriggerPayload(
         (int Spin, (int, int) Pos, Cell Cell) start,
         (int Spin, (int, int) Pos, Cell Cell) payload,
-        Settings settings)
+        GameEngine.ICustomProfileSettings settings)
     {
         if (payload.Cell.Sym == settings.F_XSPIN)
             return false;
@@ -286,7 +285,7 @@ public static class TicketSerializer
         if (payload.Spin != start.Spin)
             return false;
 
-        return payload.Cell.Sym == settings.F_PRUP || payload.Cell.Sym == settings.F_WHEEL;
+        return payload.Cell.Sym == settings.F_PRUP;
     }
 
     private sealed record FeatureChainPlan(
@@ -304,7 +303,7 @@ public static class TicketSerializer
         int spin,
         (int r, int c) pos,
         int payloadCount,
-        Settings settings)
+        GameEngine.ICustomProfileSettings settings)
     {
         unchecked
         {
@@ -317,7 +316,7 @@ public static class TicketSerializer
         }
     }
 
-    private static int DeterministicIndex(GamePlan plan, int count, int salt, Settings settings)
+    private static int DeterministicIndex(GamePlan plan, int count, int salt, GameEngine.ICustomProfileSettings settings)
     {
         if (count <= 1) return 0;
         unchecked
@@ -326,7 +325,7 @@ public static class TicketSerializer
         }
     }
 
-    private static uint FeatureChainHash(GamePlan plan, int salt, Settings settings)
+    private static uint FeatureChainHash(GamePlan plan, int salt, GameEngine.ICustomProfileSettings settings)
     {
         unchecked
         {
@@ -360,7 +359,7 @@ public static class TicketSerializer
         }
     }
 
-    private static SpawnDto SpawnObj(Cell c, int pos, GamePlan plan, Settings settings)
+    private static SpawnDto SpawnObj(Cell c, int pos, GamePlan plan, GameEngine.ICustomProfileSettings settings)
     {
         if (!c.IsFeat)
             return c.Stack > 1
@@ -409,7 +408,7 @@ public static class TicketSerializer
     private static FeatureDto FeatureObj(
         Cell c,
         GamePlan plan,
-        Settings settings,
+        GameEngine.ICustomProfileSettings settings,
         FeatureDto[]? reTrigger = null,
         int depth = 0,
         int? convertToOverride = null)
@@ -445,7 +444,7 @@ public static class TicketSerializer
         return dto;
     }
 
-    private static SpawnDto ConvertedSpawnObj(Cell c, int pos, Settings settings)
+    private static SpawnDto ConvertedSpawnObj(Cell c, int pos, GameEngine.ICustomProfileSettings settings)
     {
         int cvt = c.CvtSym > 0 && !settings.IsFeat(c.CvtSym) ? c.CvtSym : settings.F_COIN;
         return new SpawnDto { Pos = pos, Id = cvt };

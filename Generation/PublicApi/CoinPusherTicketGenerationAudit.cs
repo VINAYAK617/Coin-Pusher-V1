@@ -81,18 +81,6 @@ public sealed class CoinPusherTicketGenerationAuditResult
 
 public sealed class CoinPusherTicketGenerationAuditor
 {
-    private readonly Settings _settings;
-
-    public CoinPusherTicketGenerationAuditor()
-        : this(new Settings())
-    {
-    }
-
-    public CoinPusherTicketGenerationAuditor(Settings settings)
-    {
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-    }
-
     public CoinPusherTicketGenerationAuditResult Audit(CoinPusherTicketGenerationResult? result)
     {
         if (result == null)
@@ -119,10 +107,10 @@ public sealed class CoinPusherTicketGenerationAuditor
             result.Ticket.WinInfo.WinSymbols.Length,
             result.Ticket.WinInfo.NonWinSymbols.Length,
             featureSpawns.Length,
-            result.Ticket.Turns.Sum(turn => turn.Pushers.Count(pusher => pusher.FeatureId == _settings.F_FLUSH_ID)),
-            featureSpawns.Count(spawn => spawn.Feature!.FeatureId == _settings.F_XSPIN),
-            featureSpawns.Count(spawn => spawn.Feature!.FeatureId == _settings.F_WHEEL),
-            featureSpawns.Count(spawn => spawn.Feature!.FeatureId == _settings.F_PRUP),
+            result.Ticket.Turns.Sum(turn => turn.Pushers.Count(pusher => pusher.FeatureId == Settings.F_FLUSH_ID)),
+            featureSpawns.Count(spawn => spawn.Feature!.FeatureId == Settings.F_XSPIN),
+            featureSpawns.Count(spawn => spawn.Feature!.FeatureId == Settings.F_WHEEL),
+            featureSpawns.Count(spawn => spawn.Feature!.FeatureId == Settings.F_PRUP),
             normalSpawns.Length,
             normalSpawns.Count(spawn => spawn.Stack.HasValue && spawn.Stack.Value > 1),
             result.RequestedPrizeAmounts.ToArray(),

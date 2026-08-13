@@ -39,18 +39,16 @@ internal sealed class ForwardTicketGenerationResult
 
 internal sealed class ForwardTicketGenerator
 {
-    private readonly Settings _settings;
     private readonly int _seed;
 
-    internal ForwardTicketGenerator(Settings settings, int seed)
+    internal ForwardTicketGenerator(int seed)
     {
-        _settings = settings;
         _seed = seed;
     }
 
     internal ForwardTicketGenerationResult Generate(IReadOnlyList<decimal>? prizeAmounts)
     {
-        var build = new ForwardTicketBuilder(_settings, _seed).Build(prizeAmounts);
+        var build = new ForwardTicketBuilder(_seed).Build(prizeAmounts);
         if (!build.IsValid)
         {
             return Fail(
@@ -59,7 +57,7 @@ internal sealed class ForwardTicketGenerator
                 build);
         }
 
-        var adapted = new ForwardGamePlanAdapter(_settings).Adapt(build);
+        var adapted = new ForwardGamePlanAdapter().Adapt(build);
         if (!adapted.IsValid || adapted.Plan == null)
         {
             return Fail(
@@ -73,12 +71,11 @@ internal sealed class ForwardTicketGenerator
         string json;
         try
         {
-            ticket = TicketSerializer.ToTicketObject(adapted.Plan, _settings);
+            ticket = TicketSerializer.ToTicketObject(adapted.Plan);
             json = JsonConvert.SerializeObject(ticket, new JsonSerializerSettings
             {
                 Formatting = Formatting.None,
                 NullValueHandling = NullValueHandling.Ignore,
-                DefaultValueHandling = DefaultValueHandling.Ignore,
             });
         }
         catch (Exception ex)

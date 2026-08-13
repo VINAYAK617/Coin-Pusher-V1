@@ -7,7 +7,7 @@ internal static class Program
         try
         {
             var (prizeList, seed) = ParseArgs(args);
-            var result = new CoinPusherTicketJsonGenerator(new Settings()).Generate(prizeList, seed);
+            var result = new CoinPusherTicketJsonGenerator().Generate(prizeList, seed);
             if (!result.IsValid)
                 throw new InvalidOperationException(result.Detail);
 

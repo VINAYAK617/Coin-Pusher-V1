@@ -36,13 +36,8 @@ public sealed class CoinPusherTicketJsonGenerator
     private readonly CoinPusherTicketGenerationGuard _guard;
 
     public CoinPusherTicketJsonGenerator()
-        : this(new Settings())
     {
-    }
-
-    public CoinPusherTicketJsonGenerator(Settings settings)
-    {
-        _guard = new CoinPusherTicketGenerationGuard(settings ?? throw new ArgumentNullException(nameof(settings)));
+        _guard = new CoinPusherTicketGenerationGuard();
     }
 
     public CoinPusherTicketJsonGenerationResult Generate(

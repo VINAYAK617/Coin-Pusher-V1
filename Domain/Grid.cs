@@ -4,10 +4,10 @@ internal static class Grid
 {
     internal static Cell?[,] Clone(Cell?[,] src)
     {
-        var d = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
-        for (int r = 0; r < Settings.Default.ROWS; r++)
+        var d = new Cell?[Settings.ROWS, Settings.COLS];
+        for (int r = 0; r < Settings.ROWS; r++)
         {
-            for (int c = 0; c < Settings.Default.COLS; c++)
+            for (int c = 0; c < Settings.COLS; c++)
             {
                 d[r, c] = src[r, c]?.Clone();
             }
@@ -18,12 +18,12 @@ internal static class Grid
     // CW: result[col, ROWS-1-row] = board[row, col]
     internal static Cell?[,] RotCW(Cell?[,] b)
     {
-        var r = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
-        for (int row = 0; row < Settings.Default.ROWS; row++)
+        var r = new Cell?[Settings.ROWS, Settings.COLS];
+        for (int row = 0; row < Settings.ROWS; row++)
         {
-            for (int col = 0; col < Settings.Default.COLS; col++)
+            for (int col = 0; col < Settings.COLS; col++)
             {
-                r[col, Settings.Default.ROWS - 1 - row] = b[row, col]?.Clone();
+                r[col, Settings.ROWS - 1 - row] = b[row, col]?.Clone();
             }
         }
         return r;
@@ -32,12 +32,12 @@ internal static class Grid
     // CCW (inverse of CW): result[row, col] = board[col, ROWS-1-row]
     internal static Cell?[,] RotCCW(Cell?[,] b)
     {
-        var r = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
-        for (int row = 0; row < Settings.Default.ROWS; row++)
+        var r = new Cell?[Settings.ROWS, Settings.COLS];
+        for (int row = 0; row < Settings.ROWS; row++)
         {
-            for (int col = 0; col < Settings.Default.COLS; col++)
+            for (int col = 0; col < Settings.COLS; col++)
             {
-                r[row, col] = b[col, Settings.Default.ROWS - 1 - row]?.Clone();
+                r[row, col] = b[col, Settings.ROWS - 1 - row]?.Clone();
             }
         }
         return r;
@@ -45,15 +45,15 @@ internal static class Grid
 
     // Bottom `push` row indices collected during a normal push
     internal static int[] ZoneRows(int push) =>
-        Enumerable.Range(Settings.Default.ROWS - push, push).ToArray();
+        Enumerable.Range(Settings.ROWS - push, push).ToArray();
 
     // All (row,col) positions collected this spin
     internal static HashSet<(int r, int c)> ZoneSet(int[] push, bool[] flush)
     {
         var s = new HashSet<(int, int)>();
-        for (int col = 0; col < Settings.Default.COLS; col++)
+        for (int col = 0; col < Settings.COLS; col++)
         {
-            if (flush[col]) { for (int r = 0; r < Settings.Default.ROWS; r++) s.Add((r, col)); }
+            if (flush[col]) { for (int r = 0; r < Settings.ROWS; r++) s.Add((r, col)); }
             else            { foreach (int r in ZoneRows(push[col])) s.Add((r, col)); }
         }
         return s;

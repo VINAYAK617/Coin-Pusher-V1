@@ -50,13 +50,11 @@ internal sealed class ForwardNormalIntentResult
 
 internal sealed class ForwardNormalIntentPlanner
 {
-    private readonly Settings _settings;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
 
-    internal ForwardNormalIntentPlanner(Settings settings)
+    internal ForwardNormalIntentPlanner()
     {
-        _settings = settings;
-        _fateAnalyzer = new ForwardCellFateAnalyzer(settings);
+        _fateAnalyzer = new ForwardCellFateAnalyzer();
     }
 
     internal ForwardNormalIntentResult Plan(
@@ -87,9 +85,22 @@ internal sealed class ForwardNormalIntentPlanner
         var nearRemaining = Remaining(objectives.NearMissTargets, symbolLedger);
         var totalRequired = winRemaining + nearRemaining;
         var futureCapacities = FutureCollectionCapacities(futureTurns);
-        var futureCapacity = futureCapacities.Sum();
+        var futureWheelBonus = 0;
+        var futureCapacity = futureCapacities.Sum() + futureWheelBonus;
+        var safeCollectionCapacity = SafeCollectionCapacity(objectives, symbolLedger);
+        if (collectingSlots > totalRequired + safeCollectionCapacity)
+        {
+            return Fail(
+                ForwardNormalIntentStatus.InsufficientCollectionCapacity,
+                $"current collecting slots={collectingSlots}, remaining required collections={totalRequired}, safe filler capacity={safeCollectionCapacity}",
+                collectingSlots,
+                residueSlots);
+        }
 
-        var wheelBonus = WheelBonus(objectives, wheelImpacts, collectingSlots);
+        // WHEEL stack is symbol-specific. Capacity planning must count physical
+        // cells only; ForwardSpawnPlanner applies stack bonus once the symbol is
+        // known and the ledger can reject any over-collection.
+        var wheelBonus = 0;
         if (totalRequired > collectingSlots + wheelBonus + futureCapacity)
         {
             return Fail(
@@ -100,14 +111,30 @@ internal sealed class ForwardNormalIntentPlanner
         }
 
         var requiredNow = Math.Max(0, totalRequired - futureCapacity);
-        var desiredNow = DesiredCurrentCollections(
+        var desiredUnitsNow = DesiredCurrentCollections(
             totalRequired,
             collectingSlots,
             requiredNow,
-            futureCapacities);
+            futureCapacities,
+            futureWheelBonus,
+            safeCollectionCapacity);
+        var futureWheelReserved = FutureWheelReservations(objectives, futureTurns).Values.Sum();
+        if (futureWheelReserved > 0)
+            desiredUnitsNow = Math.Min(desiredUnitsNow, Math.Max(0, totalRequired - futureWheelReserved));
+        var desiredNow = Math.Max(0, desiredUnitsNow - wheelBonus);
         var (winProgress, nearProgress) = AllocateDemand(desiredNow, winRemaining, nearRemaining);
+        if (futureWheelReserved > 0)
+            winProgress = Math.Min(winProgress, Math.Max(0, winRemaining - futureWheelReserved));
+        var timing = ConstrainWinProgress(objectives, fates.Fates, winProgress, winRemaining);
+        winProgress = timing.WinProgress;
         var safeFillers = collectingSlots - winProgress - nearProgress;
-        var intents = BuildIntents(winProgress, nearProgress, safeFillers, residueSlots);
+        var intents = BuildIntents(
+            winProgress,
+            nearProgress,
+            safeFillers,
+            residueSlots,
+            objectives.WinCompletionTurn,
+            timing.ExactTargetTurnWinCount);
 
         return new ForwardNormalIntentResult(
             ForwardNormalIntentStatus.Valid,
@@ -170,45 +197,63 @@ internal sealed class ForwardNormalIntentPlanner
         return capacities;
     }
 
-    private int WheelBonus(
+    private static IReadOnlyDictionary<int, int> FutureWheelReservations(
         ForwardObjectives objectives,
-        IReadOnlyList<ForwardWheelImpact>? wheelImpacts,
-        int collectingSlots)
-    {
-        if (wheelImpacts == null || wheelImpacts.Count == 0 || collectingSlots <= 0)
-            return 0;
-
-        var remainingSlots = collectingSlots;
-        var bonus = 0;
-        foreach (var wheel in wheelImpacts
-                     .Where(wheel => objectives.WinTargets.ContainsKey(wheel.Symbol))
-                     .OrderByDescending(wheel => wheel.StackAdd))
-        {
-            if (remainingSlots <= 0)
-                break;
-
-            var usableCells = Math.Min(remainingSlots, _settings.COLS - 2);
-            if (usableCells <= 0)
-                continue;
-
-            bonus += usableCells * wheel.StackAdd;
-            remainingSlots -= usableCells;
-        }
-
-        return bonus;
-    }
+        IReadOnlyList<ForwardFutureTurn> futureTurns) =>
+        futureTurns
+            .SelectMany(turn => turn.FeatureIntents)
+            .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel)
+            .Where(intent => intent.WheelSymbol.HasValue)
+            .Select(intent => intent.WheelSymbol!.Value)
+            .Where(symbol => objectives.WinTargets.ContainsKey(symbol))
+            .GroupBy(symbol => symbol)
+            .ToDictionary(group => group.Key, group => group.Count());
 
     private int DesiredCurrentCollections(
         int totalRequired,
         int collectingCapacity,
         int requiredNow,
-        IReadOnlyList<int> futureCapacities)
+        IReadOnlyList<int> futureCapacities,
+        int futureWheelBonus,
+        int safeCollectionCapacity)
     {
-        _ = futureCapacities;
-        _ = requiredNow;
-        return totalRequired <= 0 || collectingCapacity <= 0
-            ? 0
-            : Math.Min(collectingCapacity, totalRequired);
+        if (totalRequired <= 0 || collectingCapacity <= 0)
+            return 0;
+
+        var futureCapacity = futureCapacities.Sum() + futureWheelBonus;
+        var futureRequiredReserve = Math.Max(0, futureCapacity - safeCollectionCapacity);
+        var maxRequiredNow = Math.Max(0, totalRequired - futureRequiredReserve);
+        var minRequiredNow = Math.Max(requiredNow, collectingCapacity - safeCollectionCapacity);
+
+        if (maxRequiredNow < minRequiredNow)
+            return Math.Min(collectingCapacity, totalRequired);
+
+        return Math.Clamp(
+            Math.Min(collectingCapacity, maxRequiredNow),
+            Math.Min(collectingCapacity, minRequiredNow),
+            Math.Min(collectingCapacity, totalRequired));
+    }
+
+    private int SafeCollectionCapacity(
+        ForwardObjectives objectives,
+        SymbolLedger ledger)
+    {
+        var candidates = objectives.FillSymbols
+            .Concat(objectives.NearMissTargets.Keys)
+            .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
+            .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol)
+            .Where(symbol => !Settings.IsFeat(symbol))
+            .Distinct();
+
+        var capacity = 0;
+        foreach (var symbol in candidates)
+        {
+            var current = ledger.CollectedCount(symbol);
+            var cap = Settings.SymbolFillCap(symbol);
+            capacity += Math.Max(0, (cap - 1) - current);
+        }
+
+        return capacity;
     }
 
     private static (int Win, int NearMiss) AllocateDemand(
@@ -242,15 +287,69 @@ internal sealed class ForwardNormalIntentPlanner
         return (win, near);
     }
 
+    private static WinProgressTiming ConstrainWinProgress(
+        ForwardObjectives objectives,
+        IReadOnlyList<ForwardCellFate> fates,
+        int requestedWinProgress,
+        int winRemaining)
+    {
+        if (!objectives.WinCompletionTurn.HasValue
+            || requestedWinProgress <= 0
+            || winRemaining <= 0)
+        {
+            return new WinProgressTiming(requestedWinProgress, 0);
+        }
+
+        var targetTurn = objectives.WinCompletionTurn.Value;
+        var legalWinSlots = fates.Count(fate =>
+            fate.IsCollected
+            && fate.CollectedTurn.HasValue
+            && fate.CollectedTurn.Value <= targetTurn);
+        var targetTurnSlots = fates.Count(fate =>
+            fate.IsCollected
+            && fate.CollectedTurn == targetTurn);
+        if (legalWinSlots <= 0)
+            return new WinProgressTiming(0, 0);
+
+        if (targetTurnSlots > 0
+            && requestedWinProgress >= winRemaining
+            && legalWinSlots >= winRemaining)
+        {
+            return new WinProgressTiming(winRemaining, 1);
+        }
+
+        var nonFinalProgress = Math.Min(
+            requestedWinProgress,
+            Math.Min(Math.Max(0, winRemaining - 1), legalWinSlots));
+
+        return new WinProgressTiming(nonFinalProgress, 0);
+    }
+
     private static IReadOnlyList<ForwardNormalSpawnIntent> BuildIntents(
         int winProgress,
         int nearProgress,
         int safeFillers,
-        int residue)
+        int residue,
+        int? winCompletionTurn,
+        int exactTargetTurnWinCount)
     {
         var intents = new List<ForwardNormalSpawnIntent>(winProgress + nearProgress + safeFillers + residue);
-        for (var i = 0; i < winProgress; i++)
-            intents.Add(new ForwardNormalSpawnIntent(ForwardSymbolIntent.MustProgressWin));
+        var normalWinProgress = Math.Max(0, winProgress - exactTargetTurnWinCount);
+        for (var i = 0; i < normalWinProgress; i++)
+        {
+            intents.Add(new ForwardNormalSpawnIntent(
+                ForwardSymbolIntent.MustProgressWin,
+                maxCollectionTurn: winCompletionTurn));
+        }
+
+        for (var i = 0; i < exactTargetTurnWinCount; i++)
+        {
+            intents.Add(new ForwardNormalSpawnIntent(
+                ForwardSymbolIntent.MustProgressWin,
+                minCollectionTurn: winCompletionTurn,
+                maxCollectionTurn: winCompletionTurn));
+        }
+
         for (var i = 0; i < nearProgress; i++)
             intents.Add(new ForwardNormalSpawnIntent(ForwardSymbolIntent.PreferNearMiss));
         for (var i = 0; i < safeFillers; i++)
@@ -261,11 +360,23 @@ internal sealed class ForwardNormalIntentPlanner
         return intents;
     }
 
+    private readonly struct WinProgressTiming
+    {
+        internal WinProgressTiming(int winProgress, int exactTargetTurnWinCount)
+        {
+            WinProgress = winProgress;
+            ExactTargetTurnWinCount = exactTargetTurnWinCount;
+        }
+
+        internal int WinProgress { get; }
+        internal int ExactTargetTurnWinCount { get; }
+    }
+
     private IEnumerable<(int r, int c)> AllPositions()
     {
-        for (var row = 0; row < _settings.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < _settings.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
                 yield return (row, col);
         }
     }

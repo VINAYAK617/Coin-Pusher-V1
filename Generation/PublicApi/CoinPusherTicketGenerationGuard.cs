@@ -36,20 +36,13 @@ public sealed class CoinPusherTicketGenerationGuardResult
 
 public sealed class CoinPusherTicketGenerationGuard
 {
-    private readonly Settings _settings;
     private readonly CoinPusherTicketGenerator _generator;
     private readonly CoinPusherTicketGenerationAuditor _auditor;
 
     public CoinPusherTicketGenerationGuard()
-        : this(new Settings())
     {
-    }
-
-    public CoinPusherTicketGenerationGuard(Settings settings)
-    {
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _generator = new CoinPusherTicketGenerator(_settings);
-        _auditor = new CoinPusherTicketGenerationAuditor(_settings);
+        _generator = new CoinPusherTicketGenerator();
+        _auditor = new CoinPusherTicketGenerationAuditor();
     }
 
     public CoinPusherTicketGenerationGuardResult Generate(

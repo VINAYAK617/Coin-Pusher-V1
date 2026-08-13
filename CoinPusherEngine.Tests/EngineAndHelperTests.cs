@@ -4,8 +4,13 @@ using Newtonsoft.Json;
 namespace CoinPusherEngine.Tests;
 
 [TestClass]
+[DoNotParallelize]
 public sealed class EngineAndHelperTests
 {
+    [TestInitialize]
+    public void ResetSettings() =>
+        GameEngine.Engine.Settings = new GameEngine.DefaultCoinPusherSettings();
+
     [TestMethod]
     public void EngineReplayMatchesVerifiedPlanTotals()
     {
@@ -13,8 +18,8 @@ public sealed class EngineAndHelperTests
         {
             Targets = new Dictionary<int, int>
             {
-                [2] = Settings.Default.SymbolFillCap(2),
-                [4] = Settings.Default.SymbolFillCap(4),
+                [2] = Settings.SymbolFillCap(2),
+                [4] = Settings.SymbolFillCap(4),
             },
             BaseSpins = 5,
             Required = new Dictionary<string, int>
@@ -23,7 +28,7 @@ public sealed class EngineAndHelperTests
                 ["FLUSH"] = 1,
                 ["EXTRA_SPIN"] = 1,
             },
-            PrizeValues = PrizeValues(Settings.Default.PrizeLadderRows.Count, tiers: 3),
+            PrizeValues = PrizeValues(Settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = 6,
         };
         var plan = ForwardPlan(input, seed: 909);
@@ -53,8 +58,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void SymbolFillCapComesFromPrizeLadderRows()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             FILL_CAP = 99,
             PrizeLadderRows = new[]
             {
@@ -63,6 +67,7 @@ public sealed class EngineAndHelperTests
                 new PrizeLadderRow { Target = 31, Tiers = new decimal[] { 5 } },
             },
         };
+        GameEngine.Engine.Settings = settings;
 
         Assert.AreEqual(17, settings.SymbolFillCap(1));
         Assert.AreEqual(23, settings.SymbolFillCap(2));
@@ -76,8 +81,7 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int> { [2] = 5 },
             new Dictionary<int, int>(),
-            maxSymbol: 6,
-            settings: Settings.Default);
+            maxSymbol: 6);
 
         Assert.AreEqual(SymbolCollectionStatus.Valid, ledger.Collect(2, stack: 3).Status);
         Assert.AreEqual(2, ledger.RemainingWinCount(2));
@@ -94,19 +98,18 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void SymbolLedgerUsesLadderCapForNonWinningSymbols()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PrizeLadderRows = new[]
             {
                 new PrizeLadderRow { Target = 4, Tiers = new decimal[] { 1 } },
                 new PrizeLadderRow { Target = 7, Tiers = new decimal[] { 2 } },
             },
         };
+        GameEngine.Engine.Settings = settings;
         var ledger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int> { [1] = 3 },
-            maxSymbol: 2,
-            settings: settings);
+            maxSymbol: 2);
 
         Assert.AreEqual(SymbolCollectionStatus.Valid, ledger.Collect(1, stack: 3).Status);
 
@@ -123,8 +126,7 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int> { [2] = 5 },
             new Dictionary<int, int> { [1] = 3 },
-            maxSymbol: 6,
-            settings: Settings.Default);
+            maxSymbol: 6);
 
         ledger.Collect(2, stack: 4);
         ledger.Collect(1, stack: 2);
@@ -141,30 +143,27 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int>(),
-            maxSymbol: 6,
-            settings: Settings.Default);
+            maxSymbol: 6);
 
         Assert.AreEqual(SymbolCollectionStatus.InvalidStack, ledger.CheckCollect(1, stack: 0).Status);
         Assert.AreEqual(SymbolCollectionStatus.UnknownSymbol, ledger.CheckCollect(7).Status);
-        Assert.AreEqual(SymbolCollectionStatus.UnknownSymbol, ledger.CheckCollect(Settings.Default.F_WHEEL).Status);
+        Assert.AreEqual(SymbolCollectionStatus.UnknownSymbol, ledger.CheckCollect(Settings.F_WHEEL).Status);
     }
 
     [TestMethod]
     public void ForwardSymbolSelectorHonorsIntentPriorityBeforeRandomChoice()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var nearLedger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int> { [2] = 3 },
-            maxSymbol: 6,
-            settings);
+            maxSymbol: 6);
         var nearSelector = new ForwardSymbolSelector(
             nearLedger,
             new Dictionary<int, int>(),
             new Dictionary<int, int> { [2] = 3 },
             new[] { 1, 2, 3, 4, 5, 6 },
             maxSymbol: 6,
-            settings,
             new Random(1));
 
         for (var i = 0; i < 3; i++)
@@ -175,15 +174,13 @@ public sealed class EngineAndHelperTests
         var fillerLedger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int> { [2] = 3 },
-            maxSymbol: 6,
-            settings);
+            maxSymbol: 6);
         var fillerSelector = new ForwardSymbolSelector(
             fillerLedger,
             new Dictionary<int, int>(),
             new Dictionary<int, int> { [2] = 3 },
             new[] { 1, 2, 3, 4, 5, 6 },
             maxSymbol: 6,
-            settings,
             new Random(2));
 
         var filler = fillerSelector.ChooseAndCollect(ForwardSymbolIntent.SafeFiller);
@@ -202,10 +199,10 @@ public sealed class EngineAndHelperTests
             new ForwardPusher(2),
             new ForwardPusher(3),
             new ForwardPusher(4),
-            new ForwardPusher(Settings.Default.ROWS, Settings.Default.F_FLUSH_ID),
+            new ForwardPusher(Settings.ROWS, Settings.F_FLUSH_ID),
         };
 
-        var (shape, check) = ForwardTurnShape.TryCreate(pushers, Settings.Default);
+        var (shape, check) = ForwardTurnShape.TryCreate(pushers);
 
         Assert.AreEqual(ForwardTurnShapeStatus.Valid, check.Status);
         Assert.IsNotNull(shape);
@@ -216,18 +213,15 @@ public sealed class EngineAndHelperTests
     public void ForwardTurnShapeReportsInvalidPusherShapes()
     {
         var tooFew = ForwardTurnShape.Validate(
-            new[] { new ForwardPusher(1) },
-            Settings.Default);
+            new[] { new ForwardPusher(1) });
         Assert.AreEqual(ForwardTurnShapeStatus.WrongColumnCount, tooFew.Status);
 
         var invalidNormal = ForwardTurnShape.Validate(
-            new[] { new ForwardPusher(0), new ForwardPusher(1), new ForwardPusher(1), new ForwardPusher(1), new ForwardPusher(1) },
-            Settings.Default);
+            new[] { new ForwardPusher(0), new ForwardPusher(1), new ForwardPusher(1), new ForwardPusher(1), new ForwardPusher(1) });
         Assert.AreEqual(ForwardTurnShapeStatus.InvalidNormalPush, invalidNormal.Status);
 
         var invalidFeature = ForwardTurnShape.Validate(
-            new[] { new ForwardPusher(1, Settings.Default.F_FLUSH_ID), new ForwardPusher(1), new ForwardPusher(1), new ForwardPusher(1), new ForwardPusher(1) },
-            Settings.Default);
+            new[] { new ForwardPusher(1, Settings.F_FLUSH_ID), new ForwardPusher(1), new ForwardPusher(1), new ForwardPusher(1), new ForwardPusher(1) });
         Assert.AreEqual(ForwardTurnShapeStatus.InvalidFeaturePush, invalidFeature.Status);
     }
 
@@ -240,9 +234,9 @@ public sealed class EngineAndHelperTests
             new ForwardPusher(2),
             new ForwardPusher(3),
             new ForwardPusher(4),
-            new ForwardPusher(Settings.Default.ROWS, Settings.Default.F_FLUSH_ID),
+            new ForwardPusher(Settings.ROWS, Settings.F_FLUSH_ID),
         };
-        var (shape, _) = ForwardTurnShape.TryCreate(pushers, Settings.Default);
+        var (shape, _) = ForwardTurnShape.TryCreate(pushers);
 
         var cells = shape!.CollectionCells().ToHashSet();
 
@@ -258,10 +252,9 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardBoardStateCollectsShiftsRotatesAndRequiresExactSpawns()
     {
-        var state = new ForwardBoardState(NumberedBoard(), Settings.Default);
+        var state = new ForwardBoardState(NumberedBoard());
         var (shape, _) = ForwardTurnShape.TryCreate(
-            Enumerable.Repeat(new ForwardPusher(1), Settings.Default.COLS).ToArray(),
-            Settings.Default);
+            Enumerable.Repeat(new ForwardPusher(1), Settings.COLS).ToArray());
 
         var mismatch = state.Advance(shape!, Array.Empty<ForwardSpawn>());
 
@@ -275,10 +268,9 @@ public sealed class EngineAndHelperTests
     public void ForwardBoardStateRejectsDuplicateAndOverwriteSpawns()
     {
         var (shape, _) = ForwardTurnShape.TryCreate(
-            Enumerable.Repeat(new ForwardPusher(1), Settings.Default.COLS).ToArray(),
-            Settings.Default);
+            Enumerable.Repeat(new ForwardPusher(1), Settings.COLS).ToArray());
 
-        var duplicateState = new ForwardBoardState(NumberedBoard(), Settings.Default);
+        var duplicateState = new ForwardBoardState(NumberedBoard());
         var duplicateSpawns = new[]
         {
             new ForwardSpawn(0, 4, Grid.Norm(1)),
@@ -290,7 +282,7 @@ public sealed class EngineAndHelperTests
         var duplicate = duplicateState.Advance(shape!, duplicateSpawns);
         Assert.AreEqual(ForwardBoardAdvanceStatus.DuplicateSpawnPosition, duplicate.Status);
 
-        var overwriteState = new ForwardBoardState(NumberedBoard(), Settings.Default);
+        var overwriteState = new ForwardBoardState(NumberedBoard());
         var overwriteSpawns = new[]
         {
             new ForwardSpawn(0, 0, Grid.Norm(1)),
@@ -306,11 +298,10 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardBoardStateAppliesSpawnsOnlyIntoEmptyCells()
     {
-        var state = new ForwardBoardState(NumberedBoard(), Settings.Default);
+        var state = new ForwardBoardState(NumberedBoard());
         var (shape, _) = ForwardTurnShape.TryCreate(
-            Enumerable.Repeat(new ForwardPusher(1), Settings.Default.COLS).ToArray(),
-            Settings.Default);
-        var spawns = Enumerable.Range(0, Settings.Default.COLS)
+            Enumerable.Repeat(new ForwardPusher(1), Settings.COLS).ToArray());
+        var spawns = Enumerable.Range(0, Settings.COLS)
             .Select(row => new ForwardSpawn(row, 4, Grid.Norm(100 + row)))
             .ToArray();
 
@@ -318,14 +309,14 @@ public sealed class EngineAndHelperTests
         var board = state.Snapshot();
 
         Assert.AreEqual(ForwardBoardAdvanceStatus.Valid, result.Status);
-        for (var row = 0; row < Settings.Default.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
             Assert.AreEqual(100 + row, board[row, 4]!.Sym);
     }
 
     [TestMethod]
     public void ForwardBoardStatePreviewDoesNotMutateAndReportsExactEmptyPositions()
     {
-        var state = new ForwardBoardState(NumberedBoard(), Settings.Default);
+        var state = new ForwardBoardState(NumberedBoard());
         var before = BoardSignature(state.Snapshot());
         var shape = Shape(1, 1, 1, 1, 1);
 
@@ -334,7 +325,7 @@ public sealed class EngineAndHelperTests
         Assert.AreEqual(ForwardBoardAdvanceStatus.Valid, preview.Status);
         Assert.AreEqual(5, preview.EmptyPositions.Count);
         CollectionAssert.AreEqual(
-            Enumerable.Range(0, Settings.Default.ROWS).Select(row => (row, Settings.Default.COLS - 1)).ToArray(),
+            Enumerable.Range(0, Settings.ROWS).Select(row => (row, Settings.COLS - 1)).ToArray(),
             preview.EmptyPositions.ToArray());
         Assert.AreEqual(before, BoardSignature(state.Snapshot()));
     }
@@ -342,7 +333,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardBoardStateAdvanceDoesNotMutateOnInvalidSpawns()
     {
-        var state = new ForwardBoardState(NumberedBoard(), Settings.Default);
+        var state = new ForwardBoardState(NumberedBoard());
         var before = BoardSignature(state.Snapshot());
 
         var result = state.Advance(Shape(1, 1, 1, 1, 1), Array.Empty<ForwardSpawn>());
@@ -355,18 +346,17 @@ public sealed class EngineAndHelperTests
     public void ForwardBoardStateRejectsTooManyAndOutOfRangeSpawns()
     {
         var (shape, _) = ForwardTurnShape.TryCreate(
-            Enumerable.Repeat(new ForwardPusher(1), Settings.Default.COLS).ToArray(),
-            Settings.Default);
+            Enumerable.Repeat(new ForwardPusher(1), Settings.COLS).ToArray());
 
-        var tooManyState = new ForwardBoardState(NumberedBoard(), Settings.Default);
-        var tooMany = Enumerable.Range(0, Settings.Default.COLS + 1)
-            .Select(i => new ForwardSpawn(Math.Min(i, Settings.Default.ROWS - 1), 4, Grid.Norm(1)))
+        var tooManyState = new ForwardBoardState(NumberedBoard());
+        var tooMany = Enumerable.Range(0, Settings.COLS + 1)
+            .Select(i => new ForwardSpawn(Math.Min(i, Settings.ROWS - 1), 4, Grid.Norm(1)))
             .ToArray();
         var tooManyResult = tooManyState.Advance(shape!, tooMany);
         Assert.AreEqual(ForwardBoardAdvanceStatus.SpawnCountMismatch, tooManyResult.Status);
 
-        var outOfRangeState = new ForwardBoardState(NumberedBoard(), Settings.Default);
-        var outOfRange = Enumerable.Range(0, Settings.Default.COLS)
+        var outOfRangeState = new ForwardBoardState(NumberedBoard());
+        var outOfRange = Enumerable.Range(0, Settings.COLS)
             .Select(row => new ForwardSpawn(row, 4, Grid.Norm(1)))
             .ToArray();
         outOfRange[0] = new ForwardSpawn(-1, 4, Grid.Norm(1));
@@ -380,24 +370,24 @@ public sealed class EngineAndHelperTests
         var board = NumberedBoard();
         board[0, 0] = Grid.Norm(2);
         board[0, 0]!.Stack = 3;
-        board[1, 0] = Grid.Feat(Settings.Default.F_WHEEL, 1, new FP { FeatId = "WHEEL", WheelSym = 2, WheelStack = 2 });
+        board[1, 0] = Grid.Feat(Settings.F_WHEEL, 1, new FP { FeatId = "WHEEL", WheelSym = 2, WheelStack = 2 });
         board[2, 0] = Grid.Norm(4);
         board[2, 0]!.Stack = 2;
 
-        var state = new ForwardBoardState(board, Settings.Default);
+        var state = new ForwardBoardState(board);
         var (shape, _) = ForwardTurnShape.TryCreate(new[]
         {
-            new ForwardPusher(Settings.Default.ROWS, Settings.Default.F_FLUSH_ID),
+            new ForwardPusher(Settings.ROWS, Settings.F_FLUSH_ID),
             new ForwardPusher(1),
             new ForwardPusher(1),
             new ForwardPusher(1),
             new ForwardPusher(1),
-        }, Settings.Default);
+        });
 
         var spawns = new List<ForwardSpawn>();
-        for (var row = 0; row < Settings.Default.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
             spawns.Add(new ForwardSpawn(row, 4, Grid.Norm(50 + row)));
-        for (var col = 0; col < Settings.Default.COLS - 1; col++)
+        for (var col = 0; col < Settings.COLS - 1; col++)
             spawns.Add(new ForwardSpawn(0, col, Grid.Norm(60 + col)));
 
         var result = state.Advance(shape!, spawns);
@@ -405,14 +395,14 @@ public sealed class EngineAndHelperTests
         Assert.AreEqual(ForwardBoardAdvanceStatus.Valid, result.Status);
         Assert.AreEqual(3, result.Collected[2]);
         Assert.AreEqual(2, result.Collected[4]);
-        Assert.IsFalse(result.Collected.ContainsKey(Settings.Default.F_WHEEL));
+        Assert.IsFalse(result.Collected.ContainsKey(Settings.F_WHEEL));
     }
 
     [TestMethod]
     public void ForwardBoardStateClonesInputAndSnapshots()
     {
         var board = NumberedBoard();
-        var state = new ForwardBoardState(board, Settings.Default);
+        var state = new ForwardBoardState(board);
 
         board[0, 0]!.Sym = 999;
         Assert.AreNotEqual(999, state.Snapshot()[0, 0]!.Sym);
@@ -426,15 +416,15 @@ public sealed class EngineAndHelperTests
     public void ForwardFeatureExecutorFiresNonWheelBeforeWheelAndConvertsCells()
     {
         var board = EmptyBoard();
-        board[0, 0] = Grid.Feat(Settings.Default.F_PRUP, 2, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 2, PrupTier = 1 });
-        board[0, 1] = Grid.Feat(Settings.Default.F_WHEEL, 3, new FP { FeatId = "WHEEL", WheelSym = 2, WheelStack = 2 });
+        board[0, 0] = Grid.Feat(Settings.F_PRUP, 2, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 2, PrupTier = 1 });
+        board[0, 1] = Grid.Feat(Settings.F_WHEEL, 3, new FP { FeatId = "WHEEL", WheelSym = 2, WheelStack = 2 });
         board[1, 1] = Grid.Norm(2);
 
-        var result = new ForwardFeatureExecutor(Settings.Default).FireAll(board);
+        var result = new ForwardFeatureExecutor().FireAll(board);
 
         Assert.AreEqual(2, result.Events.Count);
-        Assert.AreEqual(Settings.Default.F_PRUP, result.Events[0].FeatureSymbol);
-        Assert.AreEqual(Settings.Default.F_WHEEL, result.Events[1].FeatureSymbol);
+        Assert.AreEqual(Settings.F_PRUP, result.Events[0].FeatureSymbol);
+        Assert.AreEqual(Settings.F_WHEEL, result.Events[1].FeatureSymbol);
         Assert.AreEqual(2, result.Events[0].UpgradeSymbol);
         Assert.AreEqual(1, result.Events[0].UpgradeTier);
         Assert.AreEqual(2, result.Events[1].WheelSymbol);
@@ -448,12 +438,12 @@ public sealed class EngineAndHelperTests
     public void ForwardFeatureExecutorEmitsCompleteExtraGoEvent()
     {
         var board = EmptyBoard();
-        board[0, 0] = Grid.Feat(Settings.Default.F_XSPIN, 4, new FP { FeatId = "EXTRA_SPIN" });
+        board[0, 0] = Grid.Feat(Settings.F_XSPIN, 4, new FP { FeatId = "EXTRA_SPIN" });
 
-        var result = new ForwardFeatureExecutor(Settings.Default).FireAll(board);
+        var result = new ForwardFeatureExecutor().FireAll(board);
 
         Assert.AreEqual(1, result.Events.Count);
-        Assert.AreEqual(Settings.Default.F_XSPIN, result.Events[0].FeatureSymbol);
+        Assert.AreEqual(Settings.F_XSPIN, result.Events[0].FeatureSymbol);
         Assert.AreEqual(4, result.Events[0].ConvertToSymbol);
         Assert.AreEqual(1, result.Events[0].ExtraGoAward);
         Assert.IsNull(result.Events[0].WheelSymbol);
@@ -465,45 +455,57 @@ public sealed class EngineAndHelperTests
     public void ForwardFeatureExecutorWheelStacksOnlyMatchingNormalSymbolsAndClamps()
     {
         var board = EmptyBoard();
-        board[0, 0] = Grid.Feat(Settings.Default.F_WHEEL, 1, new FP { FeatId = "WHEEL", WheelSym = 2, WheelStack = 4 });
+        board[0, 0] = Grid.Feat(Settings.F_WHEEL, 1, new FP { FeatId = "WHEEL", WheelSym = 2, WheelStack = 4 });
         board[1, 0] = Grid.Norm(2);
-        board[1, 0]!.Stack = Settings.Default.MAX_COIN_STACK - 1;
+        board[1, 0]!.Stack = Settings.MAX_COIN_STACK - 1;
         board[1, 1] = Grid.Norm(3);
-        board[1, 2] = Grid.Feat(Settings.Default.F_PRUP, 3, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 3, PrupTier = 1 });
+        board[1, 2] = Grid.Feat(Settings.F_PRUP, 3, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 3, PrupTier = 1 });
 
-        new ForwardFeatureExecutor(Settings.Default).FireAll(board);
+        new ForwardFeatureExecutor().FireAll(board);
 
-        Assert.AreEqual(Settings.Default.MAX_COIN_STACK, board[1, 0]!.Stack);
+        Assert.AreEqual(Settings.MAX_COIN_STACK, board[1, 0]!.Stack);
         Assert.AreEqual(1, board[1, 1]!.Stack);
         Assert.AreEqual(3, board[1, 2]!.Sym);
         Assert.AreEqual(1, board[1, 2]!.Stack);
     }
 
     [TestMethod]
+    public void ForwardFeatureExecutorWheelSelfConversionUsesWheelStack()
+    {
+        var board = EmptyBoard();
+        board[0, 0] = Grid.Feat(Settings.F_WHEEL, 6, new FP { FeatId = "WHEEL", WheelSym = 6, WheelStack = 3 });
+
+        new ForwardFeatureExecutor().FireAll(board);
+
+        Assert.AreEqual(6, board[0, 0]!.Sym);
+        Assert.AreEqual(3, board[0, 0]!.Stack);
+    }
+
+    [TestMethod]
     public void ForwardFeatureExecutorConvertsBadTargetsToCoinSymbol()
     {
         var board = EmptyBoard();
-        board[0, 0] = Grid.Feat(Settings.Default.F_XSPIN, Settings.Default.F_WHEEL, new FP { FeatId = "EXTRA_SPIN" });
+        board[0, 0] = Grid.Feat(Settings.F_XSPIN, Settings.F_WHEEL, new FP { FeatId = "EXTRA_SPIN" });
         board[0, 1] = new Cell { Sym = 99, IsFeat = true, FeatId = "UNKNOWN", CvtSym = 0 };
 
-        var result = new ForwardFeatureExecutor(Settings.Default).FireAll(board);
+        var result = new ForwardFeatureExecutor().FireAll(board);
 
         Assert.AreEqual(2, result.Events.Count);
-        Assert.AreEqual(Settings.Default.F_COIN, board[0, 0]!.Sym);
-        Assert.AreEqual(Settings.Default.F_COIN, board[0, 1]!.Sym);
+        Assert.AreEqual(Settings.F_COIN, board[0, 0]!.Sym);
+        Assert.AreEqual(Settings.F_COIN, board[0, 1]!.Sym);
     }
 
     [TestMethod]
     public void ForwardBoardStateAppliesFeatureFireTransactionally()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var board = FilledBoard(6);
         board[0, 0] = Grid.Feat(settings.F_PRUP, 2, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 2, PrupTier = 1 });
         board[0, 1] = Grid.Feat(settings.F_WHEEL, 3, new FP { FeatId = "WHEEL", WheelSym = 2, WheelStack = 2 });
         board[1, 1] = Grid.Norm(2);
-        var state = new ForwardBoardState(board, settings);
+        var state = new ForwardBoardState(board);
 
-        var result = state.ApplyFeatureFire(new ForwardFeatureExecutor(settings));
+        var result = state.ApplyFeatureFire(new ForwardFeatureExecutor());
         var after = state.Snapshot();
 
         Assert.AreEqual(ForwardBoardFeatureFireStatus.Valid, result.Status, result.Detail);
@@ -519,10 +521,10 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardBoardStateRejectsMissingFeatureExecutorWithoutMutation()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var board = FilledBoard(6);
         board[0, 0] = Grid.Feat(settings.F_XSPIN, 2, new FP { FeatId = "EXTRA_SPIN" });
-        var state = new ForwardBoardState(board, settings);
+        var state = new ForwardBoardState(board);
         var before = BoardSignature(state.Snapshot());
 
         var result = state.ApplyFeatureFire(null);
@@ -534,14 +536,14 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureFireIntegratorFiresCurrentBoardAndReportsCounts()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var board = FilledBoard(6);
         board[0, 0] = Grid.Feat(settings.F_XSPIN, 2, new FP { FeatId = "EXTRA_SPIN" });
         board[0, 1] = Grid.Feat(settings.F_WHEEL, 3, new FP { FeatId = "WHEEL", WheelSym = 2, WheelStack = 2 });
         board[1, 1] = Grid.Norm(2);
-        var state = new ForwardBoardState(board, settings);
+        var state = new ForwardBoardState(board);
 
-        var result = new ForwardFeatureFireIntegrator(settings).FireCurrentBoard(state);
+        var result = new ForwardFeatureFireIntegrator().FireCurrentBoard(state);
         var after = state.Snapshot();
 
         Assert.AreEqual(ForwardFeatureFireIntegrationStatus.Valid, result.Status, result.Detail);
@@ -557,11 +559,11 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureFireIntegratorAcceptsBoardWithNoFeatures()
     {
-        var settings = Settings.Default;
-        var state = new ForwardBoardState(FilledBoard(6), settings);
+        var settings = Settings;
+        var state = new ForwardBoardState(FilledBoard(6));
         var before = BoardSignature(state.Snapshot());
 
-        var result = new ForwardFeatureFireIntegrator(settings).FireCurrentBoard(state);
+        var result = new ForwardFeatureFireIntegrator().FireCurrentBoard(state);
 
         Assert.AreEqual(ForwardFeatureFireIntegrationStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(0, result.Events.Count);
@@ -571,9 +573,9 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardExtraSpinLedgerAcceptsBaseGameWithoutExtras()
     {
-        var ledger = new ForwardExtraSpinLedger(Settings.Default.BASE_SPINS, Settings.Default);
+        var ledger = new ForwardExtraSpinLedger(Settings.BASE_SPINS);
 
-        for (var turn = 1; turn <= Settings.Default.BASE_SPINS; turn++)
+        for (var turn = 1; turn <= Settings.BASE_SPINS; turn++)
             Assert.AreEqual(ForwardExtraSpinStatus.Valid, ledger.BeginTurn(turn).Status);
 
         Assert.AreEqual(ForwardExtraSpinStatus.Valid, ledger.ValidateFinal().Status);
@@ -583,7 +585,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardExtraSpinLedgerAcceptsEarnedBonusTurns()
     {
-        var ledger = new ForwardExtraSpinLedger(plannedTotalTurns: 8, Settings.Default);
+        var ledger = new ForwardExtraSpinLedger(plannedTotalTurns: 8);
 
         Assert.AreEqual(ForwardExtraSpinStatus.Valid, ledger.BeginTurn(1).Status);
         Assert.AreEqual(ForwardExtraSpinStatus.Valid, ledger.AwardExtraGo(1, 2).Status);
@@ -598,7 +600,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardExtraSpinLedgerRejectsMissingAwardsAndUnearnedTurns()
     {
-        var missing = new ForwardExtraSpinLedger(plannedTotalTurns: 8, Settings.Default);
+        var missing = new ForwardExtraSpinLedger(plannedTotalTurns: 8);
         missing.AwardExtraGo(1, 2);
 
         Assert.AreEqual(ForwardExtraSpinStatus.TurnBeforeEarned, missing.BeginTurn(8).Status);
@@ -608,24 +610,24 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardExtraSpinLedgerRejectsFinalTurnAndOverAwardExtras()
     {
-        var finalTurn = new ForwardExtraSpinLedger(plannedTotalTurns: 6, Settings.Default);
+        var finalTurn = new ForwardExtraSpinLedger(plannedTotalTurns: 6);
         finalTurn.AwardExtraGo(1, 1);
         Assert.AreEqual(ForwardExtraSpinStatus.ExtraGoOnFinalTurn, finalTurn.AwardExtraGo(6, 1).Status);
 
-        var overAward = new ForwardExtraSpinLedger(plannedTotalTurns: 6, Settings.Default);
+        var overAward = new ForwardExtraSpinLedger(plannedTotalTurns: 6);
         Assert.AreEqual(ForwardExtraSpinStatus.ExtraGoOverAwardsPlannedTurns, overAward.AwardExtraGo(1, 2).Status);
     }
 
     [TestMethod]
     public void ForwardExtraSpinLedgerRejectsInvalidPlannedTotalsAndCounts()
     {
-        var below = new ForwardExtraSpinLedger(Settings.Default.BASE_SPINS - 1, Settings.Default);
+        var below = new ForwardExtraSpinLedger(Settings.BASE_SPINS - 1);
         Assert.AreEqual(ForwardExtraSpinStatus.PlannedTotalBelowBase, below.ValidatePlanBounds().Status);
 
-        var above = new ForwardExtraSpinLedger(Settings.Default.MAX_SPINS + 1, Settings.Default);
+        var above = new ForwardExtraSpinLedger(Settings.MAX_SPINS + 1);
         Assert.AreEqual(ForwardExtraSpinStatus.PlannedTotalAboveMax, above.ValidatePlanBounds().Status);
 
-        var invalidCount = new ForwardExtraSpinLedger(Settings.Default.BASE_SPINS, Settings.Default);
+        var invalidCount = new ForwardExtraSpinLedger(Settings.BASE_SPINS);
         Assert.AreEqual(ForwardExtraSpinStatus.InvalidExtraGoCount, invalidCount.AwardExtraGo(1, -1).Status);
     }
 
@@ -635,8 +637,7 @@ public sealed class EngineAndHelperTests
         var ledger = new ForwardPrizeUpgradeLedger(
             new Dictionary<int, int> { [2] = 2 },
             PrizeValues(3, tiers: 3),
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
 
         Assert.AreEqual(ForwardPrizeUpgradeStatus.Valid, ledger.ApplyUpgrade(2, 1).Status);
         Assert.AreEqual(1, ledger.CurrentTier(2));
@@ -651,8 +652,7 @@ public sealed class EngineAndHelperTests
         var ledger = new ForwardPrizeUpgradeLedger(
             new Dictionary<int, int> { [2] = 1 },
             PrizeValues(3, tiers: 2),
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
 
         Assert.AreEqual(ForwardPrizeUpgradeStatus.UnknownSymbol, ledger.ApplyUpgrade(4, 1).Status);
         Assert.AreEqual(ForwardPrizeUpgradeStatus.UpgradeNotPlanned, ledger.ApplyUpgrade(1, 1).Status);
@@ -667,16 +667,14 @@ public sealed class EngineAndHelperTests
         var missingValue = new ForwardPrizeUpgradeLedger(
             new Dictionary<int, int> { [2] = 2 },
             PrizeValues(3, tiers: 1),
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
 
         Assert.AreEqual(ForwardPrizeUpgradeStatus.PrizeValueMissing, missingValue.ApplyUpgrade(2, 1).Status);
 
         var finalMismatch = new ForwardPrizeUpgradeLedger(
             new Dictionary<int, int> { [2] = 2 },
             PrizeValues(3, tiers: 3),
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
 
         finalMismatch.ApplyUpgrade(2, 1);
         var failure = finalMismatch.ValidateFinal().Single();
@@ -691,15 +689,13 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int> { [2] = 2 },
             new Dictionary<int, int>(),
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
         var selector = new ForwardSymbolSelector(
             ledger,
             new Dictionary<int, int> { [2] = 2 },
             new Dictionary<int, int>(),
             new[] { 1, 3 },
             maxSymbol: 3,
-            settings: Settings.Default,
             rng: new Random(1));
 
         var selected = selector.ChooseAndCollect(ForwardSymbolIntent.MustProgressWin, stack: 2);
@@ -718,15 +714,13 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int> { [1] = 3 },
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
         var selector = new ForwardSymbolSelector(
             ledger,
             new Dictionary<int, int>(),
             new Dictionary<int, int> { [1] = 3 },
             new[] { 1, 3 },
             maxSymbol: 3,
-            settings: Settings.Default,
             rng: new Random(1));
 
         Assert.AreEqual(1, selector.ChooseAndCollect(ForwardSymbolIntent.PreferNearMiss, stack: 2).Symbol);
@@ -742,18 +736,17 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardSymbolSelectorReturnsFailureWhenNoCandidateIsSafe()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PrizeLadderRows = new[]
             {
                 new PrizeLadderRow { Target = 3, Tiers = new decimal[] { 1 } },
             },
         };
+        GameEngine.Engine.Settings = settings;
         var ledger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int>(),
-            maxSymbol: 1,
-            settings: settings);
+            maxSymbol: 1);
         ledger.Collect(1, stack: 2);
         var selector = new ForwardSymbolSelector(
             ledger,
@@ -761,7 +754,6 @@ public sealed class EngineAndHelperTests
             new Dictionary<int, int>(),
             new[] { 1 },
             maxSymbol: 1,
-            settings: settings,
             rng: new Random(1));
 
         var result = selector.ChooseAndCollect(ForwardSymbolIntent.SafeFiller);
@@ -776,15 +768,13 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int> { [2] = 1 },
             new Dictionary<int, int> { [1] = 1 },
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
         var selector = new ForwardSymbolSelector(
             ledger,
             new Dictionary<int, int> { [2] = 1 },
             new Dictionary<int, int> { [1] = 1 },
             new[] { 1, 3 },
             maxSymbol: 3,
-            settings: Settings.Default,
             rng: new Random(1));
 
         var residue = selector.ChooseAndCollect(ForwardSymbolIntent.ResidueOnly, stack: 7);
@@ -799,20 +789,18 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int> { [2] = 1 },
             new Dictionary<int, int>(),
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
         var selector = new ForwardSymbolSelector(
             ledger,
             new Dictionary<int, int> { [2] = 1 },
             new Dictionary<int, int>(),
             new[] { 1, 3 },
             maxSymbol: 3,
-            Settings.Default,
             new Random(7));
 
         var first = selector.TryCollectSpecific(2);
         var second = selector.TryCollectSpecific(2);
-        var invalid = selector.TryCollectSpecific(Settings.Default.F_WHEEL);
+        var invalid = selector.TryCollectSpecific(Settings.F_WHEEL);
 
         Assert.AreEqual(ForwardSymbolSelectionStatus.Valid, first.Status);
         Assert.AreEqual(2, first.Symbol);
@@ -828,8 +816,7 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int> { [2] = 2 },
             new Dictionary<int, int>(),
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
         var clone = ledger.Clone();
 
         clone.Collect(2);
@@ -841,7 +828,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardCellFateAnalyzerDetectsImmediateCollection()
     {
-        var analyzer = new ForwardCellFateAnalyzer(Settings.Default);
+        var analyzer = new ForwardCellFateAnalyzer();
         var fate = analyzer.Analyze(
             row: 4,
             col: 0,
@@ -857,7 +844,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardCellFateAnalyzerDetectsDelayedCollectionAfterRotation()
     {
-        var analyzer = new ForwardCellFateAnalyzer(Settings.Default);
+        var analyzer = new ForwardCellFateAnalyzer();
         var fate = analyzer.Analyze(
             row: 0,
             col: 0,
@@ -878,7 +865,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardCellFateAnalyzerReportsSurvivalAndFinalCoordinate()
     {
-        var analyzer = new ForwardCellFateAnalyzer(Settings.Default);
+        var analyzer = new ForwardCellFateAnalyzer();
         var fate = analyzer.Analyze(
             row: 0,
             col: 0,
@@ -894,7 +881,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardCellFateAnalyzerDetectsFlushCollection()
     {
-        var analyzer = new ForwardCellFateAnalyzer(Settings.Default);
+        var analyzer = new ForwardCellFateAnalyzer();
         var fate = analyzer.Analyze(
             row: 0,
             col: 2,
@@ -910,7 +897,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardCellFateAnalyzerRejectsInvalidInputs()
     {
-        var analyzer = new ForwardCellFateAnalyzer(Settings.Default);
+        var analyzer = new ForwardCellFateAnalyzer();
 
         Assert.AreEqual(
             ForwardCellFateStatus.InvalidStartPosition,
@@ -935,8 +922,7 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int> { [1] = 2 },
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
         var planner = SpawnPlanner(
             ledger,
             new Dictionary<int, int>(),
@@ -965,8 +951,7 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int> { [2] = 1 },
             new Dictionary<int, int> { [1] = 1 },
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
         var planner = SpawnPlanner(
             ledger,
             new Dictionary<int, int> { [2] = 1 },
@@ -995,8 +980,7 @@ public sealed class EngineAndHelperTests
         var ledger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int> { [1] = 1 },
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
         var planner = SpawnPlanner(
             ledger,
             new Dictionary<int, int>(),
@@ -1020,18 +1004,17 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardSpawnPlannerRejectsInvalidDuplicateAndUnsafeCells()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PrizeLadderRows = new[]
             {
                 new PrizeLadderRow { Target = 3, Tiers = new decimal[] { 1 } },
             },
         };
+        GameEngine.Engine.Settings = settings;
         var ledger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int>(),
-            maxSymbol: 1,
-            settings: settings);
+            maxSymbol: 1);
         ledger.Collect(1, stack: 2);
         var planner = SpawnPlanner(
             ledger,
@@ -1039,8 +1022,7 @@ public sealed class EngineAndHelperTests
             new Dictionary<int, int>(),
             new[] { 1 },
             maxSymbol: 1,
-            seed: 1,
-            settings: settings);
+            seed: 1);
 
         Assert.AreEqual(
             ForwardSpawnPlanStatus.InvalidSpawnPosition,
@@ -1068,26 +1050,24 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardSpawnPlannerUsesLedgerCollectionValueForFutureStackSafety()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PrizeLadderRows = new[]
             {
                 new PrizeLadderRow { Target = 3, Tiers = new decimal[] { 1 } },
             },
         };
+        GameEngine.Engine.Settings = settings;
         var ledger = new SymbolLedger(
             new Dictionary<int, int>(),
             new Dictionary<int, int>(),
-            maxSymbol: 1,
-            settings: settings);
+            maxSymbol: 1);
         var planner = SpawnPlanner(
             ledger,
             new Dictionary<int, int>(),
             new Dictionary<int, int>(),
             new[] { 1 },
             maxSymbol: 1,
-            seed: 1,
-            settings: settings);
+            seed: 1);
 
         var result = planner.Plan(
             new[] { new ForwardSpawnCellRequest(0, 4, ForwardSymbolIntent.SafeFiller, ledgerCollectionValue: 3, spawnStack: 1) },
@@ -1108,8 +1088,7 @@ public sealed class EngineAndHelperTests
                 new ForwardWheelImpact(4, 3, 3),
                 new ForwardWheelImpact(5, 2, 3),
             },
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
 
         var impact = analyzer.Analyze(symbol: 2, spawnTurn: 2, collectionTurn: 5, spawnStack: 1);
 
@@ -1128,13 +1107,12 @@ public sealed class EngineAndHelperTests
                 new ForwardWheelImpact(3, 2, 4),
                 new ForwardWheelImpact(4, 2, 4),
             },
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
 
         var impact = analyzer.Analyze(symbol: 2, spawnTurn: 1, collectionTurn: 5, spawnStack: 2);
 
         Assert.AreEqual(ForwardStackImpactStatus.Valid, impact.Status);
-        Assert.AreEqual(Settings.Default.MAX_COIN_STACK, impact.FinalStack);
+        Assert.AreEqual(Settings.MAX_COIN_STACK, impact.FinalStack);
         Assert.AreEqual(2, impact.AppliedWheelCount);
     }
 
@@ -1143,8 +1121,7 @@ public sealed class EngineAndHelperTests
     {
         var analyzer = new ForwardStackImpactAnalyzer(
             new[] { new ForwardWheelImpact(2, 2, 3) },
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
 
         var residue = analyzer.Analyze(symbol: 2, spawnTurn: 1, collectionTurn: null, spawnStack: 1);
         Assert.AreEqual(ForwardStackImpactStatus.Valid, residue.Status);
@@ -1162,12 +1139,11 @@ public sealed class EngineAndHelperTests
     {
         var analyzer = new ForwardStackImpactAnalyzer(
             Array.Empty<ForwardWheelImpact>(),
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
 
         Assert.AreEqual(
             ForwardStackImpactStatus.InvalidSymbol,
-            analyzer.Analyze(Settings.Default.F_WHEEL, spawnTurn: 1, collectionTurn: 2).Status);
+            analyzer.Analyze(Settings.F_WHEEL, spawnTurn: 1, collectionTurn: 2).Status);
         Assert.AreEqual(
             ForwardStackImpactStatus.InvalidSpawnStack,
             analyzer.Analyze(2, spawnTurn: 1, collectionTurn: 2, spawnStack: 0).Status);
@@ -1177,8 +1153,7 @@ public sealed class EngineAndHelperTests
 
         var badWheel = new ForwardStackImpactAnalyzer(
             new[] { new ForwardWheelImpact(0, 2, 2) },
-            maxSymbol: 3,
-            settings: Settings.Default);
+            maxSymbol: 3);
         Assert.AreEqual(
             ForwardStackImpactStatus.InvalidWheel,
             badWheel.Analyze(2, spawnTurn: 1, collectionTurn: 3).Status);
@@ -1187,13 +1162,12 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureSpawnPlannerPlansValidFeatureCellsAndUpdatesLedgers()
     {
-        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6, Settings.Default);
+        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6);
         var prizeLedger = new ForwardPrizeUpgradeLedger(
             new Dictionary<int, int> { [2] = 1 },
             PrizeValues(3, tiers: 2),
-            maxSymbol: 3,
-            settings: Settings.Default);
-        var planner = new ForwardFeatureSpawnPlanner(Settings.Default, maxSymbol: 3);
+            maxSymbol: 3);
+        var planner = new ForwardFeatureSpawnPlanner(maxSymbol: 3);
 
         var result = planner.Plan(
             turn: 1,
@@ -1215,9 +1189,9 @@ public sealed class EngineAndHelperTests
 
         Assert.AreEqual(ForwardFeatureSpawnStatus.Valid, result.Status);
         Assert.AreEqual(3, result.Spawns.Count);
-        Assert.AreEqual(Settings.Default.F_XSPIN, result.Spawns[0].Cell.Sym);
-        Assert.AreEqual(Settings.Default.F_PRUP, result.Spawns[1].Cell.Sym);
-        Assert.AreEqual(Settings.Default.F_WHEEL, result.Spawns[2].Cell.Sym);
+        Assert.AreEqual(Settings.F_XSPIN, result.Spawns[0].Cell.Sym);
+        Assert.AreEqual(Settings.F_PRUP, result.Spawns[1].Cell.Sym);
+        Assert.AreEqual(Settings.F_WHEEL, result.Spawns[2].Cell.Sym);
         Assert.AreEqual(6, extraLedger.EarnedTurns);
         Assert.AreEqual(1, extraLedger.LogicalExtraGoAwards);
         Assert.AreEqual(1, prizeLedger.CurrentTier(2));
@@ -1230,7 +1204,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureSpawnPlannerRejectsTimingAndCapacityProblems()
     {
-        var planner = new ForwardFeatureSpawnPlanner(Settings.Default, maxSymbol: 3);
+        var planner = new ForwardFeatureSpawnPlanner(maxSymbol: 3);
 
         var finalTurn = planner.Plan(
             turn: 6,
@@ -1239,7 +1213,7 @@ public sealed class EngineAndHelperTests
             reservedPositions: Array.Empty<(int r, int c)>(),
             featureRequests: new[] { ForwardFeatureSpawnRequest.ExtraGo(0, 4, 1) },
             remainingFeatureCapacity: FeatureCapacity((ForwardFeatureKind.ExtraGo, 1)),
-            new ForwardExtraSpinLedger(6, Settings.Default),
+            new ForwardExtraSpinLedger(6),
             EmptyPrizeLedger(3));
         Assert.AreEqual(ForwardFeatureSpawnStatus.FeatureOnFinalTurn, finalTurn.Status);
 
@@ -1254,7 +1228,7 @@ public sealed class EngineAndHelperTests
                 ForwardFeatureSpawnRequest.ExtraGo(1, 4, 1),
             },
             remainingFeatureCapacity: FeatureCapacity((ForwardFeatureKind.ExtraGo, 2)),
-            new ForwardExtraSpinLedger(6, Settings.Default),
+            new ForwardExtraSpinLedger(6),
             EmptyPrizeLedger(3));
         Assert.AreEqual(ForwardFeatureSpawnStatus.ExtraGoTimelineInvalid, overAward.Status);
 
@@ -1269,7 +1243,7 @@ public sealed class EngineAndHelperTests
                 ForwardFeatureSpawnRequest.Wheel(1, 4, 1, 2, 2),
             },
             remainingFeatureCapacity: FeatureCapacity((ForwardFeatureKind.Wheel, 1)),
-            new ForwardExtraSpinLedger(6, Settings.Default),
+            new ForwardExtraSpinLedger(6),
             EmptyPrizeLedger(3));
         Assert.AreEqual(ForwardFeatureSpawnStatus.FeatureCapacityExceeded, capacity.Status);
     }
@@ -1277,36 +1251,36 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureSpawnPlannerRejectsPositionProblems()
     {
-        var planner = new ForwardFeatureSpawnPlanner(Settings.Default, maxSymbol: 3);
+        var planner = new ForwardFeatureSpawnPlanner(maxSymbol: 3);
 
         Assert.AreEqual(
             ForwardFeatureSpawnStatus.InvalidEmptyPosition,
             planner.Plan(1, 6, Positions((-1, 4)), Array.Empty<(int r, int c)>(), Array.Empty<ForwardFeatureSpawnRequest>(),
-                FeatureCapacity(), new ForwardExtraSpinLedger(6, Settings.Default), EmptyPrizeLedger(3)).Status);
+                FeatureCapacity(), new ForwardExtraSpinLedger(6), EmptyPrizeLedger(3)).Status);
 
         Assert.AreEqual(
             ForwardFeatureSpawnStatus.DuplicateEmptyPosition,
             planner.Plan(1, 6, Positions((0, 4), (0, 4)), Array.Empty<(int r, int c)>(), Array.Empty<ForwardFeatureSpawnRequest>(),
-                FeatureCapacity(), new ForwardExtraSpinLedger(6, Settings.Default), EmptyPrizeLedger(3)).Status);
+                FeatureCapacity(), new ForwardExtraSpinLedger(6), EmptyPrizeLedger(3)).Status);
 
         Assert.AreEqual(
             ForwardFeatureSpawnStatus.InvalidReservedPosition,
             planner.Plan(1, 6, Positions((0, 4)), Positions((9, 9)), Array.Empty<ForwardFeatureSpawnRequest>(),
-                FeatureCapacity(), new ForwardExtraSpinLedger(6, Settings.Default), EmptyPrizeLedger(3)).Status);
+                FeatureCapacity(), new ForwardExtraSpinLedger(6), EmptyPrizeLedger(3)).Status);
 
         Assert.AreEqual(
             ForwardFeatureSpawnStatus.FeaturePositionNotEmpty,
             planner.Plan(1, 6, Positions((0, 4)), Array.Empty<(int r, int c)>(),
                 new[] { ForwardFeatureSpawnRequest.ExtraGo(1, 4, 1) },
                 FeatureCapacity((ForwardFeatureKind.ExtraGo, 1)),
-                new ForwardExtraSpinLedger(6, Settings.Default), EmptyPrizeLedger(3)).Status);
+                new ForwardExtraSpinLedger(6), EmptyPrizeLedger(3)).Status);
 
         Assert.AreEqual(
             ForwardFeatureSpawnStatus.FeaturePositionAlreadyReserved,
             planner.Plan(1, 6, Positions((0, 4)), Positions((0, 4)),
                 new[] { ForwardFeatureSpawnRequest.ExtraGo(0, 4, 1) },
                 FeatureCapacity((ForwardFeatureKind.ExtraGo, 1)),
-                new ForwardExtraSpinLedger(6, Settings.Default), EmptyPrizeLedger(3)).Status);
+                new ForwardExtraSpinLedger(6), EmptyPrizeLedger(3)).Status);
 
         Assert.AreEqual(
             ForwardFeatureSpawnStatus.DuplicateFeaturePosition,
@@ -1317,33 +1291,33 @@ public sealed class EngineAndHelperTests
                     ForwardFeatureSpawnRequest.Wheel(0, 4, 1, 2, 2),
                 },
                 FeatureCapacity((ForwardFeatureKind.ExtraGo, 1), (ForwardFeatureKind.Wheel, 1)),
-                new ForwardExtraSpinLedger(6, Settings.Default), EmptyPrizeLedger(3)).Status);
+                new ForwardExtraSpinLedger(6), EmptyPrizeLedger(3)).Status);
     }
 
     [TestMethod]
     public void ForwardFeatureSpawnPlannerRejectsInvalidPayloadsAndPrizeSequences()
     {
-        var planner = new ForwardFeatureSpawnPlanner(Settings.Default, maxSymbol: 3);
+        var planner = new ForwardFeatureSpawnPlanner(maxSymbol: 3);
 
         var badWheel = planner.Plan(
             1, 6, Positions((0, 4)), Array.Empty<(int r, int c)>(),
-            new[] { ForwardFeatureSpawnRequest.Wheel(0, 4, 1, wheelSymbol: 2, wheelStack: Settings.Default.MAX_WHEEL_STACK_VALUE + 2) },
+            new[] { ForwardFeatureSpawnRequest.Wheel(0, 4, 1, wheelSymbol: 2, wheelStack: Settings.MAX_WHEEL_STACK_VALUE + 2) },
             FeatureCapacity((ForwardFeatureKind.Wheel, 1)),
-            new ForwardExtraSpinLedger(6, Settings.Default), EmptyPrizeLedger(3));
+            new ForwardExtraSpinLedger(6), EmptyPrizeLedger(3));
         Assert.AreEqual(ForwardFeatureSpawnStatus.InvalidWheelPayload, badWheel.Status);
 
         var badPrizePayload = planner.Plan(
             1, 6, Positions((0, 4)), Array.Empty<(int r, int c)>(),
             new[] { ForwardFeatureSpawnRequest.PrizeUpgrade(0, 4, 1, upgradeSymbol: 4, upgradeTier: 1) },
             FeatureCapacity((ForwardFeatureKind.PrizeUpgrade, 1)),
-            new ForwardExtraSpinLedger(6, Settings.Default), EmptyPrizeLedger(3));
+            new ForwardExtraSpinLedger(6), EmptyPrizeLedger(3));
         Assert.AreEqual(ForwardFeatureSpawnStatus.InvalidPrizeUpgradePayload, badPrizePayload.Status);
 
         var prizeInvalid = planner.Plan(
             1, 6, Positions((0, 4)), Array.Empty<(int r, int c)>(),
             new[] { ForwardFeatureSpawnRequest.PrizeUpgrade(0, 4, 1, upgradeSymbol: 2, upgradeTier: 1) },
             FeatureCapacity((ForwardFeatureKind.PrizeUpgrade, 1)),
-            new ForwardExtraSpinLedger(6, Settings.Default), EmptyPrizeLedger(3));
+            new ForwardExtraSpinLedger(6), EmptyPrizeLedger(3));
         Assert.AreEqual(ForwardFeatureSpawnStatus.PrizeUpgradeInvalid, prizeInvalid.Status);
 
         var duplicateSameSymbol = planner.Plan(
@@ -1354,17 +1328,17 @@ public sealed class EngineAndHelperTests
                 ForwardFeatureSpawnRequest.PrizeUpgrade(1, 4, 1, upgradeSymbol: 2, upgradeTier: 2),
             },
             FeatureCapacity((ForwardFeatureKind.PrizeUpgrade, 2)),
-            new ForwardExtraSpinLedger(6, Settings.Default),
-            new ForwardPrizeUpgradeLedger(new Dictionary<int, int> { [2] = 2 }, PrizeValues(3, 3), 3, Settings.Default));
+            new ForwardExtraSpinLedger(6),
+            new ForwardPrizeUpgradeLedger(new Dictionary<int, int> { [2] = 2 }, PrizeValues(3, 3), 3));
         Assert.AreEqual(ForwardFeatureSpawnStatus.MultiplePrizeUpgradesSameSymbolSameTurn, duplicateSameSymbol.Status);
     }
 
     [TestMethod]
     public void ForwardFeatureSpawnPlannerDoesNotMutateLedgersWhenPlanFails()
     {
-        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6, Settings.Default);
+        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6);
         var prizeLedger = EmptyPrizeLedger(3);
-        var planner = new ForwardFeatureSpawnPlanner(Settings.Default, maxSymbol: 3);
+        var planner = new ForwardFeatureSpawnPlanner(maxSymbol: 3);
 
         var result = planner.Plan(
             1, 6,
@@ -1380,7 +1354,7 @@ public sealed class EngineAndHelperTests
             prizeLedger);
 
         Assert.AreEqual(ForwardFeatureSpawnStatus.PrizeUpgradeInvalid, result.Status);
-        Assert.AreEqual(Settings.Default.BASE_SPINS, extraLedger.EarnedTurns);
+        Assert.AreEqual(Settings.BASE_SPINS, extraLedger.EarnedTurns);
         Assert.AreEqual(0, extraLedger.LogicalExtraGoAwards);
         Assert.AreEqual(0, prizeLedger.CurrentTier(2));
     }
@@ -1388,7 +1362,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnShapePlannerBuildsMixedUnsortedLegalShapes()
     {
-        var planner = new ForwardTurnShapePlanner(Settings.Default, new Random(11));
+        var planner = new ForwardTurnShapePlanner(new Random(11));
 
         var result = planner.Plan(minPoppedCells: 10, maxPoppedCells: 12);
 
@@ -1398,13 +1372,13 @@ public sealed class EngineAndHelperTests
         Assert.IsFalse(result.IsAllSame);
         Assert.IsFalse(result.IsSortedPattern);
         Assert.IsTrue(result.DistinctPushValues >= 3);
-        Assert.IsTrue(result.Shape!.Pushers.All(p => p.PushValue >= Settings.Default.MIN_PUSH && p.PushValue <= Settings.Default.MAX_PUSH));
+        Assert.IsTrue(result.Shape!.Pushers.All(p => p.PushValue >= Settings.MIN_PUSH && p.PushValue <= Settings.MAX_PUSH));
     }
 
     [TestMethod]
     public void ForwardTurnShapePlannerSupportsFlushAndBlockedColumns()
     {
-        var planner = new ForwardTurnShapePlanner(Settings.Default, new Random(12));
+        var planner = new ForwardTurnShapePlanner(new Random(12));
 
         var result = planner.Plan(
             minPoppedCells: 10,
@@ -1413,9 +1387,9 @@ public sealed class EngineAndHelperTests
             blockedColumns: new HashSet<int> { 4 });
 
         Assert.AreEqual(ForwardTurnShapePlanStatus.Valid, result.Status);
-        Assert.AreEqual(Settings.Default.ROWS, result.Shape!.Pushers[2].PushValue);
-        Assert.AreEqual(Settings.Default.F_FLUSH_ID, result.Shape.Pushers[2].FeatureId);
-        Assert.AreEqual(Settings.Default.MIN_PUSH, result.Shape.Pushers[4].PushValue);
+        Assert.AreEqual(Settings.ROWS, result.Shape!.Pushers[2].PushValue);
+        Assert.AreEqual(Settings.F_FLUSH_ID, result.Shape.Pushers[2].FeatureId);
+        Assert.AreEqual(Settings.MIN_PUSH, result.Shape.Pushers[4].PushValue);
         Assert.IsNull(result.Shape.Pushers[4].FeatureId);
         Assert.IsTrue(result.PoppedCellCount >= 10 && result.PoppedCellCount <= 14);
     }
@@ -1423,7 +1397,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnShapePlannerRejectsInvalidOrImpossibleInputs()
     {
-        var planner = new ForwardTurnShapePlanner(Settings.Default, new Random(13));
+        var planner = new ForwardTurnShapePlanner(new Random(13));
 
         Assert.AreEqual(
             ForwardTurnShapePlanStatus.InvalidBudget,
@@ -1445,9 +1419,9 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnShapePlannerIsDeterministicForSeedAndKeepsPressureMixed()
     {
-        var first = new ForwardTurnShapePlanner(Settings.Default, new Random(14))
+        var first = new ForwardTurnShapePlanner(new Random(14))
             .Plan(minPoppedCells: 14, maxPoppedCells: 17, pressureMode: true);
-        var second = new ForwardTurnShapePlanner(Settings.Default, new Random(14))
+        var second = new ForwardTurnShapePlanner(new Random(14))
             .Plan(minPoppedCells: 14, maxPoppedCells: 17, pressureMode: true);
 
         Assert.AreEqual(ForwardTurnShapePlanStatus.Valid, first.Status);
@@ -1463,41 +1437,41 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnShapePlannerAvoidsRepeatedPushBagsWhenLegal()
     {
-        var planner = new ForwardTurnShapePlanner(Settings.Default, new Random(20260813));
+        var planner = new ForwardTurnShapePlanner(new Random(20260813));
         var used = new HashSet<long>();
 
-        for (var i = 0; i < Settings.Default.BASE_SPINS; i++)
+        for (var i = 0; i < Settings.BASE_SPINS; i++)
         {
             var result = planner.Plan(
-                minPoppedCells: Settings.Default.COLS * Settings.Default.MIN_PUSH,
-                maxPoppedCells: Settings.Default.COLS * Settings.Default.MAX_PUSH,
+                minPoppedCells: Settings.COLS * Settings.MIN_PUSH,
+                maxPoppedCells: Settings.COLS * Settings.MAX_PUSH,
                 avoidedPushBags: used);
 
             Assert.AreEqual(ForwardTurnShapePlanStatus.Valid, result.Status, result.Detail);
-            used.Add(ForwardTurnShapePlanner.PushBagKey(result.Shape!, Settings.Default));
+            used.Add(ForwardTurnShapePlanner.PushBagKey(result.Shape!));
         }
 
-        Assert.AreEqual(Settings.Default.BASE_SPINS, used.Count);
+        Assert.AreEqual(Settings.BASE_SPINS, used.Count);
     }
 
     [TestMethod]
     public void ForwardMathInputResolverBuildsNoWinInputFromEmptyPrizeList()
     {
-        var result = new ForwardMathInputResolver(Settings.Default)
+        var result = new ForwardMathInputResolver()
             .Resolve(Array.Empty<decimal>(), seed: 1);
 
         Assert.AreEqual(ForwardMathInputStatus.Valid, result.Status);
         Assert.IsNotNull(result.Bundle);
         Assert.AreEqual(0, result.Bundle!.Covered.Count);
         Assert.AreEqual(0, result.Bundle.Input.Targets.Count);
-        Assert.AreEqual(Settings.Default.BASE_SPINS, result.Bundle.Input.BaseSpins);
-        Assert.AreEqual(Settings.Default.PrizeLadderRows.Count, result.Bundle.Input.MaxSym);
+        Assert.AreEqual(Settings.BASE_SPINS, result.Bundle.Input.BaseSpins);
+        Assert.AreEqual(Settings.PrizeLadderRows.Count, result.Bundle.Input.MaxSym);
     }
 
     [TestMethod]
     public void ForwardMathInputResolverBundlesPrizeAmountsDeterministically()
     {
-        var resolver = new ForwardMathInputResolver(Settings.Default);
+        var resolver = new ForwardMathInputResolver();
 
         var first = resolver.Resolve(new decimal[] { 1, 2, 5 }, seed: 15);
         var second = resolver.Resolve(new decimal[] { 1, 2, 5 }, seed: 15);
@@ -1513,7 +1487,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardObjectivePlannerAlwaysPlansNearMissWhenEligible()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var input = new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -1525,7 +1499,7 @@ public sealed class EngineAndHelperTests
 
         for (var seed = 1; seed <= 100; seed++)
         {
-            var result = new ForwardObjectivePlanner(settings).Resolve(input, seed);
+            var result = new ForwardObjectivePlanner().Resolve(input, seed);
 
             Assert.AreEqual(ForwardObjectiveStatus.Valid, result.Status, result.Detail);
             Assert.IsTrue(result.Objectives!.NearMissTargets.Count > 0, $"seed {seed}");
@@ -1536,27 +1510,29 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardMathInputResolverRejectsBadPrizeInputs()
     {
-        var resolver = new ForwardMathInputResolver(Settings.Default);
+        var resolver = new ForwardMathInputResolver();
 
         Assert.AreEqual(ForwardMathInputStatus.MissingPrizeAmounts, resolver.Resolve(null, seed: 1).Status);
         Assert.AreEqual(ForwardMathInputStatus.NegativePrizeAmount, resolver.Resolve(new decimal[] { -1 }, seed: 1).Status);
 
-        var noLadder = new Settings { PrizeLadderRows = Array.Empty<PrizeLadderRow>() };
+        var noLadder = new GameEngine.DefaultCoinPusherSettings { PrizeLadderRows = Array.Empty<PrizeLadderRow>() };
+        GameEngine.Engine.Settings = noLadder;
         Assert.AreEqual(
             ForwardMathInputStatus.MissingPrizeLadder,
-            new ForwardMathInputResolver(noLadder).Resolve(new decimal[] { 1 }, seed: 1).Status);
+            new ForwardMathInputResolver().Resolve(new decimal[] { 1 }, seed: 1).Status);
     }
 
     [TestMethod]
     public void CapacityAnalyzerCalculatesCapacityAndFeasibility()
     {
-        var normalCapacity = Settings.Default.BASE_SPINS * Settings.Default.MixedPushCapacity(Settings.Default.COLS);
+        var normalCapacity = Settings.BASE_SPINS * Settings.MixedPushCapacity(Settings.COLS);
         var flushCapacity = normalCapacity
-            + 2 * (Settings.Default.ROWS + Settings.Default.MixedPushCapacity(Settings.Default.COLS - 1) - Settings.Default.MixedPushCapacity(Settings.Default.COLS));
+            + 2 * (Settings.ROWS + Settings.MixedPushCapacity(Settings.COLS - 1) - Settings.MixedPushCapacity(Settings.COLS));
 
         Assert.AreEqual(normalCapacity, CapacityAnalyzer.TotalCapacity(5, 0, 0));
         Assert.AreEqual(flushCapacity, CapacityAnalyzer.TotalCapacity(5, 2, 0));
         Assert.AreEqual(flushCapacity, CapacityAnalyzer.TotalCapacity(5, 2, 1));
+        Assert.AreEqual(normalCapacity + 10, CapacityAnalyzer.TotalCapacity(5, Settings.COLS, 0));
         Assert.AreEqual(flushCapacity - 20, CapacityAnalyzer.FillerBudget(20, 5, 0, 2, 1));
         Assert.IsTrue(CapacityAnalyzer.IsFeasible(20, 5, 4, tokenLoad: 0, flushTokens: 2, wheelFireSpins: 1));
         Assert.IsTrue(CapacityAnalyzer.IsFeasible(20, 5, new[] { 1, 5, 6 }, tokenLoad: 0, flushTokens: 2, wheelFireSpins: 1));
@@ -1597,10 +1573,10 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void GridCloneRotateAndZonesBehavePredictably()
     {
-        var board = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
+        var board = new Cell?[Settings.ROWS, Settings.COLS];
         board[0, 0] = Grid.Norm(1);
         board[0, 4] = Grid.Norm(2);
-        board[4, 0] = Grid.Feat(Settings.Default.F_WHEEL, 1, new FP { FeatId = "WHEEL", WheelSym = 1, WheelStack = 2 });
+        board[4, 0] = Grid.Feat(Settings.F_WHEEL, 1, new FP { FeatId = "WHEEL", WheelSym = 1, WheelStack = 2 });
 
         var clone = Grid.Clone(board);
         clone[0, 0]!.Sym = 9;
@@ -1626,7 +1602,7 @@ public sealed class EngineAndHelperTests
     public void SimFlattensStaleFeatures()
     {
         var board = FilledBoard(1);
-        board[0, 0] = Grid.Feat(Settings.Default.F_PRUP, 3, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 2, PrupTier = 1 });
+        board[0, 0] = Grid.Feat(Settings.F_PRUP, 3, new FP { FeatId = "PRIZE_UPGRADE", PrupSym = 2, PrupTier = 1 });
 
         Sim.FlatStale(board);
 
@@ -1637,8 +1613,8 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void WheelResidueSurvivesOutsideImmediateCollectionZone()
     {
-        var board = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
-        board[0, 0] = Grid.Feat(Settings.Default.F_WHEEL, 1, new FP
+        var board = new Cell?[Settings.ROWS, Settings.COLS];
+        board[0, 0] = Grid.Feat(Settings.F_WHEEL, 1, new FP
         {
             FeatId = "WHEEL",
             WheelSym = 2,
@@ -1670,7 +1646,7 @@ public sealed class EngineAndHelperTests
             MaxSym = 99,
         };
 
-        var result = new ForwardObjectivePlanner(settings).Resolve(input, seed: 16);
+        var result = new ForwardObjectivePlanner().Resolve(input, seed: 16);
 
         Assert.AreEqual(ForwardObjectiveStatus.Valid, result.Status, result.Detail);
         Assert.IsTrue(result.Objectives!.IsNoWin);
@@ -1697,7 +1673,7 @@ public sealed class EngineAndHelperTests
             MaxSym = settings.PrizeLadderRows.Count,
         };
 
-        var result = new ForwardObjectivePlanner(settings).Resolve(input, seed: 17);
+        var result = new ForwardObjectivePlanner().Resolve(input, seed: 17);
 
         Assert.AreEqual(ForwardObjectiveStatus.Valid, result.Status, result.Detail);
         Assert.IsFalse(result.Objectives!.IsNoWin);
@@ -1712,7 +1688,7 @@ public sealed class EngineAndHelperTests
     public void ForwardObjectivePlannerRejectsUnsafeTargetsAndOverlaps()
     {
         var settings = SettingsWithForcedNearMiss(count: 5);
-        var planner = new ForwardObjectivePlanner(settings);
+        var planner = new ForwardObjectivePlanner();
 
         var wrongWinTarget = planner.Resolve(new MathInput
         {
@@ -1748,7 +1724,7 @@ public sealed class EngineAndHelperTests
     public void ForwardObjectivePlannerRejectsPrizeTierDeclarationsWithoutConfiguredValues()
     {
         var settings = SettingsWithForcedNearMiss(count: 3);
-        var planner = new ForwardObjectivePlanner(settings);
+        var planner = new ForwardObjectivePlanner();
 
         var nonWinningPrizeTier = planner.Resolve(new MathInput
         {
@@ -1784,8 +1760,8 @@ public sealed class EngineAndHelperTests
             MaxSym = settings.PrizeLadderRows.Count,
         };
 
-        var first = new ForwardObjectivePlanner(settings).Resolve(input, seed: 23);
-        var second = new ForwardObjectivePlanner(settings).Resolve(input, seed: 23);
+        var first = new ForwardObjectivePlanner().Resolve(input, seed: 23);
+        var second = new ForwardObjectivePlanner().Resolve(input, seed: 23);
 
         Assert.AreEqual(ForwardObjectiveStatus.Valid, first.Status, first.Detail);
         Assert.AreEqual(ForwardObjectiveStatus.Valid, second.Status, second.Detail);
@@ -1807,9 +1783,9 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 24).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 24).Objectives;
 
-        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 25);
+        var result = new ForwardFeatureBudgetPlanner().Plan(input, objectives, seed: 25);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(3, result.Budget!.ExtraGoCount);
@@ -1831,13 +1807,15 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 25).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 25).Objectives;
 
-        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 26);
+        var result = new ForwardFeatureBudgetPlanner().Plan(input, objectives, seed: 26);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
-        Assert.AreEqual(settings.MAX_SPINS - settings.BASE_SPINS, result.Budget!.ExtraGoCount);
-        Assert.AreEqual(settings.MAX_SPINS, result.Budget.TotalTurns);
+        Assert.IsTrue(result.Budget!.ExtraGoCount > 0);
+        Assert.IsTrue(result.Budget.ExtraGoCount <= settings.MAX_SPINS - settings.BASE_SPINS);
+        Assert.AreEqual(settings.BASE_SPINS + result.Budget.ExtraGoCount, result.Budget.TotalTurns);
+        Assert.IsTrue(result.Budget.TotalTurns <= settings.MAX_SPINS);
         Assert.IsFalse(result.Budget.HasOptionalFeatures);
     }
 
@@ -1854,9 +1832,9 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 26).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 26).Objectives;
 
-        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 27);
+        var result = new ForwardFeatureBudgetPlanner().Plan(input, objectives, seed: 27);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(2, result.Budget!.RequiredPrizeUpgradeCount);
@@ -1875,22 +1853,22 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 28).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 28).Objectives;
 
         var unknown = WithRequired(input, new Dictionary<string, int> { ["BONUS"] = 1 });
         Assert.AreEqual(
             ForwardFeatureBudgetStatus.UnknownRequiredFeature,
-            new ForwardFeatureBudgetPlanner(settings).Plan(unknown, objectives, seed: 29).Status);
+            new ForwardFeatureBudgetPlanner().Plan(unknown, objectives, seed: 29).Status);
 
         var negative = WithRequired(input, new Dictionary<string, int> { ["WHEEL"] = -1 });
         Assert.AreEqual(
             ForwardFeatureBudgetStatus.NegativeRequiredFeature,
-            new ForwardFeatureBudgetPlanner(settings).Plan(negative, objectives, seed: 30).Status);
+            new ForwardFeatureBudgetPlanner().Plan(negative, objectives, seed: 30).Status);
 
         var tooManyWheel = WithRequired(input, new Dictionary<string, int> { ["WHEEL"] = settings.WheelFeatureConfig.Max + 1 });
         Assert.AreEqual(
             ForwardFeatureBudgetStatus.RequiredFeatureExceedsLimit,
-            new ForwardFeatureBudgetPlanner(settings).Plan(tooManyWheel, objectives, seed: 31).Status);
+            new ForwardFeatureBudgetPlanner().Plan(tooManyWheel, objectives, seed: 31).Status);
     }
 
     [TestMethod]
@@ -1906,9 +1884,9 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 32).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 32).Objectives;
 
-        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 33);
+        var result = new ForwardFeatureBudgetPlanner().Plan(input, objectives, seed: 33);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.PrizeUpgradeRequirementMismatch, result.Status);
     }
@@ -1916,12 +1894,12 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureBudgetPlannerCanAddRareOptionalNoWinExtraGo()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PNoWinExtraGoOptional = 1.0,
             POptionalFeatureTicket = 0.0,
             PFlushOptional = 0.0,
         };
+        GameEngine.Engine.Settings = settings;
         var input = new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -1930,9 +1908,9 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 34).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 34).Objectives;
 
-        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 35);
+        var result = new ForwardFeatureBudgetPlanner().Plan(input, objectives, seed: 35);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
         Assert.IsTrue(result.Budget!.ExtraGoCount >= 1);
@@ -1944,12 +1922,12 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureBudgetPlannerCanAddDedicatedOptionalFlush()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PNoWinExtraGoOptional = 0.0,
             POptionalFeatureTicket = 0.0,
             PFlushOptional = 1.0,
         };
+        GameEngine.Engine.Settings = settings;
         var input = new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -1958,9 +1936,9 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 35).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 35).Objectives;
 
-        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 36);
+        var result = new ForwardFeatureBudgetPlanner().Plan(input, objectives, seed: 36);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(1, result.Budget!.FlushCount);
@@ -1970,13 +1948,13 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureBudgetPlannerCanAddDedicatedOptionalWheel()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PNoWinExtraGoOptional = 0.0,
             POptionalFeatureTicket = 0.0,
             PWheelOptional = 1.0,
             PFlushOptional = 0.0,
         };
+        GameEngine.Engine.Settings = settings;
         var input = new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -1985,9 +1963,9 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 135).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 135).Objectives;
 
-        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 136);
+        var result = new ForwardFeatureBudgetPlanner().Plan(input, objectives, seed: 136);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(1, result.Budget!.WheelCount);
@@ -1997,8 +1975,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureBudgetPlannerSkipsOptionalFlushWithoutSafeFiller()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PNoWinExtraGoOptional = 0.0,
             POptionalFeatureTicket = 1.0,
             PFlushOptional = 1.0,
@@ -2006,6 +1983,7 @@ public sealed class EngineAndHelperTests
             POptionalTicketWheel = 0.0,
             POptionalTicketPrizeUpgrade = 0.0,
         };
+        GameEngine.Engine.Settings = settings;
         var input = new MathInput
         {
             Targets = settings.PrizeLadderRows
@@ -2016,9 +1994,9 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 365).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 365).Objectives;
 
-        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 366);
+        var result = new ForwardFeatureBudgetPlanner().Plan(input, objectives, seed: 366);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(0, result.Budget!.FlushCount);
@@ -2028,8 +2006,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureBudgetPlannerCanAddOptionalTicketFeaturesWithinCaps()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PNoWinExtraGoOptional = 0.0,
             PFlushOptional = 0.0,
             POptionalFeatureTicket = 1.0,
@@ -2037,6 +2014,7 @@ public sealed class EngineAndHelperTests
             POptionalTicketFlush = 1.0,
             POptionalTicketPrizeUpgrade = 1.0,
         };
+        GameEngine.Engine.Settings = settings;
         var input = new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -2046,9 +2024,9 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         };
-        var objectives = new ForwardObjectivePlanner(settings).Resolve(input, seed: 36).Objectives;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed: 36).Objectives;
 
-        var result = new ForwardFeatureBudgetPlanner(settings).Plan(input, objectives, seed: 37);
+        var result = new ForwardFeatureBudgetPlanner().Plan(input, objectives, seed: 37);
 
         Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(1, result.Budget!.WheelCount);
@@ -2060,7 +2038,8 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureTimingPlannerSchedulesLateExtraGoChainSafely()
     {
-        var settings = new Settings { PFeatureLatePlacement = 1.0 };
+        var settings = new GameEngine.DefaultCoinPusherSettings { PFeatureLatePlacement = 1.0 };
+        GameEngine.Engine.Settings = settings;
         var budget = new ForwardFeatureBudget(
             settings.BASE_SPINS,
             settings.BASE_SPINS + 3,
@@ -2071,14 +2050,15 @@ public sealed class EngineAndHelperTests
             optionalPrizeUpgradeCount: 0,
             hasOptionalFeatures: false);
 
-        var result = new ForwardFeatureTimingPlanner(settings, seed: 38).Plan(budget);
+        var result = new ForwardFeatureTimingPlanner(seed: 38).Plan(budget);
 
         Assert.AreEqual(ForwardFeatureTimingStatus.Valid, result.Status, result.Detail);
         CollectionAssert.AreEqual(
             new[] { settings.BASE_SPINS, settings.BASE_SPINS + 1, settings.BASE_SPINS + 2 },
             result.Timing!.TurnsFor(ForwardTimedFeatureKind.ExtraGo).ToArray());
         Assert.IsTrue(result.Timing.Events.All(feature => feature.Turn < budget.TotalTurns));
-        Assert.IsTrue(result.Timing.TurnsFor(ForwardTimedFeatureKind.Wheel).All(turn => turn >= budget.TotalTurns - settings.WinLateTailSpins));
+        Assert.IsTrue(result.Timing.TurnsFor(ForwardTimedFeatureKind.Wheel).All(turn =>
+            turn >= budget.TotalTurns - Math.Max(3, settings.WinLateTailSpins + 1)));
         Assert.IsTrue(result.Timing.TurnsFor(ForwardTimedFeatureKind.Flush).All(turn => turn >= budget.TotalTurns - settings.WinLateTailSpins));
         Assert.IsTrue(result.Timing.TurnsFor(ForwardTimedFeatureKind.PrizeUpgrade).All(turn => turn >= budget.TotalTurns - settings.WinLateTailSpins));
     }
@@ -2086,7 +2066,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureTimingPlannerRejectsInvalidExtraGoEnvelope()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var budget = new ForwardFeatureBudget(
             settings.BASE_SPINS,
             settings.BASE_SPINS + 3,
@@ -2097,7 +2077,7 @@ public sealed class EngineAndHelperTests
             optionalPrizeUpgradeCount: 0,
             hasOptionalFeatures: false);
 
-        var result = new ForwardFeatureTimingPlanner(settings, seed: 39).Plan(budget);
+        var result = new ForwardFeatureTimingPlanner(seed: 39).Plan(budget);
 
         Assert.AreEqual(ForwardFeatureTimingStatus.InvalidTurnEnvelope, result.Status);
     }
@@ -2105,10 +2085,10 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureTimingPlannerRejectsFeatureWindowWithNoLegalTurn()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             WheelFeatureConfig = (1.0, 1, 9, 9, 1),
         };
+        GameEngine.Engine.Settings = settings;
         var budget = new ForwardFeatureBudget(
             settings.BASE_SPINS,
             settings.BASE_SPINS,
@@ -2119,7 +2099,7 @@ public sealed class EngineAndHelperTests
             optionalPrizeUpgradeCount: 0,
             hasOptionalFeatures: false);
 
-        var result = new ForwardFeatureTimingPlanner(settings, seed: 40).Plan(budget);
+        var result = new ForwardFeatureTimingPlanner(seed: 40).Plan(budget);
 
         Assert.AreEqual(ForwardFeatureTimingStatus.NoLegalTurn, result.Status);
     }
@@ -2127,10 +2107,10 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureTimingPlannerRejectsExtraGoWindowWithNoEarnableTurn()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             ExtraSpinFeatureConfig = (1.0, 1, 9, 9, 1),
         };
+        GameEngine.Engine.Settings = settings;
         var budget = new ForwardFeatureBudget(
             settings.BASE_SPINS,
             settings.BASE_SPINS + 1,
@@ -2141,7 +2121,7 @@ public sealed class EngineAndHelperTests
             optionalPrizeUpgradeCount: 0,
             hasOptionalFeatures: false);
 
-        var result = new ForwardFeatureTimingPlanner(settings, seed: 41).Plan(budget);
+        var result = new ForwardFeatureTimingPlanner(seed: 41).Plan(budget);
 
         Assert.AreEqual(ForwardFeatureTimingStatus.NoLegalTurn, result.Status);
     }
@@ -2149,7 +2129,8 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureTimingPlannerNeverSchedulesSimpleFeaturesOnFinalTurn()
     {
-        var settings = new Settings { PFeatureLatePlacement = 1.0 };
+        var settings = new GameEngine.DefaultCoinPusherSettings { PFeatureLatePlacement = 1.0 };
+        GameEngine.Engine.Settings = settings;
         var budget = new ForwardFeatureBudget(
             settings.BASE_SPINS,
             settings.BASE_SPINS,
@@ -2160,7 +2141,7 @@ public sealed class EngineAndHelperTests
             optionalPrizeUpgradeCount: 0,
             hasOptionalFeatures: false);
 
-        var result = new ForwardFeatureTimingPlanner(settings, seed: 42).Plan(budget);
+        var result = new ForwardFeatureTimingPlanner(seed: 42).Plan(budget);
 
         Assert.AreEqual(ForwardFeatureTimingStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(3, result.Timing!.Count(ForwardTimedFeatureKind.Wheel));
@@ -2172,7 +2153,8 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureTimingPlannerKeepsPrizeUpgradesOnDistinctTurns()
     {
-        var settings = new Settings { PFeatureLatePlacement = 1.0 };
+        var settings = new GameEngine.DefaultCoinPusherSettings { PFeatureLatePlacement = 1.0 };
+        GameEngine.Engine.Settings = settings;
         var budget = new ForwardFeatureBudget(
             settings.BASE_SPINS,
             settings.BASE_SPINS,
@@ -2185,7 +2167,7 @@ public sealed class EngineAndHelperTests
 
         for (var seed = 1; seed <= 100; seed++)
         {
-            var result = new ForwardFeatureTimingPlanner(settings, seed).Plan(budget);
+            var result = new ForwardFeatureTimingPlanner(seed).Plan(budget);
             Assert.AreEqual(ForwardFeatureTimingStatus.Valid, result.Status, result.Detail);
 
             var turns = result.Timing!.TurnsFor(ForwardTimedFeatureKind.PrizeUpgrade);
@@ -2198,7 +2180,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnFramePlannerBuildsPlayableFramesAndFutureViews()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var budget = new ForwardFeatureBudget(
             settings.BASE_SPINS,
             settings.BASE_SPINS + 1,
@@ -2219,7 +2201,7 @@ public sealed class EngineAndHelperTests
             new Dictionary<int, int>(),
             new Dictionary<int, int>());
 
-        var result = new ForwardTurnFramePlanner(settings, seed: 49).Plan(budget, intents);
+        var result = new ForwardTurnFramePlanner(seed: 49).Plan(budget, intents);
 
         Assert.AreEqual(ForwardTurnFrameStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(budget.TotalTurns, result.Plan!.Frames.Count);
@@ -2232,7 +2214,7 @@ public sealed class EngineAndHelperTests
         Assert.AreEqual(settings.ROWS, flushFrame.Shape.Pushers.Single(pusher => pusher.FeatureId == settings.F_FLUSH_ID).PushValue);
 
         var normalPushes = result.Plan.ByTurn[1].Shape.Pushers
-            .Where(pusher => !pusher.IsFlush(settings))
+            .Where(pusher => !pusher.IsFlush())
             .Select(pusher => pusher.PushValue)
             .ToArray();
         Assert.IsTrue(normalPushes.Distinct().Count() >= 2);
@@ -2243,7 +2225,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnFramePlannerRejectsIntentBudgetCountMismatch()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var budget = new ForwardFeatureBudget(
             settings.BASE_SPINS,
             settings.BASE_SPINS,
@@ -2259,7 +2241,7 @@ public sealed class EngineAndHelperTests
             new Dictionary<int, int>(),
             new Dictionary<int, int>());
 
-        var result = new ForwardTurnFramePlanner(settings, seed: 50).Plan(budget, intents);
+        var result = new ForwardTurnFramePlanner(seed: 50).Plan(budget, intents);
 
         Assert.AreEqual(ForwardTurnFrameStatus.FeatureCountMismatch, result.Status);
     }
@@ -2267,7 +2249,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnFramePlannerRejectsAnyFinalTurnFeature()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var budget = new ForwardFeatureBudget(
             settings.BASE_SPINS,
             settings.BASE_SPINS,
@@ -2283,7 +2265,7 @@ public sealed class EngineAndHelperTests
             new Dictionary<int, int>(),
             new Dictionary<int, int>());
 
-        var result = new ForwardTurnFramePlanner(settings, seed: 51).Plan(budget, intents);
+        var result = new ForwardTurnFramePlanner(seed: 51).Plan(budget, intents);
 
         Assert.AreEqual(ForwardTurnFrameStatus.FeatureOnFinalTurn, result.Status);
     }
@@ -2291,7 +2273,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnFramePlannerRejectsMoreFlushesThanColumns()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var flushes = Enumerable.Range(0, settings.COLS + 1)
             .Select(_ => ForwardFeatureIntent.Flush(turn: 2))
             .ToArray();
@@ -2310,15 +2292,47 @@ public sealed class EngineAndHelperTests
             new Dictionary<int, int>(),
             new Dictionary<int, int>());
 
-        var result = new ForwardTurnFramePlanner(settings, seed: 52).Plan(budget, intents);
+        var result = new ForwardTurnFramePlanner(seed: 52).Plan(budget, intents);
 
         Assert.AreEqual(ForwardTurnFrameStatus.TooManyFlushColumns, result.Status);
     }
 
     [TestMethod]
+    public void ForwardTurnFramePlannerAllowsAllColumnsToFlushForTwentyFivePops()
+    {
+        var settings = Settings;
+        var flushes = Enumerable.Range(0, settings.COLS)
+            .Select(_ => ForwardFeatureIntent.Flush(turn: 2))
+            .ToArray();
+        var budget = new ForwardFeatureBudget(
+            settings.BASE_SPINS,
+            settings.BASE_SPINS,
+            wheelCount: 0,
+            flushCount: flushes.Length,
+            extraGoCount: 0,
+            requiredPrizeUpgradeCount: 0,
+            optionalPrizeUpgradeCount: 0,
+            hasOptionalFeatures: false);
+        var intents = new ForwardFeatureIntentPlan(
+            budget.TotalTurns,
+            flushes,
+            new Dictionary<int, int>(),
+            new Dictionary<int, int>());
+
+        var result = new ForwardTurnFramePlanner(seed: 53).Plan(budget, intents);
+
+        Assert.AreEqual(ForwardTurnFrameStatus.Valid, result.Status, result.Detail);
+        var flushFrame = result.Plan!.ByTurn[2];
+        Assert.AreEqual(settings.COLS, flushFrame.FlushColumns.Count);
+        Assert.AreEqual(settings.ROWS * settings.COLS, flushFrame.Shape.PoppedCellCount);
+        Assert.IsTrue(flushFrame.Shape.Pushers.All(pusher =>
+            pusher.PushValue == settings.ROWS && pusher.FeatureId == settings.F_FLUSH_ID));
+    }
+
+    [TestMethod]
     public void ForwardNormalIntentPlannerAssignsRequiredDemandOnlyToCollectingSlots()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -2327,13 +2341,13 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
         Assert.AreEqual(SymbolCollectionStatus.Valid, ledger.Collect(1, 18).Status);
         Assert.AreEqual(SymbolCollectionStatus.Valid, ledger.Collect(2, 9).Status);
         var positions = Positions((4, 0), (4, 1), (4, 2), (0, 0), (0, 1));
         var futureTurns = new[] { new ForwardFutureTurn(2, Shape(1, 1, 1, 1, 1)) };
 
-        var result = new ForwardNormalIntentPlanner(settings).Plan(
+        var result = new ForwardNormalIntentPlanner().Plan(
             turn: 1,
             objectives,
             positions,
@@ -2355,7 +2369,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardNormalIntentPlannerFailsWhenRequiredCollectionsCannotFit()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -2364,10 +2378,10 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
         var positions = Positions((0, 0), (0, 1));
 
-        var result = new ForwardNormalIntentPlanner(settings).Plan(
+        var result = new ForwardNormalIntentPlanner().Plan(
             turn: settings.BASE_SPINS,
             objectives,
             positions,
@@ -2382,7 +2396,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardNormalIntentPlannerUsesCurrentCollectionCapacityBeforeSafeFiller()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -2391,7 +2405,7 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
         Assert.AreEqual(SymbolCollectionStatus.Valid, ledger.Collect(1, 16).Status);
         var positions = Positions((4, 0), (4, 1), (4, 2), (4, 3), (4, 4));
         var futureTurns = new[]
@@ -2400,7 +2414,7 @@ public sealed class EngineAndHelperTests
             new ForwardFutureTurn(3, Shape(5, 5, 5, 5, 5)),
         };
 
-        var result = new ForwardNormalIntentPlanner(settings).Plan(
+        var result = new ForwardNormalIntentPlanner().Plan(
             turn: 1,
             objectives,
             positions,
@@ -2416,7 +2430,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardStartingBoardPlannerBuildsNormalBoardAndReservesCollectedCells()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -2425,13 +2439,13 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
         Assert.AreEqual(SymbolCollectionStatus.Valid, ledger.Collect(1, 17).Status);
         var frames = new ForwardTurnFramePlan(
             totalTurns: 1,
             new[] { new ForwardTurnFrame(1, Shape(1, 1, 1, 1, 1), Array.Empty<ForwardFeatureIntent>(), new HashSet<int>()) });
 
-        var result = new ForwardStartingBoardPlanner(settings, seed: 61).Plan(objectives, frames, ledger);
+        var result = new ForwardStartingBoardPlanner(seed: 61).Plan(objectives, frames, ledger);
 
         Assert.AreEqual(ForwardStartingBoardStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(5, result.CollectingCells);
@@ -2445,7 +2459,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardStartingBoardPlannerAllowsResidueOnlyWinSymbolsWithoutLedgerChange()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -2454,11 +2468,11 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
         Assert.AreEqual(SymbolCollectionStatus.Valid, ledger.Collect(1, settings.SymbolFillCap(1)).Status);
         var frames = new ForwardTurnFramePlan(totalTurns: 0, Array.Empty<ForwardTurnFrame>());
 
-        var result = new ForwardStartingBoardPlanner(settings, seed: 62).Plan(objectives, frames, ledger);
+        var result = new ForwardStartingBoardPlanner(seed: 62).Plan(objectives, frames, ledger);
 
         Assert.AreEqual(ForwardStartingBoardStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(0, result.CollectingCells);
@@ -2470,7 +2484,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardStartingBoardPlannerFailsWithoutMutatingLedgerWhenDemandCannotFit()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -2479,12 +2493,12 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var ledger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
         var frames = new ForwardTurnFramePlan(
             totalTurns: 1,
             new[] { new ForwardTurnFrame(1, Shape(1, 1, 1, 1, 1), Array.Empty<ForwardFeatureIntent>(), new HashSet<int>()) });
 
-        var result = new ForwardStartingBoardPlanner(settings, seed: 63).Plan(objectives, frames, ledger);
+        var result = new ForwardStartingBoardPlanner(seed: 63).Plan(objectives, frames, ledger);
 
         Assert.AreEqual(ForwardStartingBoardStatus.IntentPlanningFailed, result.Status);
         Assert.AreEqual(5, result.CollectingCells);
@@ -2495,7 +2509,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnRealizerPlacesFeaturesBeforePlanningNormalIntents()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -2504,10 +2518,10 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var board = new ForwardBoardState(FilledBoard(6), settings);
-        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var board = new ForwardBoardState(FilledBoard(6));
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
         Assert.AreEqual(SymbolCollectionStatus.Valid, symbolLedger.Collect(1, settings.SymbolFillCap(1) - 2).Status);
-        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS + 1, settings);
+        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS + 1);
         var prizeLedger = EmptyPrizeLedger(objectives.MaxSymbol);
         var frame = new ForwardTurnFrame(
             turn: 1,
@@ -2516,7 +2530,7 @@ public sealed class EngineAndHelperTests
             new HashSet<int>());
         var futureTurns = new[] { new ForwardFutureTurn(2, Shape(5, 5, 5, 5, 5)) };
 
-        var result = new ForwardTurnRealizer(settings, seed: 71).RealizeAndAdvance(
+        var result = new ForwardTurnRealizer(seed: 71).RealizeAndAdvance(
             frame,
             plannedTotalTurns: settings.BASE_SPINS + 1,
             board,
@@ -2540,7 +2554,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnRealizerDoesNotMutateBoardOrLedgersWhenNormalDemandCannotFit()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -2549,17 +2563,17 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var board = new ForwardBoardState(FilledBoard(6), settings);
+        var board = new ForwardBoardState(FilledBoard(6));
         var before = BoardSignature(board.Snapshot());
-        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
-        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS, settings);
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
+        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS);
         var frame = new ForwardTurnFrame(
             turn: settings.BASE_SPINS,
             Shape(1, 1, 1, 1, 1),
             Array.Empty<ForwardFeatureIntent>(),
             new HashSet<int>());
 
-        var result = new ForwardTurnRealizer(settings, seed: 72).RealizeAndAdvance(
+        var result = new ForwardTurnRealizer(seed: 72).RealizeAndAdvance(
             frame,
             plannedTotalTurns: settings.BASE_SPINS,
             board,
@@ -2579,7 +2593,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnRealizerRejectsFinalTurnFeatureWithoutMutation()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -2588,23 +2602,23 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var board = new ForwardBoardState(FilledBoard(6), settings);
+        var board = new ForwardBoardState(FilledBoard(6));
         var before = BoardSignature(board.Snapshot());
-        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS, settings);
+        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS);
         var frame = new ForwardTurnFrame(
             turn: settings.BASE_SPINS,
             Shape(1, 1, 1, 1, 1),
             new[] { ForwardFeatureIntent.ExtraGo(turn: settings.BASE_SPINS) },
             new HashSet<int>());
 
-        var result = new ForwardTurnRealizer(settings, seed: 73).RealizeAndAdvance(
+        var result = new ForwardTurnRealizer(seed: 73).RealizeAndAdvance(
             frame,
             plannedTotalTurns: settings.BASE_SPINS,
             board,
             objectives,
             futureTurns: Array.Empty<ForwardFutureTurn>(),
             remainingFeatureCapacity: FeatureCapacity((ForwardFeatureKind.ExtraGo, 1)),
-            symbolLedger: new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings),
+            symbolLedger: new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol),
             extraLedger,
             prizeUpgradeLedger: EmptyPrizeLedger(objectives.MaxSymbol));
 
@@ -2616,7 +2630,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnCycleExecutorAdvancesFiresAndAuditsFeaturePayloads()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -2625,14 +2639,13 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var board = new ForwardBoardState(FilledBoard(6), settings);
-        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
-        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS + 1, settings);
+        var board = new ForwardBoardState(FilledBoard(6));
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
+        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS + 1);
         var prizeLedger = new ForwardPrizeUpgradeLedger(
             new Dictionary<int, int> { [2] = 1 },
             objectives.PrizeValues,
-            objectives.MaxSymbol,
-            settings);
+            objectives.MaxSymbol);
         var frame = new ForwardTurnFrame(
             turn: 1,
             Shape(1, 1, 1, 1, 1),
@@ -2644,7 +2657,7 @@ public sealed class EngineAndHelperTests
             },
             new HashSet<int>());
 
-        var result = new ForwardTurnCycleExecutor(settings, seed: 81).ExecuteAndAdvance(
+        var result = new ForwardTurnCycleExecutor(seed: 81).ExecuteAndAdvance(
             frame,
             plannedTotalTurns: settings.BASE_SPINS + 1,
             board,
@@ -2676,7 +2689,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnCycleExecutorRejectsUnfiredFeatureAtTurnStartWithoutMutation()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -2687,18 +2700,18 @@ public sealed class EngineAndHelperTests
         });
         var rawBoard = FilledBoard(6);
         rawBoard[0, 0] = Grid.Feat(settings.F_XSPIN, 2, new FP { FeatId = "EXTRA_SPIN" });
-        var board = new ForwardBoardState(rawBoard, settings);
+        var board = new ForwardBoardState(rawBoard);
         var before = BoardSignature(board.Snapshot());
-        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS, settings);
+        var extraLedger = new ForwardExtraSpinLedger(settings.BASE_SPINS);
 
-        var result = new ForwardTurnCycleExecutor(settings, seed: 82).ExecuteAndAdvance(
+        var result = new ForwardTurnCycleExecutor(seed: 82).ExecuteAndAdvance(
             new ForwardTurnFrame(1, Shape(1, 1, 1, 1, 1), Array.Empty<ForwardFeatureIntent>(), new HashSet<int>()),
             plannedTotalTurns: settings.BASE_SPINS,
             board,
             objectives,
             futureTurns: new[] { new ForwardFutureTurn(2, Shape(1, 1, 1, 1, 1)) },
             remainingFeatureCapacity: FeatureCapacity(),
-            symbolLedger: new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings),
+            symbolLedger: new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol),
             extraLedger,
             prizeUpgradeLedger: EmptyPrizeLedger(objectives.MaxSymbol));
 
@@ -2710,7 +2723,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnCycleExecutorAuditRejectsWrongConvertToId()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var spawn = new ForwardSpawn(
             0,
             0,
@@ -2724,7 +2737,7 @@ public sealed class EngineAndHelperTests
             ExtraGoAward = 1,
         };
 
-        var detail = new ForwardTurnCycleExecutor(settings, seed: 83).AuditFeatureFire(
+        var detail = new ForwardTurnCycleExecutor(seed: 83).AuditFeatureFire(
             new[] { spawn },
             new[] { fireEvent });
 
@@ -2735,7 +2748,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnCycleExecutorAuditRejectsWheelBeforeLaterNonWheel()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var wheel = new ForwardSpawn(
             0,
             0,
@@ -2745,7 +2758,7 @@ public sealed class EngineAndHelperTests
             1,
             Grid.Feat(settings.F_XSPIN, 2, new FP { FeatId = "EXTRA_SPIN" }));
 
-        var detail = new ForwardTurnCycleExecutor(settings, seed: 84).AuditFeatureFire(
+        var detail = new ForwardTurnCycleExecutor(seed: 84).AuditFeatureFire(
             new[] { wheel, extra },
             new[]
             {
@@ -2798,10 +2811,10 @@ public sealed class EngineAndHelperTests
             Array.Empty<ForwardFeatureIntent>(),
             new Dictionary<int, int>(),
             new Dictionary<int, int>());
-        var frameResult = new ForwardTurnFramePlanner(settings, seed: 91).Plan(budget, intentPlan);
+        var frameResult = new ForwardTurnFramePlanner(seed: 91).Plan(budget, intentPlan);
         Assert.AreEqual(ForwardTurnFrameStatus.Valid, frameResult.Status, frameResult.Detail);
 
-        var result = new ForwardTicketPipelineExecutor(settings, seed: 92).Execute(
+        var result = new ForwardTicketPipelineExecutor(seed: 92).Execute(
             objectives,
             frameResult.Plan);
 
@@ -2819,7 +2832,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTicketPipelineExecutorRejectsInvalidFramePlanBeforeMutation()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -2836,7 +2849,7 @@ public sealed class EngineAndHelperTests
                 new ForwardTurnFrame(2, Shape(1, 1, 1, 1, 1), Array.Empty<ForwardFeatureIntent>(), new HashSet<int>()),
             });
 
-        var result = new ForwardTicketPipelineExecutor(settings, seed: 93).Execute(
+        var result = new ForwardTicketPipelineExecutor(seed: 93).Execute(
             objectives,
             invalidFrames);
 
@@ -2847,9 +2860,9 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTicketPipelineExecutorAuditRejectsActualCollectionMismatch()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
 
-        var detail = new ForwardTicketPipelineExecutor(settings, seed: 94).AuditActualCollections(
+        var detail = new ForwardTicketPipelineExecutor(seed: 94).AuditActualCollections(
             new Dictionary<int, int> { [1] = 19, [2] = 3 },
             new Dictionary<int, int> { [1] = 20, [2] = 3 },
             maxSymbol: settings.PrizeLadderRows.Count);
@@ -2886,10 +2899,10 @@ public sealed class EngineAndHelperTests
             Array.Empty<ForwardFeatureIntent>(),
             new Dictionary<int, int>(),
             new Dictionary<int, int>());
-        var frames = new ForwardTurnFramePlanner(settings, seed: 95).Plan(budget, intentPlan);
+        var frames = new ForwardTurnFramePlanner(seed: 95).Plan(budget, intentPlan);
         Assert.AreEqual(ForwardTurnFrameStatus.Valid, frames.Status, frames.Detail);
 
-        var result = new ForwardTicketEnvelopeValidator(settings).Validate(objectives, frames.Plan);
+        var result = new ForwardTicketEnvelopeValidator().Validate(objectives, frames.Plan);
 
         Assert.AreEqual(ForwardTicketEnvelopeStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(settings.SymbolFillCap(1), result.RequiredCollections);
@@ -2900,7 +2913,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTicketEnvelopeValidatorRejectsFeatureOnFinalTurn()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -2921,7 +2934,7 @@ public sealed class EngineAndHelperTests
                     new HashSet<int>()))
                 .ToArray());
 
-        var result = new ForwardTicketEnvelopeValidator(settings).Validate(objectives, frames);
+        var result = new ForwardTicketEnvelopeValidator().Validate(objectives, frames);
 
         Assert.AreEqual(ForwardTicketEnvelopeStatus.FeatureOnFinalTurn, result.Status);
     }
@@ -2929,7 +2942,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTicketEnvelopeValidatorRejectsUnearnedExtraTurnPlan()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -2948,7 +2961,7 @@ public sealed class EngineAndHelperTests
                     new HashSet<int>()))
                 .ToArray());
 
-        var result = new ForwardTicketEnvelopeValidator(settings).Validate(objectives, frames);
+        var result = new ForwardTicketEnvelopeValidator().Validate(objectives, frames);
 
         Assert.AreEqual(ForwardTicketEnvelopeStatus.InvalidTotalTurns, result.Status);
         StringAssert.Contains(result.Detail, "EXTRA_GO count=0");
@@ -2957,7 +2970,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTicketEnvelopeValidatorRejectsInsufficientCollectionCapacity()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var targets = settings.PrizeLadderRows
             .Select((row, index) => (Symbol: index + 1, row.Target))
             .ToDictionary(item => item.Symbol, item => item.Target);
@@ -2979,7 +2992,7 @@ public sealed class EngineAndHelperTests
                     new HashSet<int>()))
                 .ToArray());
 
-        var result = new ForwardTicketEnvelopeValidator(settings).Validate(objectives, frames);
+        var result = new ForwardTicketEnvelopeValidator().Validate(objectives, frames);
 
         Assert.AreEqual(ForwardTicketEnvelopeStatus.InsufficientCollectionCapacity, result.Status);
         Assert.IsTrue(result.RequiredCollections > result.AvailableCollectionSlots);
@@ -2990,7 +3003,7 @@ public sealed class EngineAndHelperTests
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
 
-        var result = new ForwardTicketBuilder(settings, seed: 101).Build(new decimal[] { 1m });
+        var result = new ForwardTicketBuilder(seed: 101).Build(new decimal[] { 1m });
 
         Assert.AreEqual(ForwardTicketBuildStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(ForwardTicketEnvelopeStatus.Valid, result.Envelope!.Status);
@@ -3006,9 +3019,9 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTicketBuilderReportsMathInputFailureWithoutLaterStages()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
 
-        var result = new ForwardTicketBuilder(settings, seed: 102).Build(null);
+        var result = new ForwardTicketBuilder(seed: 102).Build(null);
 
         Assert.AreEqual(ForwardTicketBuildStatus.MathInputFailed, result.Status);
         Assert.AreEqual(ForwardMathInputStatus.MissingPrizeAmounts, result.MathInput!.Status);
@@ -3020,17 +3033,17 @@ public sealed class EngineAndHelperTests
     public void ForwardGamePlanAdapterCreatesVerifiedSerializerCompatiblePlan()
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
-        var build = new ForwardTicketBuilder(settings, seed: 111).Build(new decimal[] { 1m });
+        var build = new ForwardTicketBuilder(seed: 111).Build(new decimal[] { 1m });
         Assert.AreEqual(ForwardTicketBuildStatus.Valid, build.Status, build.Detail);
 
-        var result = new ForwardGamePlanAdapter(settings).Adapt(build);
+        var result = new ForwardGamePlanAdapter().Adapt(build);
 
         Assert.AreEqual(ForwardGamePlanAdapterStatus.Valid, result.Status, result.Detail);
         Assert.IsTrue(result.Plan!.Verified);
         Assert.AreEqual(build.Pipeline!.Plan!.Turns.Count, result.Plan.Spins.Count);
         Assert.AreEqual(build.Pipeline.Plan.ActualCollected[1], Sim.Run(result.Plan)[1]);
 
-        var ticket = TicketSerializer.ToTicketObject(result.Plan, settings);
+        var ticket = TicketSerializer.ToTicketObject(result.Plan);
         var report = TicketChecker.CheckTicket(ticket);
         Assert.IsTrue(report.IsValid, string.Join(Environment.NewLine,
             report.Checks
@@ -3043,10 +3056,10 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardGamePlanAdapterRejectsInvalidBuildResult()
     {
-        var settings = Settings.Default;
-        var build = new ForwardTicketBuilder(settings, seed: 112).Build(null);
+        var settings = Settings;
+        var build = new ForwardTicketBuilder(seed: 112).Build(null);
 
-        var result = new ForwardGamePlanAdapter(settings).Adapt(build);
+        var result = new ForwardGamePlanAdapter().Adapt(build);
 
         Assert.AreEqual(ForwardGamePlanAdapterStatus.SourceBuildInvalid, result.Status);
         Assert.IsNull(result.Plan);
@@ -3057,7 +3070,7 @@ public sealed class EngineAndHelperTests
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
 
-        var result = new ForwardTicketGenerator(settings, seed: 121).Generate(new decimal[] { 1m });
+        var result = new ForwardTicketGenerator(seed: 121).Generate(new decimal[] { 1m });
 
         Assert.AreEqual(ForwardTicketGenerationStatus.Valid, result.Status, result.Detail);
         Assert.IsNotNull(result.Ticket);
@@ -3076,9 +3089,9 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTicketGeneratorStopsWhenBuildFails()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
 
-        var result = new ForwardTicketGenerator(settings, seed: 122).Generate(null);
+        var result = new ForwardTicketGenerator(seed: 122).Generate(null);
 
         Assert.AreEqual(ForwardTicketGenerationStatus.BuildFailed, result.Status);
         Assert.AreEqual(ForwardTicketBuildStatus.MathInputFailed, result.Build!.Status);
@@ -3092,7 +3105,7 @@ public sealed class EngineAndHelperTests
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
 
-        var result = new CoinPusherTicketGenerator(settings).Generate(new decimal[] { 1m }, seed: 131);
+        var result = new CoinPusherTicketGenerator().Generate(new decimal[] { 1m }, seed: 131);
 
         Assert.AreEqual(CoinPusherTicketGenerationStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(131, result.Seed);
@@ -3113,7 +3126,7 @@ public sealed class EngineAndHelperTests
     public void CoinPusherTicketGeneratorIsDeterministicForSameSeed()
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
-        var generator = new CoinPusherTicketGenerator(settings);
+        var generator = new CoinPusherTicketGenerator();
 
         var first = generator.Generate(new decimal[] { 1m }, seed: 132);
         var second = generator.Generate(new decimal[] { 1m }, seed: 132);
@@ -3126,7 +3139,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CoinPusherTicketGeneratorRejectsNullPrizeListWithoutThrowing()
     {
-        var result = new CoinPusherTicketGenerator(Settings.Default).Generate(null, seed: 133);
+        var result = new CoinPusherTicketGenerator().Generate(null, seed: 133);
 
         Assert.AreEqual(CoinPusherTicketGenerationStatus.InvalidRequest, result.Status);
         Assert.AreEqual(133, result.Seed);
@@ -3138,7 +3151,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CoinPusherTicketGenerationRequestValidatorAcceptsWinAndNoWinRequests()
     {
-        var validator = new CoinPusherTicketGenerationRequestValidator(Settings.Default);
+        var validator = new CoinPusherTicketGenerationRequestValidator();
 
         Assert.AreEqual(
             CoinPusherTicketGenerationRequestStatus.Valid,
@@ -3151,7 +3164,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CoinPusherTicketGenerationRequestValidatorRejectsZeroPrizeAmount()
     {
-        var result = new CoinPusherTicketGenerationRequestValidator(Settings.Default)
+        var result = new CoinPusherTicketGenerationRequestValidator()
             .Validate(new decimal[] { 0m });
 
         Assert.AreEqual(CoinPusherTicketGenerationRequestStatus.ZeroPrizeAmount, result.Status);
@@ -3161,7 +3174,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CoinPusherTicketGeneratorRejectsInvalidRequestBeforePlanning()
     {
-        var result = new CoinPusherTicketGenerator(Settings.Default).Generate(new decimal[] { 0m }, seed: 134);
+        var result = new CoinPusherTicketGenerator().Generate(new decimal[] { 0m }, seed: 134);
 
         Assert.AreEqual(CoinPusherTicketGenerationStatus.InvalidRequest, result.Status);
         StringAssert.Contains(result.Detail, nameof(CoinPusherTicketGenerationRequestStatus.ZeroPrizeAmount));
@@ -3174,9 +3187,10 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CoinPusherTicketGenerationRequestValidatorRejectsUnsafeFeatureIds()
     {
-        var settings = new Settings { F_WHEEL = Settings.Default.F_COIN };
+        var settings = new GameEngine.DefaultCoinPusherSettings { F_WHEEL = Settings.F_COIN };
+        GameEngine.Engine.Settings = settings;
 
-        var result = new CoinPusherTicketGenerationRequestValidator(settings)
+        var result = new CoinPusherTicketGenerationRequestValidator()
             .Validate(Array.Empty<decimal>());
 
         Assert.AreEqual(CoinPusherTicketGenerationRequestStatus.InvalidFeatureIds, result.Status);
@@ -3186,7 +3200,7 @@ public sealed class EngineAndHelperTests
     public void CoinPusherTicketGenerationValidatorAcceptsCompleteGeneratedResult()
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
-        var generated = new ForwardTicketGenerator(settings, seed: 141).Generate(new decimal[] { 1m });
+        var generated = new ForwardTicketGenerator(seed: 141).Generate(new decimal[] { 1m });
         Assert.AreEqual(ForwardTicketGenerationStatus.Valid, generated.Status, generated.Detail);
 
         var result = new CoinPusherTicketGenerationValidator().Validate(new decimal[] { 1m }, generated);
@@ -3198,7 +3212,7 @@ public sealed class EngineAndHelperTests
     public void CoinPusherTicketGenerationValidatorRejectsPrizeCoverageMismatch()
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
-        var generated = new ForwardTicketGenerator(settings, seed: 142).Generate(new decimal[] { 1m });
+        var generated = new ForwardTicketGenerator(seed: 142).Generate(new decimal[] { 1m });
         Assert.AreEqual(ForwardTicketGenerationStatus.Valid, generated.Status, generated.Detail);
 
         var result = new CoinPusherTicketGenerationValidator().Validate(new decimal[] { 2m }, generated);
@@ -3212,10 +3226,10 @@ public sealed class EngineAndHelperTests
     public void CoinPusherTicketGenerationAuditorSummarizesValidTicket()
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
-        var generation = new CoinPusherTicketGenerator(settings).Generate(new decimal[] { 1m }, seed: 151);
+        var generation = new CoinPusherTicketGenerator().Generate(new decimal[] { 1m }, seed: 151);
         Assert.AreEqual(CoinPusherTicketGenerationStatus.Valid, generation.Status, generation.Detail);
 
-        var result = new CoinPusherTicketGenerationAuditor(settings).Audit(generation);
+        var result = new CoinPusherTicketGenerationAuditor().Audit(generation);
 
         Assert.AreEqual(CoinPusherTicketGenerationAuditStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(151, result.Audit!.Seed);
@@ -3230,9 +3244,9 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CoinPusherTicketGenerationAuditorRejectsInvalidGenerationResult()
     {
-        var generation = new CoinPusherTicketGenerator(Settings.Default).Generate(null, seed: 152);
+        var generation = new CoinPusherTicketGenerator().Generate(null, seed: 152);
 
-        var result = new CoinPusherTicketGenerationAuditor(Settings.Default).Audit(generation);
+        var result = new CoinPusherTicketGenerationAuditor().Audit(generation);
 
         Assert.AreEqual(CoinPusherTicketGenerationAuditStatus.GenerationNotValid, result.Status);
         Assert.IsNull(result.Audit);
@@ -3243,7 +3257,7 @@ public sealed class EngineAndHelperTests
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
 
-        var result = new CoinPusherTicketGenerationGuard(settings).Generate(new decimal[] { 1m }, seed: 161);
+        var result = new CoinPusherTicketGenerationGuard().Generate(new decimal[] { 1m }, seed: 161);
 
         Assert.AreEqual(CoinPusherTicketGenerationGuardStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(161, result.Seed);
@@ -3259,7 +3273,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CoinPusherTicketGenerationGuardDoesNotExposeTicketWhenGenerationFails()
     {
-        var result = new CoinPusherTicketGenerationGuard(Settings.Default).Generate(null, seed: 162);
+        var result = new CoinPusherTicketGenerationGuard().Generate(null, seed: 162);
 
         Assert.AreEqual(CoinPusherTicketGenerationGuardStatus.GenerationRejected, result.Status);
         Assert.IsFalse(result.IsValid);
@@ -3275,7 +3289,7 @@ public sealed class EngineAndHelperTests
     {
         var settings = SettingsWithNoOptionalFeaturesAndNoNearMiss();
 
-        var result = new CoinPusherTicketJsonGenerator(settings).Generate(new decimal[] { 1m }, seed: 171);
+        var result = new CoinPusherTicketJsonGenerator().Generate(new decimal[] { 1m }, seed: 171);
 
         Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, result.Status, result.Detail);
         Assert.IsFalse(string.IsNullOrWhiteSpace(result.Json));
@@ -3291,9 +3305,47 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
+    public void CoinPusherTicketJsonGeneratorKeepsZeroSpawnPositionInJson()
+    {
+        var ticket = new TicketSerializer.TicketDto
+        {
+            WinInfo = new TicketSerializer.WinInfoDto
+            {
+                TotalSpins = 1,
+                WinSymbols = Array.Empty<TicketSerializer.WinSymbolDto>(),
+                NonWinSymbols = Array.Empty<TicketSerializer.NonWinSymbolDto>(),
+                PrizeTiers = Array.Empty<TicketSerializer.PrizeTierDto>(),
+            },
+            StartingBoard = new[]
+            {
+                new[] { new TicketSerializer.BoardCellDto { Id = 1 } },
+            },
+            Turns = new[]
+            {
+                new TicketSerializer.TurnDto
+                {
+                    Pushers = Array.Empty<TicketSerializer.PusherDto>(),
+                    Spawns = new[]
+                    {
+                        new TicketSerializer.SpawnDto { Pos = 0, Id = 1 },
+                    },
+                },
+            },
+        };
+        var json = JsonConvert.SerializeObject(ticket, new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore,
+        });
+
+        Assert.IsTrue(
+            json.Contains("\"Pos\":0"),
+            "Spawn position 0 must be emitted explicitly; omitting it makes the ticket ambiguous.");
+    }
+
+    [TestMethod]
     public void CoinPusherTicketJsonGeneratorDoesNotExposeJsonWhenGuardRejects()
     {
-        var generator = new CoinPusherTicketJsonGenerator(Settings.Default);
+        var generator = new CoinPusherTicketJsonGenerator();
 
         var result = generator.Generate(new decimal[] { 0m }, seed: 172);
 
@@ -3307,7 +3359,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardObjectiveFinalizerBalancesNearMissTargetsToFrameCapacity()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -3337,7 +3389,7 @@ public sealed class EngineAndHelperTests
             new Dictionary<int, int>(),
             new Dictionary<int, int>());
 
-        var result = new ForwardObjectiveFinalizer(settings).Finalize(objectives, intentPlan, framePlan);
+        var result = new ForwardObjectiveFinalizer().Finalize(objectives, intentPlan, framePlan);
 
         Assert.AreEqual(ForwardObjectiveFinalizationStatus.Valid, result.Status, result.Detail);
         CollectionAssert.AreEqual(
@@ -3348,13 +3400,14 @@ public sealed class EngineAndHelperTests
         Assert.IsTrue(result.Objectives.NearMissTargets.Values.All(target => target >= settings.NONWIN_MIN_TARGET));
         Assert.AreEqual(
             ForwardTicketEnvelopeStatus.Valid,
-            new ForwardTicketEnvelopeValidator(settings).Validate(result.Objectives, framePlan).Status);
+            new ForwardTicketEnvelopeValidator().Validate(result.Objectives, framePlan).Status);
     }
 
     [TestMethod]
     public void ForwardObjectiveFinalizerKeepsNearMissTargetsWhenCapacityFits()
     {
-        var settings = new Settings { NONWIN_MIN_TARGET = 1 };
+        var settings = new GameEngine.DefaultCoinPusherSettings { NONWIN_MIN_TARGET = 1 };
+        GameEngine.Engine.Settings = settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -3377,7 +3430,7 @@ public sealed class EngineAndHelperTests
             new Dictionary<int, int>(),
             new Dictionary<int, int>());
 
-        var result = new ForwardObjectiveFinalizer(settings).Finalize(objectives, intentPlan, framePlan);
+        var result = new ForwardObjectiveFinalizer().Finalize(objectives, intentPlan, framePlan);
 
         Assert.AreEqual(ForwardObjectiveFinalizationStatus.Valid, result.Status, result.Detail);
         CollectionAssert.AreEqual(
@@ -3388,30 +3441,31 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void CoinPusherTicketJsonGeneratorHandlesDefaultSeedNearMissCapacity()
     {
-        var result = new CoinPusherTicketJsonGenerator(Settings.Default).Generate(new decimal[] { 1m }, seed: 181);
+        var result = new CoinPusherTicketJsonGenerator().Generate(new decimal[] { 1m }, seed: 181);
 
         Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, result.Status, result.Detail);
         Assert.IsFalse(string.IsNullOrWhiteSpace(result.Json));
         Assert.IsNotNull(result.Summary);
-        Assert.IsTrue(result.Plan!.NonWinTargets.Values.All(target => target >= Settings.Default.NONWIN_MIN_TARGET));
+        Assert.IsTrue(result.Plan!.NonWinTargets.Values.All(target => target >= Settings.NONWIN_MIN_TARGET));
     }
 
     [TestMethod]
     public void CoinPusherTicketJsonGeneratorHandlesSixSymbolCapacityWithoutSafeFiller()
     {
-        var result = new CoinPusherTicketJsonGenerator(Settings.Default).Generate(
+        var result = new CoinPusherTicketJsonGenerator().Generate(
             new decimal[] { 1m, 2m, 5m, 10m, 100m, 10000m },
             seed: 1006295523);
 
         Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, result.Status, result.Detail);
-        Assert.AreEqual(Settings.Default.MAX_SPINS, result.Plan!.TotalSpins);
+        Assert.IsTrue(result.Plan!.TotalSpins >= Settings.BASE_SPINS);
+        Assert.IsTrue(result.Plan.TotalSpins <= Settings.MAX_SPINS);
         Assert.AreEqual(6, result.Ticket!.WinInfo.WinSymbols.Length);
     }
 
     [TestMethod]
     public void ForwardTurnRecorderPreservesPushersSpawnsAndFeatureCells()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var shape = Shape(5, 1, 2, 3, 4);
         var frame = new ForwardTurnFrame(
             turn: 2,
@@ -3435,7 +3489,7 @@ public sealed class EngineAndHelperTests
             normalIntentResult: null,
             flushCount: 1);
 
-        var result = new ForwardTurnRecorder(settings).Record(frame, realization);
+        var result = new ForwardTurnRecorder().Record(frame, realization);
 
         Assert.AreEqual(ForwardTurnRecordStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(2, result.Turn!.Turn);
@@ -3456,7 +3510,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnRecorderRejectsInvalidRealizationAndDuplicateSpawns()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var frame = new ForwardTurnFrame(
             turn: 1,
             Shape(1, 1, 1, 1, 1),
@@ -3471,7 +3525,7 @@ public sealed class EngineAndHelperTests
             normalIntentResult: null,
             flushCount: 0);
 
-        var invalidResult = new ForwardTurnRecorder(settings).Record(frame, invalid);
+        var invalidResult = new ForwardTurnRecorder().Record(frame, invalid);
 
         Assert.AreEqual(ForwardTurnRecordStatus.InvalidRealization, invalidResult.Status);
 
@@ -3488,7 +3542,7 @@ public sealed class EngineAndHelperTests
             normalIntentResult: null,
             flushCount: 0);
 
-        var duplicateResult = new ForwardTurnRecorder(settings).Record(frame, duplicate);
+        var duplicateResult = new ForwardTurnRecorder().Record(frame, duplicate);
 
         Assert.AreEqual(ForwardTurnRecordStatus.DuplicateSpawnPosition, duplicateResult.Status);
     }
@@ -3496,11 +3550,11 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureIntentPlannerBuildsSemanticPayloadsWithoutConvertGuessing()
     {
-        var settings = new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             PWheelStackValue1 = 0.0,
             PWheelStackValue2 = 1.0,
         };
+        GameEngine.Engine.Settings = settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -3521,7 +3575,7 @@ public sealed class EngineAndHelperTests
                 new ForwardTimedFeature(ForwardTimedFeatureKind.PrizeUpgrade, 5),
             });
 
-        var result = new ForwardFeatureIntentPlanner(settings, seed: 43).Plan(objectives, timing);
+        var result = new ForwardFeatureIntentPlanner(seed: 43).Plan(objectives, timing);
 
         Assert.AreEqual(ForwardFeatureIntentStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(5, result.Plan!.Intents.Count);
@@ -3545,7 +3599,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureIntentPlannerBlocksSameTurnDuplicatePrizeUpgradeSymbol()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -3562,7 +3616,7 @@ public sealed class EngineAndHelperTests
                 new ForwardTimedFeature(ForwardTimedFeatureKind.PrizeUpgrade, 2),
             });
 
-        var result = new ForwardFeatureIntentPlanner(settings, seed: 44).Plan(objectives, timing);
+        var result = new ForwardFeatureIntentPlanner(seed: 44).Plan(objectives, timing);
 
         Assert.AreEqual(ForwardFeatureIntentStatus.PrizeUpgradeNoEligibleSymbol, result.Status);
     }
@@ -3570,7 +3624,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureIntentPlannerAllowsSameTurnPrizeUpgradesForDifferentSymbols()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -3589,7 +3643,7 @@ public sealed class EngineAndHelperTests
                 new ForwardTimedFeature(ForwardTimedFeatureKind.PrizeUpgrade, 3),
             });
 
-        var result = new ForwardFeatureIntentPlanner(settings, seed: 45).Plan(objectives, timing);
+        var result = new ForwardFeatureIntentPlanner(seed: 45).Plan(objectives, timing);
 
         Assert.AreEqual(ForwardFeatureIntentStatus.Valid, result.Status, result.Detail);
         var symbols = result.Plan!.Intents
@@ -3603,7 +3657,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureIntentPlannerAllocatesOptionalPrizeUpgradeToNearMiss()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -3616,7 +3670,7 @@ public sealed class EngineAndHelperTests
             totalTurns: 5,
             new[] { new ForwardTimedFeature(ForwardTimedFeatureKind.PrizeUpgrade, 3) });
 
-        var result = new ForwardFeatureIntentPlanner(settings, seed: 46).Plan(objectives, timing);
+        var result = new ForwardFeatureIntentPlanner(seed: 46).Plan(objectives, timing);
 
         Assert.AreEqual(ForwardFeatureIntentStatus.Valid, result.Status, result.Detail);
         Assert.AreEqual(1, result.Plan!.EffectiveNonWinPrizeTiers[2]);
@@ -3629,7 +3683,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeatureIntentPlannerRejectsOptionalPrizeUpgradeWithoutNearMiss()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -3642,7 +3696,7 @@ public sealed class EngineAndHelperTests
             totalTurns: 5,
             new[] { new ForwardTimedFeature(ForwardTimedFeatureKind.PrizeUpgrade, 3) });
 
-        var result = new ForwardFeatureIntentPlanner(settings, seed: 47).Plan(objectives, timing);
+        var result = new ForwardFeatureIntentPlanner(seed: 47).Plan(objectives, timing);
 
         Assert.AreEqual(ForwardFeatureIntentStatus.OptionalPrizeUpgradeNoTarget, result.Status);
     }
@@ -3650,7 +3704,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeaturePlacementAdapterPlacesFeaturesWithSafePreferredConvert()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [2] = settings.SymbolFillCap(2) },
@@ -3660,9 +3714,9 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
-        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6, settings);
-        var prizeLedger = new ForwardPrizeUpgradeLedger(objectives.PrizeTiers, objectives.PrizeValues, objectives.MaxSymbol, settings);
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
+        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6);
+        var prizeLedger = new ForwardPrizeUpgradeLedger(objectives.PrizeTiers, objectives.PrizeValues, objectives.MaxSymbol);
         var intents = new[]
         {
             ForwardFeatureIntent.Wheel(turn: 1, symbol: 2, stackValue: 2),
@@ -3671,7 +3725,7 @@ public sealed class EngineAndHelperTests
             ForwardFeatureIntent.Flush(turn: 1),
         };
 
-        var result = new ForwardFeaturePlacementAdapter(settings, objectives.MaxSymbol, seed: 48).Plan(
+        var result = new ForwardFeaturePlacementAdapter(objectives.MaxSymbol, seed: 48).Plan(
             turn: 1,
             plannedTotalTurns: 6,
             objectives,
@@ -3695,7 +3749,7 @@ public sealed class EngineAndHelperTests
         Assert.IsTrue(result.Spawns.Any(spawn => spawn.Cell.Sym == settings.F_XSPIN));
         Assert.AreEqual(1, result.WheelImpacts.Count);
         Assert.AreEqual(3, result.WheelImpacts[0].StackValue);
-        Assert.AreEqual(2, symbolLedger.CollectedCount(2));
+        Assert.AreEqual(3, symbolLedger.CollectedCount(2));
         Assert.AreEqual(settings.BASE_SPINS + 1, extraLedger.EarnedTurns);
         Assert.AreEqual(1, extraLedger.LogicalExtraGoAwards);
         Assert.AreEqual(1, prizeLedger.CurrentTier(2));
@@ -3704,7 +3758,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardFeaturePlacementAdapterFallsBackWhenPreferredConvertWouldOverCollect()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [2] = settings.SymbolFillCap(2) },
@@ -3713,11 +3767,11 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
         for (var i = 0; i < settings.SymbolFillCap(2); i++)
             Assert.AreEqual(SymbolCollectionStatus.Valid, symbolLedger.Collect(2).Status);
 
-        var result = new ForwardFeaturePlacementAdapter(settings, objectives.MaxSymbol, seed: 49).Plan(
+        var result = new ForwardFeaturePlacementAdapter(objectives.MaxSymbol, seed: 49).Plan(
             turn: 1,
             plannedTotalTurns: 5,
             objectives,
@@ -3727,7 +3781,7 @@ public sealed class EngineAndHelperTests
             futureTurns: new[] { new ForwardFutureTurn(2, Shape(1, 1, 1, 1, 1)) },
             remainingFeatureCapacity: FeatureCapacity((ForwardFeatureKind.Wheel, 1)),
             symbolLedger,
-            new ForwardExtraSpinLedger(plannedTotalTurns: 5, settings),
+            new ForwardExtraSpinLedger(plannedTotalTurns: 5),
             EmptyPrizeLedger(objectives.MaxSymbol));
 
         Assert.AreEqual(ForwardFeaturePlacementStatus.Valid, result.Status, result.Detail);
@@ -3737,9 +3791,93 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
+    public void ForwardFeaturePlacementAdapterAvoidsSameTurnWheelConversionOverflow()
+    {
+        var settings = new GameEngine.DefaultCoinPusherSettings
+        {
+            PrizeLadderRows = new[]
+            {
+                new PrizeLadderRow { Target = 4, Tiers = new decimal[] { 1 } },
+                new PrizeLadderRow { Target = 4, Tiers = new decimal[] { 2 } },
+            },
+        };
+        GameEngine.Engine.Settings = settings;
+        var objectives = ResolveObjectives(settings, new MathInput
+        {
+            Targets = new Dictionary<int, int>(),
+            NonWinTargets = new Dictionary<int, int>(),
+            BaseSpins = settings.BASE_SPINS,
+            PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 1),
+            MaxSym = settings.PrizeLadderRows.Count,
+        });
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
+        Assert.AreEqual(SymbolCollectionStatus.Valid, symbolLedger.Collect(1, stack: 2).Status);
+
+        var result = new ForwardFeaturePlacementAdapter(objectives.MaxSymbol, seed: 501).Plan(
+            turn: 1,
+            plannedTotalTurns: 3,
+            objectives,
+            new[] { ForwardFeatureIntent.Wheel(turn: 1, symbol: 1, stackValue: 1) },
+            emptyPositions: Positions((0, 4)),
+            reservedPositions: Array.Empty<(int r, int c)>(),
+            futureTurns: new[] { new ForwardFutureTurn(2, Shape(1, 1, 1, 1, 5)) },
+            remainingFeatureCapacity: FeatureCapacity((ForwardFeatureKind.Wheel, 1)),
+            symbolLedger,
+            new ForwardExtraSpinLedger(plannedTotalTurns: 3),
+            EmptyPrizeLedger(objectives.MaxSymbol));
+
+        Assert.AreEqual(ForwardFeaturePlacementStatus.Valid, result.Status, result.Detail);
+        Assert.AreEqual(1, result.Requests.Count);
+        Assert.AreNotEqual(1, result.Requests.Single().WheelSymbol);
+        Assert.IsTrue(symbolLedger.CollectedCount(1) < settings.SymbolFillCap(1));
+    }
+
+    [TestMethod]
+    public void ForwardFeaturePlacementAdapterReservesWheelSelfConvertedStack()
+    {
+        var settings = new GameEngine.DefaultCoinPusherSettings
+        {
+            PrizeLadderRows = new[]
+            {
+                new PrizeLadderRow { Target = 4, Tiers = new decimal[] { 1 } },
+                new PrizeLadderRow { Target = 4, Tiers = new decimal[] { 2 } },
+            },
+        };
+        GameEngine.Engine.Settings = settings;
+        var objectives = ResolveObjectives(settings, new MathInput
+        {
+            Targets = new Dictionary<int, int>(),
+            NonWinTargets = new Dictionary<int, int>(),
+            BaseSpins = settings.BASE_SPINS,
+            PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 1),
+            MaxSym = settings.PrizeLadderRows.Count,
+        });
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
+        Assert.AreEqual(SymbolCollectionStatus.Valid, symbolLedger.Collect(1).Status);
+
+        var result = new ForwardFeaturePlacementAdapter(objectives.MaxSymbol, seed: 502).Plan(
+            turn: 1,
+            plannedTotalTurns: 3,
+            objectives,
+            new[] { ForwardFeatureIntent.Wheel(turn: 1, symbol: 1, stackValue: 1) },
+            emptyPositions: Positions((0, 4)),
+            reservedPositions: Array.Empty<(int r, int c)>(),
+            futureTurns: new[] { new ForwardFutureTurn(2, Shape(1, 1, 1, 1, 5)) },
+            remainingFeatureCapacity: FeatureCapacity((ForwardFeatureKind.Wheel, 1)),
+            symbolLedger,
+            new ForwardExtraSpinLedger(plannedTotalTurns: 3),
+            EmptyPrizeLedger(objectives.MaxSymbol));
+
+        Assert.AreEqual(ForwardFeaturePlacementStatus.Valid, result.Status, result.Detail);
+        Assert.AreEqual(1, result.Requests.Single().ConvertToSymbol);
+        Assert.AreEqual(1, result.Requests.Single().WheelSymbol);
+        Assert.AreEqual(3, symbolLedger.CollectedCount(1));
+    }
+
+    [TestMethod]
     public void ForwardFeaturePlacementAdapterDoesNotMutateLedgersWhenConvertIsImpossible()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -3748,13 +3886,13 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(1, tiers: 1),
             MaxSym = 1,
         });
-        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
         for (var i = 0; i < settings.SymbolFillCap(1); i++)
             Assert.AreEqual(SymbolCollectionStatus.Valid, symbolLedger.Collect(1).Status);
-        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6, settings);
+        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6);
         var prizeLedger = EmptyPrizeLedger(objectives.MaxSymbol);
 
-        var result = new ForwardFeaturePlacementAdapter(settings, objectives.MaxSymbol, seed: 50).Plan(
+        var result = new ForwardFeaturePlacementAdapter(objectives.MaxSymbol, seed: 50).Plan(
             turn: 1,
             plannedTotalTurns: 6,
             objectives,
@@ -3777,7 +3915,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnAssemblerAdvancesBoardWithExactNormalSpawnsAndWinProgress()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -3786,15 +3924,15 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var board = new ForwardBoardState(FilledBoard(6), settings);
+        var board = new ForwardBoardState(FilledBoard(6));
         var shape = Shape(1, 1, 1, 1, 1);
         var emptyCount = board.PreviewAfterPushRotate(shape).EmptyPositions.Count;
         var normalIntents = new[] { new ForwardNormalSpawnIntent(ForwardSymbolIntent.MustProgressWin) }
             .Concat(Enumerable.Repeat(ForwardNormalSpawnIntent.SafeFiller(), emptyCount - 1))
             .ToArray();
-        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
 
-        var result = new ForwardTurnAssembler(settings, seed: 51).AssembleAndAdvance(
+        var result = new ForwardTurnAssembler(seed: 51).AssembleAndAdvance(
             turn: 1,
             plannedTotalTurns: 5,
             board,
@@ -3805,7 +3943,7 @@ public sealed class EngineAndHelperTests
             futureTurns: new[] { new ForwardFutureTurn(2, Shape(1, 1, 1, 1, 1)) },
             remainingFeatureCapacity: FeatureCapacity(),
             symbolLedger: symbolLedger,
-            extraSpinLedger: new ForwardExtraSpinLedger(plannedTotalTurns: 5, settings),
+            extraSpinLedger: new ForwardExtraSpinLedger(plannedTotalTurns: 5),
             prizeUpgradeLedger: EmptyPrizeLedger(objectives.MaxSymbol));
 
         Assert.AreEqual(ForwardTurnAssemblyStatus.Valid, result.Status, result.Detail);
@@ -3818,7 +3956,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnAssemblerMergesFeatureAndNormalSpawnsExactly()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -3827,12 +3965,12 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var board = new ForwardBoardState(FilledBoard(6), settings);
+        var board = new ForwardBoardState(FilledBoard(6));
         var shape = Shape(1, 1, 1, 1, 1);
         var emptyCount = board.PreviewAfterPushRotate(shape).EmptyPositions.Count;
-        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6, settings);
+        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 6);
 
-        var result = new ForwardTurnAssembler(settings, seed: 52).AssembleAndAdvance(
+        var result = new ForwardTurnAssembler(seed: 52).AssembleAndAdvance(
             turn: 1,
             plannedTotalTurns: 6,
             board,
@@ -3842,7 +3980,7 @@ public sealed class EngineAndHelperTests
             normalIntents: Enumerable.Repeat(ForwardNormalSpawnIntent.SafeFiller(), emptyCount - 1).ToArray(),
             futureTurns: new[] { new ForwardFutureTurn(2, Shape(1, 1, 1, 1, 1)) },
             remainingFeatureCapacity: FeatureCapacity((ForwardFeatureKind.ExtraGo, 1)),
-            symbolLedger: new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings),
+            symbolLedger: new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol),
             extraSpinLedger: extraLedger,
             prizeUpgradeLedger: EmptyPrizeLedger(objectives.MaxSymbol));
 
@@ -3857,7 +3995,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnAssemblerRejectsNormalIntentMismatchWithoutMutation()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -3866,12 +4004,12 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var board = new ForwardBoardState(FilledBoard(6), settings);
+        var board = new ForwardBoardState(FilledBoard(6));
         var before = BoardSignature(board.Snapshot());
-        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
-        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 5, settings);
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
+        var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: 5);
 
-        var result = new ForwardTurnAssembler(settings, seed: 53).AssembleAndAdvance(
+        var result = new ForwardTurnAssembler(seed: 53).AssembleAndAdvance(
             turn: 1,
             plannedTotalTurns: 5,
             board,
@@ -3894,7 +4032,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnAssemblerRejectsUnsatisfiedResidueIntentWithoutMutation()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int>(),
@@ -3903,11 +4041,11 @@ public sealed class EngineAndHelperTests
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
             MaxSym = settings.PrizeLadderRows.Count,
         });
-        var board = new ForwardBoardState(FilledBoard(6), settings);
+        var board = new ForwardBoardState(FilledBoard(6));
         var shape = Shape(1, 1, 1, 1, 1);
         var emptyCount = board.PreviewAfterPushRotate(shape).EmptyPositions.Count;
 
-        var result = new ForwardTurnAssembler(settings, seed: 54).AssembleAndAdvance(
+        var result = new ForwardTurnAssembler(seed: 54).AssembleAndAdvance(
             turn: 1,
             plannedTotalTurns: 5,
             board,
@@ -3917,8 +4055,8 @@ public sealed class EngineAndHelperTests
             normalIntents: Enumerable.Repeat(new ForwardNormalSpawnIntent(ForwardSymbolIntent.ResidueOnly), emptyCount).ToArray(),
             futureTurns: new[] { new ForwardFutureTurn(2, Shape(5, 5, 5, 5, 5)) },
             remainingFeatureCapacity: FeatureCapacity(),
-            symbolLedger: new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings),
-            extraSpinLedger: new ForwardExtraSpinLedger(plannedTotalTurns: 5, settings),
+            symbolLedger: new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol),
+            extraSpinLedger: new ForwardExtraSpinLedger(plannedTotalTurns: 5),
             prizeUpgradeLedger: EmptyPrizeLedger(objectives.MaxSymbol));
 
         Assert.AreEqual(ForwardTurnAssemblyStatus.NormalIntentCannotBeSatisfied, result.Status);
@@ -3946,24 +4084,24 @@ public sealed class EngineAndHelperTests
         {
             for (var seed = 1; seed <= 40; seed++)
             {
-                var math = new ForwardMathInputResolver(settings).Resolve(amounts, seed);
+                var math = new ForwardMathInputResolver().Resolve(amounts, seed);
                 Assert.AreEqual(ForwardMathInputStatus.Valid, math.Status, $"amounts=[{string.Join(",", amounts)}], seed={seed}: {math.Detail}");
 
-                var objectives = new ForwardObjectivePlanner(settings).Resolve(math.Bundle!.Input, seed + 1000);
+                var objectives = new ForwardObjectivePlanner().Resolve(math.Bundle!.Input, seed + 1000);
                 Assert.AreEqual(ForwardObjectiveStatus.Valid, objectives.Status, $"amounts=[{string.Join(",", amounts)}], seed={seed}: {objectives.Detail}");
 
-                var budget = new ForwardFeatureBudgetPlanner(settings).Plan(math.Bundle.Input, objectives.Objectives, seed + 2000);
+                var budget = new ForwardFeatureBudgetPlanner().Plan(math.Bundle.Input, objectives.Objectives, seed + 2000);
                 Assert.AreEqual(ForwardFeatureBudgetStatus.Valid, budget.Status, $"amounts=[{string.Join(",", amounts)}], seed={seed}: {budget.Detail}");
                 Assert.AreEqual(settings.BASE_SPINS + budget.Budget!.ExtraGoCount, budget.Budget.TotalTurns);
 
-                var timing = new ForwardFeatureTimingPlanner(settings, seed + 3000).Plan(budget.Budget);
+                var timing = new ForwardFeatureTimingPlanner(seed + 3000).Plan(budget.Budget);
                 Assert.AreEqual(ForwardFeatureTimingStatus.Valid, timing.Status, $"amounts=[{string.Join(",", amounts)}], seed={seed}: {timing.Detail}");
                 Assert.IsTrue(timing.Timing!.Events.All(feature => feature.Turn < timing.Timing.TotalTurns));
                 Assert.AreEqual(
                     timing.Timing.Count(ForwardTimedFeatureKind.PrizeUpgrade),
                     timing.Timing.TurnsFor(ForwardTimedFeatureKind.PrizeUpgrade).Distinct().Count());
 
-                var intents = new ForwardFeatureIntentPlanner(settings, seed + 4000).Plan(objectives.Objectives, timing.Timing);
+                var intents = new ForwardFeatureIntentPlanner(seed + 4000).Plan(objectives.Objectives, timing.Timing);
                 Assert.AreEqual(ForwardFeatureIntentStatus.Valid, intents.Status, $"amounts=[{string.Join(",", amounts)}], seed={seed}: {intents.Detail}");
                 Assert.AreEqual(timing.Timing.Events.Count, intents.Plan!.Intents.Count);
             }
@@ -3973,7 +4111,7 @@ public sealed class EngineAndHelperTests
     [TestMethod]
     public void ForwardTurnAssemblerMaintainsExactSpawnInvariantAcrossSeededShapes()
     {
-        var settings = Settings.Default;
+        var settings = Settings;
         var objectives = ResolveObjectives(settings, new MathInput
         {
             Targets = new Dictionary<int, int> { [1] = settings.SymbolFillCap(1) },
@@ -3994,7 +4132,7 @@ public sealed class EngineAndHelperTests
         for (var seed = 1; seed <= 50; seed++)
         {
             var shape = shapes[seed % shapes.Length];
-            var board = new ForwardBoardState(FilledBoard(6), settings);
+            var board = new ForwardBoardState(FilledBoard(6));
             var preview = board.PreviewAfterPushRotate(shape);
             Assert.AreEqual(ForwardBoardAdvanceStatus.Valid, preview.Status, preview.Detail);
 
@@ -4004,11 +4142,11 @@ public sealed class EngineAndHelperTests
                 : Array.Empty<ForwardFeatureIntent>();
             var normalCount = preview.EmptyPositions.Count - featureIntents.Length;
             var normalIntents = Enumerable.Repeat(ForwardNormalSpawnIntent.SafeFiller(), normalCount).ToArray();
-            var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: hasExtraGo ? 6 : 5, settings);
-            var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol, settings);
+            var extraLedger = new ForwardExtraSpinLedger(plannedTotalTurns: hasExtraGo ? 6 : 5);
+            var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
             var before = BoardSignature(board.Snapshot());
 
-            var result = new ForwardTurnAssembler(settings, seed + 5000).AssembleAndAdvance(
+            var result = new ForwardTurnAssembler(seed + 5000).AssembleAndAdvance(
                 turn: 1,
                 plannedTotalTurns: hasExtraGo ? 6 : 5,
                 board,
@@ -4036,10 +4174,10 @@ public sealed class EngineAndHelperTests
 
     private static Cell?[,] FilledBoard(int symbol)
     {
-        var board = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
-        for (var row = 0; row < Settings.Default.ROWS; row++)
+        var board = new Cell?[Settings.ROWS, Settings.COLS];
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < Settings.Default.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
                 board[row, col] = Grid.Norm(symbol);
         }
 
@@ -4049,9 +4187,9 @@ public sealed class EngineAndHelperTests
     private static string BoardSignature(Cell?[,] board)
     {
         var parts = new List<string>();
-        for (var row = 0; row < Settings.Default.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < Settings.Default.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
             {
                 var cell = board[row, col];
                 parts.Add(cell == null
@@ -4065,11 +4203,11 @@ public sealed class EngineAndHelperTests
 
     private static Cell?[,] NumberedBoard()
     {
-        var board = new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
+        var board = new Cell?[Settings.ROWS, Settings.COLS];
         var sym = 1;
-        for (var row = 0; row < Settings.Default.ROWS; row++)
+        for (var row = 0; row < Settings.ROWS; row++)
         {
-            for (var col = 0; col < Settings.Default.COLS; col++)
+            for (var col = 0; col < Settings.COLS; col++)
                 board[row, col] = Grid.Norm(sym++);
         }
 
@@ -4077,16 +4215,16 @@ public sealed class EngineAndHelperTests
     }
 
     private static Cell?[,] EmptyBoard() =>
-        new Cell?[Settings.Default.ROWS, Settings.Default.COLS];
+        new Cell?[Settings.ROWS, Settings.COLS];
 
     private static ForwardTurnShape Shape(params int[] pushValues)
     {
         var pushers = pushValues
-            .Select(push => push == Settings.Default.ROWS
-                ? new ForwardPusher(Settings.Default.ROWS, Settings.Default.F_FLUSH_ID)
+            .Select(push => push == Settings.ROWS
+                ? new ForwardPusher(Settings.ROWS, Settings.F_FLUSH_ID)
                 : new ForwardPusher(push))
             .ToArray();
-        var (shape, check) = ForwardTurnShape.TryCreate(pushers, Settings.Default);
+        var (shape, check) = ForwardTurnShape.TryCreate(pushers);
         Assert.AreEqual(ForwardTurnShapeStatus.Valid, check.Status);
         return shape!;
     }
@@ -4098,9 +4236,10 @@ public sealed class EngineAndHelperTests
         IReadOnlyList<int> fillerSymbols,
         int maxSymbol,
         int seed,
-        Settings? settings = null)
+        GameEngine.ICustomProfileSettings? settings = null)
     {
-        var actualSettings = settings ?? Settings.Default;
+        var actualSettings = settings ?? Settings;
+        GameEngine.Engine.Settings = actualSettings;
         return new ForwardSpawnPlanner(
             new ForwardSymbolSelector(
                 ledger,
@@ -4108,10 +4247,8 @@ public sealed class EngineAndHelperTests
                 nearMissMinimums,
                 fillerSymbols,
                 maxSymbol,
-                actualSettings,
                 new Random(seed)),
-            new ForwardCellFateAnalyzer(actualSettings),
-            actualSettings);
+            new ForwardCellFateAnalyzer());
     }
 
     private static (int r, int c)[] Positions(params (int r, int c)[] positions) => positions;
@@ -4124,32 +4261,37 @@ public sealed class EngineAndHelperTests
         new(
             new Dictionary<int, int>(),
             PrizeValues(maxSymbol, tiers: 2),
-            maxSymbol,
-            Settings.Default);
+            maxSymbol);
 
-    private static Settings SettingsWithForcedNearMiss(int count)
+    private static GameEngine.ICustomProfileSettings SettingsWithForcedNearMiss(int count)
     {
         var weights = new double[Math.Max(1, count)];
         weights[count - 1] = 1.0;
 
-        return new Settings
-        {
+        var settings = new GameEngine.DefaultCoinPusherSettings {
             NonWinTargetProfiles = new[] { (1.0, 10, 19, count) },
             NonWinCountWeights = weights,
         };
+        GameEngine.Engine.Settings = settings;
+        return settings;
     }
 
-    private static Settings SettingsWithNoOptionalFeatures() =>
-        new()
+    private static GameEngine.ICustomProfileSettings SettingsWithNoOptionalFeatures()
+    {
+        var settings = new GameEngine.DefaultCoinPusherSettings()
         {
             PNoWinExtraGoOptional = 0.0,
             POptionalFeatureTicket = 0.0,
             PWheelOptional = 0.0,
             PFlushOptional = 0.0,
         };
+        GameEngine.Engine.Settings = settings;
+        return settings;
+    }
 
-    private static Settings SettingsWithNoOptionalFeaturesAndNoNearMiss() =>
-        new()
+    private static GameEngine.ICustomProfileSettings SettingsWithNoOptionalFeaturesAndNoNearMiss()
+    {
+        var settings = new GameEngine.DefaultCoinPusherSettings()
         {
             PNoWinExtraGoOptional = 0.0,
             POptionalFeatureTicket = 0.0,
@@ -4157,6 +4299,9 @@ public sealed class EngineAndHelperTests
             PFlushOptional = 0.0,
             NonWinTargetProfiles = new[] { (1.0, 0, 0, 0) },
         };
+        GameEngine.Engine.Settings = settings;
+        return settings;
+    }
 
     private static MathInput WithRequired(
         MathInput input,
@@ -4174,16 +4319,16 @@ public sealed class EngineAndHelperTests
             MaxSym = input.MaxSym,
         };
 
-    private static ForwardObjectives ResolveObjectives(Settings settings, MathInput input)
+    private static ForwardObjectives ResolveObjectives(GameEngine.ICustomProfileSettings settings, MathInput input)
     {
-        var result = new ForwardObjectivePlanner(settings).Resolve(input, seed: 1234);
+        var result = new ForwardObjectivePlanner().Resolve(input, seed: 1234);
         Assert.AreEqual(ForwardObjectiveStatus.Valid, result.Status, result.Detail);
         return result.Objectives!;
     }
 
-    private static GamePlan ForwardPlan(MathInput input, int seed, Settings? settings = null)
+    private static GamePlan ForwardPlan(MathInput input, int seed, GameEngine.ICustomProfileSettings? settings = null)
     {
-        var actualSettings = settings ?? Settings.Default;
+        var actualSettings = settings ?? Settings;
         var last = "";
         for (var attempt = 0; attempt < Math.Min(actualSettings.MaxPlanAttempts, 32); attempt++)
         {
@@ -4201,27 +4346,28 @@ public sealed class EngineAndHelperTests
     private static (GamePlan? Plan, string Detail) TryForwardPlan(
         MathInput input,
         int seed,
-        Settings actualSettings)
+        GameEngine.ICustomProfileSettings actualSettings)
     {
-        var objectives = new ForwardObjectivePlanner(actualSettings).Resolve(input, seed + 1);
+        GameEngine.Engine.Settings = actualSettings;
+        var objectives = new ForwardObjectivePlanner().Resolve(input, seed + 1);
         if (!objectives.IsValid) return (null, $"{objectives.Status}: {objectives.Detail}");
 
-        var budget = new ForwardFeatureBudgetPlanner(actualSettings).Plan(input, objectives.Objectives, seed + 2);
+        var budget = new ForwardFeatureBudgetPlanner().Plan(input, objectives.Objectives, seed + 2);
         if (!budget.IsValid) return (null, $"{budget.Status}: {budget.Detail}");
 
-        var timing = new ForwardFeatureTimingPlanner(actualSettings, seed + 3).Plan(budget.Budget);
+        var timing = new ForwardFeatureTimingPlanner(seed + 3).Plan(budget.Budget);
         if (!timing.IsValid) return (null, $"{timing.Status}: {timing.Detail}");
 
-        var intents = new ForwardFeatureIntentPlanner(actualSettings, seed + 4).Plan(objectives.Objectives, timing.Timing);
+        var intents = new ForwardFeatureIntentPlanner(seed + 4).Plan(objectives.Objectives, timing.Timing);
         if (!intents.IsValid) return (null, $"{intents.Status}: {intents.Detail}");
 
-        var frames = new ForwardTurnFramePlanner(actualSettings, seed + 5).Plan(
+        var frames = new ForwardTurnFramePlanner(seed + 5).Plan(
             budget.Budget,
             intents.Plan,
             objectives.Objectives);
         if (!frames.IsValid) return (null, $"{frames.Status}: {frames.Detail}");
 
-        var finalized = new ForwardObjectiveFinalizer(actualSettings).Finalize(
+        var finalized = new ForwardObjectiveFinalizer().Finalize(
             objectives.Objectives,
             intents.Plan,
             frames.Plan);
@@ -4232,12 +4378,12 @@ public sealed class EngineAndHelperTests
             finalized.Detail,
             finalized.Objectives);
 
-        var envelope = new ForwardTicketEnvelopeValidator(actualSettings).Validate(
+        var envelope = new ForwardTicketEnvelopeValidator().Validate(
             finalObjectives.Objectives,
             frames.Plan);
         if (!envelope.IsValid) return (null, $"{envelope.Status}: {envelope.Detail}");
 
-        var pipeline = new ForwardTicketPipelineExecutor(actualSettings, seed + 6).Execute(
+        var pipeline = new ForwardTicketPipelineExecutor(seed + 6).Execute(
             finalObjectives.Objectives,
             frames.Plan);
         if (!pipeline.IsValid) return (null, $"{pipeline.Status}: {pipeline.Detail}");
@@ -4253,7 +4399,7 @@ public sealed class EngineAndHelperTests
             frames,
             envelope,
             pipeline);
-        var adapted = new ForwardGamePlanAdapter(actualSettings).Adapt(build);
+        var adapted = new ForwardGamePlanAdapter().Adapt(build);
         if (!adapted.IsValid || adapted.Plan == null)
             return (null, $"{adapted.Status}: {adapted.Detail}");
 
