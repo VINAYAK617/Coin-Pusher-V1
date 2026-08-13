@@ -1041,7 +1041,7 @@ public static class TicketChecker
                 for (int c = 0; c < Settings.COLS; c++)
                 {
                     if (board[r, c]?.IsFeat == true)
-                        board[r, c] = new ReplayCell { Sym = ResolveConvert(board[r, c]!) };
+                        board[r, c] = ConvertCell(board[r, c]!);
                 }
             }
 
