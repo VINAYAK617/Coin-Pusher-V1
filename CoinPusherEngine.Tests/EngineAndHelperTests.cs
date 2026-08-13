@@ -3875,6 +3875,50 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
+    public void ForwardFeaturePlacementAdapterAvoidsFutureWheelOverflowOnConvertedFeatureResidue()
+    {
+        var settings = new GameEngine.DefaultCoinPusherSettings
+        {
+            PrizeLadderRows = new[]
+            {
+                new PrizeLadderRow { Target = 4, Tiers = new decimal[] { 1 } },
+                new PrizeLadderRow { Target = 4, Tiers = new decimal[] { 2 } },
+            },
+        };
+        GameEngine.Engine.Settings = settings;
+        var objectives = ResolveObjectives(settings, new MathInput
+        {
+            Targets = new Dictionary<int, int>(),
+            NonWinTargets = new Dictionary<int, int>(),
+            BaseSpins = settings.BASE_SPINS,
+            PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 1),
+            MaxSym = settings.PrizeLadderRows.Count,
+        });
+        var boardAfterPushRotate = new Cell?[settings.ROWS, settings.COLS];
+        boardAfterPushRotate[0, 4] = Grid.Norm(1);
+        var symbolLedger = new SymbolLedger(objectives.WinTargets, objectives.NearMissTargets, objectives.MaxSymbol);
+        Assert.AreEqual(SymbolCollectionStatus.Valid, symbolLedger.Collect(1, stack: 3).Status);
+
+        var result = new ForwardFeaturePlacementAdapter(objectives.MaxSymbol, seed: 503).Plan(
+            turn: 2,
+            plannedTotalTurns: 3,
+            objectives,
+            new[] { ForwardFeatureIntent.Wheel(turn: 2, symbol: 1, stackValue: 1) },
+            emptyPositions: Positions((4, 0)),
+            reservedPositions: Array.Empty<(int r, int c)>(),
+            futureTurns: new[] { new ForwardFutureTurn(3, Shape(1, 1, 1, 1, 5)) },
+            remainingFeatureCapacity: FeatureCapacity((ForwardFeatureKind.Wheel, 1)),
+            symbolLedger,
+            new ForwardExtraSpinLedger(plannedTotalTurns: 3),
+            EmptyPrizeLedger(objectives.MaxSymbol),
+            boardAfterPushRotate);
+
+        Assert.AreEqual(ForwardFeaturePlacementStatus.Valid, result.Status, result.Detail);
+        Assert.AreNotEqual(1, result.Requests.Single().WheelSymbol);
+        Assert.AreEqual(3, symbolLedger.CollectedCount(1));
+    }
+
+    [TestMethod]
     public void ForwardFeaturePlacementAdapterDoesNotMutateLedgersWhenConvertIsImpossible()
     {
         var settings = Settings;
