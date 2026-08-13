@@ -3695,7 +3695,7 @@ public sealed class EngineAndHelperTests
         Assert.IsTrue(result.Spawns.Any(spawn => spawn.Cell.Sym == settings.F_XSPIN));
         Assert.AreEqual(1, result.WheelImpacts.Count);
         Assert.AreEqual(3, result.WheelImpacts[0].StackValue);
-        Assert.AreEqual(2, symbolLedger.CollectedCount(2));
+        Assert.AreEqual(4, symbolLedger.CollectedCount(2));
         Assert.AreEqual(settings.BASE_SPINS + 1, extraLedger.EarnedTurns);
         Assert.AreEqual(1, extraLedger.LogicalExtraGoAwards);
         Assert.AreEqual(1, prizeLedger.CurrentTier(2));

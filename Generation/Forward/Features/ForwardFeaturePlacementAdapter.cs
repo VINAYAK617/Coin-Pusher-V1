@@ -129,6 +129,7 @@ internal sealed class ForwardFeaturePlacementAdapter
         var trialRequests = new List<ForwardFeatureSpawnRequest>();
         var reservations = new List<ConvertReservation>();
         var sameTurnWheelSymbols = new HashSet<int>();
+        var sameTurnCollectedConvertSymbols = new HashSet<int>();
         foreach (var intent in boardIntents)
         {
             var placed = TryPlaceIntent(
@@ -138,7 +139,8 @@ internal sealed class ForwardFeaturePlacementAdapter
                 objectives,
                 trialSymbolLedger,
                 boardAfterPushRotate,
-                sameTurnWheelSymbols);
+                sameTurnWheelSymbols,
+                sameTurnCollectedConvertSymbols);
             if (!placed.IsValid)
                 return placed.Result!;
 
@@ -150,6 +152,8 @@ internal sealed class ForwardFeaturePlacementAdapter
                 sameTurnWheelSymbols.Add(placed.Request.Value.WheelSymbol.Value);
             }
             reservations.Add(placed.Reservation!.Value);
+            if (placed.Reservation.Value.IsCollected)
+                sameTurnCollectedConvertSymbols.Add(placed.Reservation.Value.ConvertSymbol);
             available.Remove((placed.Request.Value.Row, placed.Request.Value.Col));
         }
 
@@ -170,17 +174,7 @@ internal sealed class ForwardFeaturePlacementAdapter
                 flushCount: flushCount);
         }
 
-        foreach (var reservation in reservations.Where(reservation => reservation.IsCollected))
-        {
-            var commit = symbolLedger.Collect(reservation.ConvertSymbol);
-            if (!commit.IsValid)
-            {
-                return Fail(
-                    ForwardFeaturePlacementStatus.CommitFailed,
-                    $"symbol ledger commit failed for ConvertToId={reservation.ConvertSymbol}: {commit.Detail}",
-                    flushCount: flushCount);
-            }
-        }
+        symbolLedger.ReplaceWith(trialSymbolLedger);
 
         var committedSpawn = _featureSpawnPlanner.Plan(
             turn,
@@ -216,7 +210,8 @@ internal sealed class ForwardFeaturePlacementAdapter
         ForwardObjectives objectives,
         SymbolLedger currentTrialLedger,
         Cell?[,]? boardAfterPushRotate,
-        IReadOnlySet<int> sameTurnWheelSymbols)
+        IReadOnlySet<int> sameTurnWheelSymbols,
+        IReadOnlySet<int> sameTurnCollectedConvertSymbols)
     {
         foreach (var position in OrderedCandidatePositions(available, intent, futureTurns))
         {
@@ -229,13 +224,19 @@ internal sealed class ForwardFeaturePlacementAdapter
                 CreateSelector(
                     objectives,
                     candidateLedger,
-                    intent.Kind == ForwardTimedFeatureKind.Wheel
-                        ? null
-                        : sameTurnWheelSymbols));
+                    sameTurnWheelSymbols));
             if (!convert.IsValid)
                 continue;
 
-            var request = BuildRequest(intent, position, convert.ConvertSymbol, boardAfterPushRotate, futureTurns, objectives);
+            var request = BuildRequest(
+                intent,
+                position,
+                convert.ConvertSymbol,
+                boardAfterPushRotate,
+                futureTurns,
+                objectives,
+                candidateLedger,
+                sameTurnCollectedConvertSymbols);
             if (!request.HasValue)
                 continue;
 
@@ -245,7 +246,8 @@ internal sealed class ForwardFeaturePlacementAdapter
                     position.r,
                     position.c,
                     convert.ConvertSymbol,
-                    convert.IsCollected),
+                    convert.IsCollected,
+                    request.Value.Kind),
                 candidateLedger);
         }
 
@@ -343,7 +345,9 @@ internal sealed class ForwardFeaturePlacementAdapter
         int convertSymbol,
         Cell?[,]? boardAfterPushRotate,
         IReadOnlyList<ForwardFutureTurn> futureTurns,
-        ForwardObjectives objectives) =>
+        ForwardObjectives objectives,
+        SymbolLedger ledger,
+        IReadOnlySet<int> sameTurnCollectedConvertSymbols) =>
         intent.Kind switch
         {
             ForwardTimedFeatureKind.Wheel => BuildWheelRequest(
@@ -352,7 +356,9 @@ internal sealed class ForwardFeaturePlacementAdapter
                 convertSymbol,
                 boardAfterPushRotate,
                 futureTurns,
-                objectives),
+                objectives,
+                ledger,
+                sameTurnCollectedConvertSymbols),
             ForwardTimedFeatureKind.ExtraGo => ForwardFeatureSpawnRequest.ExtraGo(
                 position.r,
                 position.c,
@@ -372,45 +378,56 @@ internal sealed class ForwardFeaturePlacementAdapter
         int convertSymbol,
         Cell?[,]? boardAfterPushRotate,
         IReadOnlyList<ForwardFutureTurn> futureTurns,
-        ForwardObjectives objectives)
+        ForwardObjectives objectives,
+        SymbolLedger ledger,
+        IReadOnlySet<int> sameTurnCollectedConvertSymbols)
     {
-        var wheelSymbol = SafeWheelSymbol(intent, boardAfterPushRotate, futureTurns, objectives);
-        if (wheelSymbol <= 0)
-            return null;
+        var wheelStack = intent.ResultingWheelStack!.Value;
+        foreach (var wheelSymbol in OrderedWheelSymbols(intent, objectives, sameTurnCollectedConvertSymbols))
+        {
+            if (!WheelSymbolSafeOnCurrentBoard(wheelSymbol, boardAfterPushRotate, futureTurns))
+                continue;
 
-        return ForwardFeatureSpawnRequest.Wheel(
-            position.r,
-            position.c,
-            convertSymbol,
-            wheelSymbol,
-            intent.ResultingWheelStack!.Value);
+            var trialLedger = ledger.Clone();
+            var selfConversion = CommitWheelSelfConversionBonus(
+                position,
+                convertSymbol,
+                wheelSymbol,
+                wheelStack,
+                futureTurns,
+                trialLedger);
+            if (!selfConversion.IsValid)
+                continue;
+
+            ledger.ReplaceWith(trialLedger);
+            return ForwardFeatureSpawnRequest.Wheel(
+                position.r,
+                position.c,
+                convertSymbol,
+                wheelSymbol,
+                wheelStack);
+        }
+
+        return null;
     }
 
-    private int SafeWheelSymbol(
+    private IReadOnlyList<int> OrderedWheelSymbols(
         ForwardFeatureIntent intent,
-        Cell?[,]? boardAfterPushRotate,
-        IReadOnlyList<ForwardFutureTurn> futureTurns,
-        ForwardObjectives objectives)
+        ForwardObjectives objectives,
+        IReadOnlySet<int> blockedSameTurnSymbols)
     {
-        var candidates = objectives.FillSymbols
+        return objectives.FillSymbols
             .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
             .Where(symbol => !objectives.NearMissTargets.ContainsKey(symbol))
             .Concat(objectives.NearMissTargets.Keys)
             .Concat(objectives.WinSymbols)
             .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol))
+            .Where(symbol => !blockedSameTurnSymbols.Contains(symbol))
             .Distinct()
             .OrderBy(symbol => symbol == intent.WheelSymbol ? 0 : 1)
             .ThenBy(symbol => objectives.WinTargets.ContainsKey(symbol) ? 2 : objectives.NearMissTargets.ContainsKey(symbol) ? 1 : 0)
             .ThenBy(symbol => symbol)
             .ToArray();
-
-        foreach (var symbol in candidates)
-        {
-            if (WheelSymbolSafeOnCurrentBoard(symbol, boardAfterPushRotate, futureTurns))
-                return symbol;
-        }
-
-        return 0;
     }
 
     private bool WheelSymbolSafeOnCurrentBoard(
@@ -436,6 +453,33 @@ internal sealed class ForwardFeaturePlacementAdapter
         }
 
         return true;
+    }
+
+    private WheelImpactCommitResult CommitWheelSelfConversionBonus(
+        (int r, int c) position,
+        int convertSymbol,
+        int wheelSymbol,
+        int wheelStack,
+        IReadOnlyList<ForwardFutureTurn> futureTurns,
+        SymbolLedger ledger)
+    {
+        if (convertSymbol != wheelSymbol)
+            return WheelImpactCommitResult.Ok();
+
+        var stackBonus = Math.Max(0, wheelStack - 1);
+        if (stackBonus == 0)
+            return WheelImpactCommitResult.Ok();
+
+        var fate = _fateAnalyzer.Analyze(position.r, position.c, futureTurns);
+        if (!fate.IsValid)
+            return WheelImpactCommitResult.Fail(fate.Detail);
+        if (!fate.IsCollected)
+            return WheelImpactCommitResult.Ok();
+
+        var collect = ledger.Collect(convertSymbol, stackBonus);
+        return collect.IsValid
+            ? WheelImpactCommitResult.Ok()
+            : WheelImpactCommitResult.Fail(collect.Detail);
     }
 
     private ForwardSymbolSelector CreateSelector(
@@ -474,18 +518,21 @@ internal sealed class ForwardFeaturePlacementAdapter
             int row,
             int col,
             int convertSymbol,
-            bool isCollected)
+            bool isCollected,
+            ForwardFeatureKind featureKind)
         {
             Row = row;
             Col = col;
             ConvertSymbol = convertSymbol;
             IsCollected = isCollected;
+            FeatureKind = featureKind;
         }
 
         internal int Row { get; }
         internal int Col { get; }
         internal int ConvertSymbol { get; }
         internal bool IsCollected { get; }
+        internal ForwardFeatureKind FeatureKind { get; }
     }
 
     private readonly struct ConvertSelection
@@ -513,6 +560,24 @@ internal sealed class ForwardFeaturePlacementAdapter
 
         internal static ConvertSelection Fail(ForwardFeaturePlacementStatus status, string detail) =>
             new(status, 0, false, detail);
+    }
+
+    private readonly struct WheelImpactCommitResult
+    {
+        private WheelImpactCommitResult(bool isValid, string detail)
+        {
+            IsValid = isValid;
+            Detail = detail;
+        }
+
+        internal bool IsValid { get; }
+        internal string Detail { get; }
+
+        internal static WheelImpactCommitResult Ok() =>
+            new(true, "ok");
+
+        internal static WheelImpactCommitResult Fail(string detail) =>
+            new(false, detail);
     }
 
     private sealed class FeatureSlotAttempt

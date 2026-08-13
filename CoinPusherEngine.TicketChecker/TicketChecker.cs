@@ -89,10 +89,10 @@ public static class TicketChecker
             return result;
         }
 
-        Ticket? ticket;
+        Newtonsoft.Json.Linq.JObject? root;
         try
         {
-            ticket = JsonConvert.DeserializeObject<Ticket>(json);
+            root = JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(json);
         }
         catch (JsonException ex)
         {
@@ -101,7 +101,17 @@ public static class TicketChecker
             return result;
         }
 
-        return CheckTicket(ticket).ToResult();
+        if (root == null)
+        {
+            var result = new TicketCheckResult();
+            result.Errors.Add("Ticket JSON could not be parsed: root object is null.");
+            return result;
+        }
+
+        if (root["WinInfo"] != null || root["StartingBoard"] != null || root["Turns"] != null)
+            return CheckTicket(root.ToObject<TicketDto>()).ToResult();
+
+        return CheckTicket(root.ToObject<Ticket>()).ToResult();
     }
 
     public static TicketCheckResult CheckObject(Ticket? ticket) =>
@@ -1024,7 +1034,7 @@ public static class TicketChecker
                 for (int c = 0; c < Settings.Default.COLS; c++)
                 {
                     if (board[r, c]?.IsFeat == true)
-                        board[r, c] = new ReplayCell { Sym = ResolveConvert(board[r, c]!) };
+                        board[r, c] = ConvertCell(board[r, c]!);
                 }
             }
 
@@ -1133,7 +1143,7 @@ public static class TicketChecker
 
                     board[r, c] = fc.ReTrigger is { Length: > 0 }
                         ? FeatureCell(fc.ReTrigger[0])
-                        : new ReplayCell { Sym = ResolveConvert(fc) };
+                        : ConvertCell(fc);
                     any = true;
                 }
             }
@@ -1181,6 +1191,20 @@ public static class TicketChecker
             WheelStackValue = feature.WheelStackValue ?? 0,
             ReTrigger = feature.ReTrigger ?? Array.Empty<FeatureDto>(),
         };
+
+    private static ReplayCell ConvertCell(ReplayCell fc)
+    {
+        var convertTo = ResolveConvert(fc);
+        var converted = new ReplayCell { Sym = convertTo, Stack = 1 };
+        if (fc.FeatureId == Settings.Default.F_WHEEL && fc.WheelSymbolId == convertTo)
+        {
+            converted.Stack = Math.Min(
+                Settings.Default.MAX_COIN_STACK,
+                Math.Max(1, fc.WheelStackValue + 1));
+        }
+
+        return converted;
+    }
 
     /// <summary>
     /// Resolves the REAL eventual symbol a feature cell converts to. When a

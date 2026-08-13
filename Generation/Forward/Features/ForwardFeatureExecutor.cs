@@ -53,7 +53,7 @@ internal sealed class ForwardFeatureExecutor
                         FireWheel(board, featureCell);
 
                     var convertTo = ConvertTarget(featureCell);
-                    board[row, col] = Grid.Norm(convertTo);
+                    board[row, col] = ConvertCell(featureCell, convertTo);
                     result.Events.Add(new ForwardFeatureFireEvent
                     {
                         Row = row,
@@ -112,4 +112,17 @@ internal sealed class ForwardFeatureExecutor
         cell.CvtSym > 0 && !_settings.IsFeat(cell.CvtSym)
             ? cell.CvtSym
             : _settings.F_COIN;
+
+    private Cell ConvertCell(Cell featureCell, int convertTo)
+    {
+        var converted = Grid.Norm(convertTo);
+        if (IsWheel(featureCell) && featureCell.Fp?.WheelSym == convertTo)
+        {
+            converted.Stack = Math.Min(
+                _settings.MAX_COIN_STACK,
+                Math.Max(1, featureCell.Fp?.WheelStack ?? 1));
+        }
+
+        return converted;
+    }
 }

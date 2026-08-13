@@ -123,8 +123,7 @@ internal static class Sim
             {
                 var cell = board[r, c];
                 if (cell?.IsFeat != true) continue;
-                board[r, c] = Grid.Norm(cell.CvtSym > 0 && !Settings.Default.IsFeat(cell.CvtSym)
-                                         ? cell.CvtSym : Settings.Default.F_COIN);
+                board[r, c] = Cvt(cell);
             }
         }
     }
@@ -139,6 +138,15 @@ internal static class Sim
     private static Cell Cvt(Cell fc)
     {
         int id = fc.CvtSym > 0 && !Settings.Default.IsFeat(fc.CvtSym) ? fc.CvtSym : Settings.Default.F_COIN;
-        return Grid.Norm(id);
+        var converted = Grid.Norm(id);
+        if ((fc.Sym == Settings.Default.F_WHEEL || fc.FeatId == "WHEEL")
+            && fc.Fp?.WheelSym == id)
+        {
+            converted.Stack = Math.Min(
+                Settings.Default.MAX_COIN_STACK,
+                Math.Max(1, fc.Fp?.WheelStack ?? 1));
+        }
+
+        return converted;
     }
 }
