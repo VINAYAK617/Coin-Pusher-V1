@@ -897,6 +897,13 @@ public static class TicketChecker
                 $"spawn Id={owningSpawnId} but Feature.FeatureId={feature.FeatureId}");
         }
 
+        if (depth > 0 && feature.FeatureId == Settings.Default.F_WHEEL)
+        {
+            ok = false;
+            add("Schema", $"{prefix} WHEEL ReTrigger payload", Status.Fail,
+                "WHEEL must stay as a physical board feature because its board position controls stack timing");
+        }
+
         if (feature.ReTrigger is { Length: > 1 })
         {
             ok = false;

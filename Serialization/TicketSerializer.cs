@@ -284,7 +284,7 @@ public static class TicketSerializer
         if (payload.Spin != start.Spin)
             return false;
 
-        return payload.Cell.Sym == settings.F_PRUP || payload.Cell.Sym == settings.F_WHEEL;
+        return payload.Cell.Sym == settings.F_PRUP;
     }
 
     private sealed record FeatureChainPlan(

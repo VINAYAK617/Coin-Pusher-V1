@@ -898,7 +898,7 @@ public sealed class GameLogicCoverageTests
     }
 
     [TestMethod]
-    public void SerializerCanUseWheelAsSameTurnRetriggerPayload()
+    public void SerializerKeepsWheelPhysicalBecauseBoardPositionAffectsStacking()
     {
         var settings = new Settings { PFeatureRetriggerChain = 1.0 };
         var plan = new GamePlan
@@ -917,14 +917,54 @@ public sealed class GameLogicCoverageTests
         };
 
         var ticket = TicketSerializer.ToTicketObject(plan, settings);
-        var parent = ticket.Turns
+        var featureSpawns = ticket.Turns
             .SelectMany(turn => turn.Spawns)
-            .First(spawn => spawn.Feature?.ReTrigger.Length == 1);
+            .Where(spawn => spawn.Feature != null)
+            .ToArray();
 
-        Assert.AreEqual(Settings.Default.F_WHEEL, parent.Feature!.ConvertToId);
-        Assert.AreEqual(Settings.Default.F_WHEEL, parent.Feature.ReTrigger[0].FeatureId);
-        Assert.AreEqual(2, parent.Feature.ReTrigger[0].WheelSymbolId);
-        Assert.AreEqual(1, parent.Feature.ReTrigger[0].WheelStackValue);
+        Assert.IsFalse(featureSpawns.Any(spawn =>
+            spawn.Feature!.ReTrigger.Any(child => child.FeatureId == Settings.Default.F_WHEEL)));
+        Assert.IsTrue(featureSpawns.Any(spawn =>
+            spawn.Feature!.FeatureId == Settings.Default.F_WHEEL
+            && spawn.Feature.WheelSymbolId == 2
+            && spawn.Feature.WheelStackValue == 1));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsWheelNestedInRetriggerBecausePositionIsLoadBearing()
+    {
+        var settings = new Settings { PFeatureRetriggerChain = 0.0 };
+        var plan = new GamePlan
+        {
+            TotalSpins = 3,
+            Targets = new Dictionary<int, int>(),
+            WinSyms = Array.Empty<int>(),
+            FillSyms = new[] { 1, 2, 3 },
+            PrizeValues = PrizeValues(6, tiers: 3),
+            Spins = new List<SpinPlan>
+            {
+                SpinWithExtraAndWheel(1),
+                PlainSpin(2),
+                PlainSpin(3),
+            },
+        };
+
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
+        var turn = ticket.Turns.First(item =>
+            item.Spawns.Any(spawn => spawn.Feature?.FeatureId == Settings.Default.F_XSPIN)
+            && item.Spawns.Any(spawn => spawn.Feature?.FeatureId == Settings.Default.F_WHEEL));
+        var extraGo = turn.Spawns.First(spawn => spawn.Feature?.FeatureId == Settings.Default.F_XSPIN).Feature!;
+        var wheel = CloneFeature(turn.Spawns.First(spawn => spawn.Feature?.FeatureId == Settings.Default.F_WHEEL).Feature!);
+
+        extraGo.ConvertToId = Settings.Default.F_WHEEL;
+        extraGo.ReTrigger = new[] { wheel };
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        AssertRejected(report, "nested WHEEL retrigger", "Schema");
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail
+            && check.Name.Contains("WHEEL ReTrigger payload")));
     }
 
     [TestMethod]
@@ -990,6 +1030,10 @@ public sealed class GameLogicCoverageTests
     private static TicketSerializer.TicketDto CloneTicket(TicketSerializer.TicketDto ticket) =>
         JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(
             JsonConvert.SerializeObject(ticket))!;
+
+    private static TicketSerializer.FeatureDto CloneFeature(TicketSerializer.FeatureDto feature) =>
+        JsonConvert.DeserializeObject<TicketSerializer.FeatureDto>(
+            JsonConvert.SerializeObject(feature))!;
 
     private static void ChangeNormalSpawnId(TicketSerializer.TicketDto ticket)
     {
