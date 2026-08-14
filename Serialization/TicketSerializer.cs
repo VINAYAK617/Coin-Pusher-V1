@@ -256,9 +256,7 @@ public static class TicketSerializer
         if (roll >= settings.PFeatureRetriggerChain) return FeatureChainPlan.Empty;
 
         var payload = payloadCandidates[DeterministicIndex(plan, payloadCandidates.Count, salt: 193, settings)];
-        var startConvertToId = start.Cell.CvtSym > 0 && !settings.IsFeat(start.Cell.CvtSym)
-            ? start.Cell.CvtSym
-            : settings.F_COIN;
+        var startConvertToId = RequireConvertSymbol(start.Cell, settings, "ReTrigger chain start");
         var nested = FeatureObj(
             payload.Cell,
             plan,
@@ -367,7 +365,7 @@ public static class TicketSerializer
                 ? new SpawnDto { Pos = pos, Id = c.Sym, Stack = c.Stack }
                 : new SpawnDto { Pos = pos, Id = c.Sym };
 
-        int cvt = c.CvtSym > 0 ? c.CvtSym : settings.F_COIN;
+        int cvt = RequireConvertSymbol(c, settings, "feature spawn");
         if (c.Sym == settings.F_WHEEL)
         {
             return new SpawnDto
@@ -417,7 +415,7 @@ public static class TicketSerializer
         var chain = reTrigger ?? System.Array.Empty<FeatureDto>();
         var convertToId = chain.Length > 0
             ? chain[0].FeatureId
-            : convertToOverride ?? (c.CvtSym > 0 && !settings.IsFeat(c.CvtSym) ? c.CvtSym : settings.F_COIN);
+            : convertToOverride ?? RequireConvertSymbol(c, settings, "feature payload");
 
         var dto = new FeatureDto
         {
@@ -447,8 +445,18 @@ public static class TicketSerializer
 
     private static SpawnDto ConvertedSpawnObj(Cell c, int pos, Settings settings)
     {
-        int cvt = c.CvtSym > 0 && !settings.IsFeat(c.CvtSym) ? c.CvtSym : settings.F_COIN;
+        int cvt = RequireConvertSymbol(c, settings, "suppressed ReTrigger payload");
         return new SpawnDto { Pos = pos, Id = cvt };
+    }
+
+    private static int RequireConvertSymbol(Cell c, Settings settings, string context)
+    {
+        if (c.CvtSym > 0 && !settings.IsFeat(c.CvtSym))
+            return c.CvtSym;
+
+        throw new InvalidOperationException(
+            $"{context} feature symbol {c.Sym} has invalid ConvertToId={c.CvtSym}; " +
+            "feature conversion must target a normal symbol.");
     }
 
     private static decimal PrizeValueFor(GamePlan plan, int sym, int tier)

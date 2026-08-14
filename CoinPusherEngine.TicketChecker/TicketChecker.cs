@@ -897,13 +897,6 @@ public static class TicketChecker
                 $"spawn Id={owningSpawnId} but Feature.FeatureId={feature.FeatureId}");
         }
 
-        if (feature.ConvertToId <= 0 || feature.ConvertToId == Settings.Default.F_FLUSH_ID)
-        {
-            ok = false;
-            add("Schema", $"{prefix} convert target", Status.Fail,
-                $"ConvertToId={feature.ConvertToId} must be a positive coin symbol or valid retrigger bridge, never FLUSH/PUSH");
-        }
-
         if (feature.ReTrigger is { Length: > 1 })
         {
             ok = false;
@@ -916,6 +909,12 @@ public static class TicketChecker
             ok = false;
             add("Schema", $"{prefix} ReTrigger convert target", Status.Fail,
                 $"ConvertToId={feature.ConvertToId} must equal nested FeatureId={feature.ReTrigger[0].FeatureId}");
+        }
+        else if (feature.ReTrigger is not { Length: 1 } && !IsNormalSymbolId(feature.ConvertToId))
+        {
+            ok = false;
+            add("Schema", $"{prefix} convert target", Status.Fail,
+                $"ConvertToId={feature.ConvertToId} must be a normal symbol id when no ReTrigger child is present");
         }
 
         if (feature.FeatureId == Settings.Default.F_WHEEL)
@@ -1213,15 +1212,34 @@ public static class TicketChecker
     /// </summary>
     private static int ResolveConvert(ReplayCell fc)
     {
+        int convertTo;
         if (Settings.Default.IsFeat(fc.ConvertToId) && fc.ReTrigger.Length > 0)
         {
             var link = fc.ReTrigger[0];
             while (link.ReTrigger is { Length: > 0 })
                 link = link.ReTrigger[0];
-            return link.ConvertToId > 0 ? link.ConvertToId : Settings.Default.F_COIN;
+            convertTo = link.ConvertToId;
         }
-        return fc.ConvertToId > 0 ? fc.ConvertToId : Settings.Default.F_COIN;
+        else
+        {
+            convertTo = fc.ConvertToId;
+        }
+
+        if (!IsNormalSymbolId(convertTo))
+        {
+            throw new InvalidOperationException(
+                $"Feature replay resolved invalid ConvertToId={convertTo}; " +
+                "feature conversion must target a normal symbol.");
+        }
+
+        return convertTo;
     }
+
+    private static bool IsNormalSymbolId(int symbol) =>
+        symbol >= 1
+        && symbol <= Settings.Default.PrizeLadderRows.Count
+        && !Settings.Default.IsFeat(symbol)
+        && symbol != Settings.Default.F_FLUSH_ID;
 
     private static bool BoardHasFeatureCell(ReplayCell?[,] board, bool wheelPass)
     {
