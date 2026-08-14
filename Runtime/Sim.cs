@@ -137,7 +137,7 @@ internal static class Sim
 
     private static Cell Cvt(Cell fc)
     {
-        int id = fc.CvtSym > 0 && !Settings.IsFeat(fc.CvtSym) ? fc.CvtSym : Settings.F_COIN;
+        int id = RequireConvertSymbol(fc);
         var converted = Grid.Norm(id);
         if ((fc.Sym == Settings.F_WHEEL || fc.FeatId == "WHEEL")
             && fc.Fp?.WheelSym == id)
@@ -149,4 +149,19 @@ internal static class Sim
 
         return converted;
     }
+
+    private static int RequireConvertSymbol(Cell fc)
+    {
+        if (IsNormalSymbolId(fc.CvtSym))
+            return fc.CvtSym;
+
+        throw new InvalidOperationException(
+            $"Feature symbol {fc.Sym} has invalid ConvertToId={fc.CvtSym}; " +
+            "feature conversion must target a normal symbol.");
+    }
+
+    private static bool IsNormalSymbolId(int symbol) =>
+        symbol >= 1
+        && symbol <= Settings.PrizeLadderRows.Count
+        && !Settings.IsFeat(symbol);
 }

@@ -811,6 +811,8 @@ public sealed class GameLogicCoverageTests
             ("board feature placed on final spin", AddFinalBoardFeature, "Feature"),
             ("FLUSH/PUSH placed on final spin", AddFinalFlushPusher, "Feature"),
             ("WHEEL stack outside configured range", BreakWheelStackValue, "Schema"),
+            ("feature convert target points at feature without ReTrigger", BreakFeatureConvertTarget, "Schema"),
+            ("feature convert target outside configured symbol range", BreakFeatureConvertTargetOutOfRange, "Schema"),
             ("PRIZE_UPGRADE payload missing prize value", BreakPrizeUpgradePayload, "Schema"),
             ("collected non-winning symbol removed from WinInfo", RemoveCollectedNonWinDeclaration, "WinInfo"),
             ("TotalSpins does not match turns", BreakTotalSpins, "SpinCount"),
@@ -1159,6 +1161,28 @@ public sealed class GameLogicCoverageTests
     {
         var wheel = FirstFeature(ticket, Settings.F_WHEEL);
         wheel.WheelStackValue = Settings.MAX_WHEEL_STACK_VALUE + 1;
+    }
+
+    private static void BreakFeatureConvertTarget(TicketSerializer.TicketDto ticket)
+    {
+        var feature = ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .First(spawn => spawn.Feature != null)
+            .Feature!;
+
+        feature.ConvertToId = Settings.F_WHEEL;
+        feature.ReTrigger = Array.Empty<TicketSerializer.FeatureDto>();
+    }
+
+    private static void BreakFeatureConvertTargetOutOfRange(TicketSerializer.TicketDto ticket)
+    {
+        var feature = ticket.Turns
+            .SelectMany(turn => turn.Spawns)
+            .First(spawn => spawn.Feature != null)
+            .Feature!;
+
+        feature.ConvertToId = Settings.PrizeLadderRows.Count + 1;
+        feature.ReTrigger = Array.Empty<TicketSerializer.FeatureDto>();
     }
 
     private static void BreakPrizeUpgradePayload(TicketSerializer.TicketDto ticket)

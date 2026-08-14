@@ -101,10 +101,20 @@ internal sealed class ForwardFeatureExecutor
     private bool IsWheel(Cell cell) =>
         cell.Sym == Settings.F_WHEEL || cell.FeatId == "WHEEL";
 
-    private int ConvertTarget(Cell cell) =>
-        cell.CvtSym > 0 && !Settings.IsFeat(cell.CvtSym)
-            ? cell.CvtSym
-            : Settings.F_COIN;
+    private int ConvertTarget(Cell cell)
+    {
+        if (IsNormalSymbolId(cell.CvtSym))
+            return cell.CvtSym;
+
+        throw new InvalidOperationException(
+            $"Feature symbol {cell.Sym} has invalid ConvertToId={cell.CvtSym}; " +
+            "feature conversion must target a normal symbol.");
+    }
+
+    private static bool IsNormalSymbolId(int symbol) =>
+        symbol >= 1
+        && symbol <= Settings.PrizeLadderRows.Count
+        && !Settings.IsFeat(symbol);
 
     private Cell ConvertCell(Cell featureCell, int convertTo)
     {

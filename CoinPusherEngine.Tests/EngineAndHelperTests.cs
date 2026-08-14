@@ -482,17 +482,31 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
-    public void ForwardFeatureExecutorConvertsBadTargetsToCoinSymbol()
+    public void ForwardFeatureExecutorRejectsBadConvertTargets()
     {
         var board = EmptyBoard();
         board[0, 0] = Grid.Feat(Settings.F_XSPIN, Settings.F_WHEEL, new FP { FeatId = "EXTRA_SPIN" });
         board[0, 1] = new Cell { Sym = 99, IsFeat = true, FeatId = "UNKNOWN", CvtSym = 0 };
 
-        var result = new ForwardFeatureExecutor().FireAll(board);
+        var ex = Assert.ThrowsException<InvalidOperationException>(() =>
+            new ForwardFeatureExecutor().FireAll(board));
 
-        Assert.AreEqual(2, result.Events.Count);
-        Assert.AreEqual(Settings.F_COIN, board[0, 0]!.Sym);
-        Assert.AreEqual(Settings.F_COIN, board[0, 1]!.Sym);
+        StringAssert.Contains(ex.Message, "invalid ConvertToId");
+    }
+
+    [TestMethod]
+    public void ForwardFeatureExecutorRejectsOutOfRangeConvertTargets()
+    {
+        var board = EmptyBoard();
+        board[0, 0] = Grid.Feat(
+            Settings.F_XSPIN,
+            Settings.PrizeLadderRows.Count + 1,
+            new FP { FeatId = "EXTRA_SPIN" });
+
+        var ex = Assert.ThrowsException<InvalidOperationException>(() =>
+            new ForwardFeatureExecutor().FireAll(board));
+
+        StringAssert.Contains(ex.Message, "invalid ConvertToId");
     }
 
     [TestMethod]
