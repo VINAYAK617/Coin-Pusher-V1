@@ -164,7 +164,9 @@ internal sealed class ForwardTurnAssembler
                 objectives.FillSymbols,
                 objectives.MaxSymbol,
                 _settings,
-                new Random(_rng.Next())),
+                new Random(_rng.Next()),
+                topPrizeSymbol: objectives.TopPrizeSymbol,
+                finalTurn: plannedTotalTurns),
             new ForwardCellFateAnalyzer(_settings),
             _settings).Plan(
                 normalRequests.Requests,

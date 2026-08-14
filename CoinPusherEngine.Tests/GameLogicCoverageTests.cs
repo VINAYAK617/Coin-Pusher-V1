@@ -222,6 +222,67 @@ public sealed class GameLogicCoverageTests
         AssertValid(JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(TicketSerializer.ToJson(plan))!);
     }
 
+    [DataTestMethod]
+    [DataRow(10000)]
+    [DataRow(20000)]
+    [DataRow(30000)]
+    [DataRow(40000)]
+    public void TopPrizeCompletesOnFinalTurnInPublicReplay(int seed)
+    {
+        var topSymbol = Settings.Default.PrizeLadderRows.Count;
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int> { [topSymbol] = Settings.Default.SymbolFillCap(topSymbol) },
+            BaseSpins = Settings.Default.BASE_SPINS,
+            PrizeValues = PrizeValues(topSymbol, tiers: 3),
+            MaxSym = topSymbol,
+        }, seed);
+
+        var report = TicketChecker.CheckTicket(ticket);
+        var topCheck = report.Checks.FirstOrDefault(check =>
+            check.Category == "Payout"
+            && check.Name == $"Top prize symbol {topSymbol} completes on final turn");
+
+        Assert.IsNotNull(topCheck);
+        Assert.AreEqual(TicketChecker.Status.Pass, topCheck!.Result, topCheck.Detail);
+        AssertValid(ticket);
+    }
+
+    [TestMethod]
+    public void CheckerRejectsTopPrizeCompletionBeforeFinalTurn()
+    {
+        var topSymbol = Settings.Default.PrizeLadderRows.Count;
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int> { [topSymbol] = Settings.Default.SymbolFillCap(topSymbol) },
+            BaseSpins = Settings.Default.BASE_SPINS,
+            PrizeValues = PrizeValues(topSymbol, tiers: 3),
+            MaxSym = topSymbol,
+        }, seed: 50505);
+
+        foreach (var row in ticket.StartingBoard)
+        {
+            foreach (var cell in row)
+                cell.Id = topSymbol;
+        }
+
+        foreach (var spawn in ticket.Turns.Take(ticket.Turns.Length - 1).SelectMany(turn => turn.Spawns))
+        {
+            if (spawn.Feature == null)
+                spawn.Id = topSymbol;
+        }
+
+        var report = TicketChecker.CheckTicket(ticket);
+
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail
+            && check.Category == "Payout"
+            && check.Name == $"Top prize symbol {topSymbol} completes on final turn"),
+            string.Join(Environment.NewLine, report.Checks
+                .Where(check => check.Result == TicketChecker.Status.Fail)
+                .Select(check => $"{check.Category}/{check.Name}: {check.Detail}")));
+    }
+
     [TestMethod]
     public void LadderResolveReturnsCandidateAndPrizeValuesForUpgradePath()
     {

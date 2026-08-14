@@ -44,6 +44,8 @@ internal sealed class ForwardSymbolSelector
     private readonly Settings _settings;
     private readonly Random _rng;
     private readonly HashSet<int> _blockedCollectSymbols;
+    private readonly int _topPrizeSymbol;
+    private readonly int _finalTurn;
 
     internal ForwardSymbolSelector(
         SymbolLedger ledger,
@@ -53,7 +55,9 @@ internal sealed class ForwardSymbolSelector
         int maxSymbol,
         Settings settings,
         Random rng,
-        IReadOnlySet<int>? blockedCollectSymbols = null)
+        IReadOnlySet<int>? blockedCollectSymbols = null,
+        int topPrizeSymbol = 0,
+        int finalTurn = 0)
     {
         _ledger = ledger;
         _winSymbols = winTargets.Keys.ToHashSet();
@@ -63,23 +67,30 @@ internal sealed class ForwardSymbolSelector
         _settings = settings;
         _rng = rng;
         _blockedCollectSymbols = blockedCollectSymbols?.ToHashSet() ?? new HashSet<int>();
-    }
-
-    internal ForwardSymbolSelection ChooseAndCollect(ForwardSymbolIntent intent, int stack = 1)
-    {
-        return ChooseAndCollect(
-            intent,
-            _ => stack);
+        _topPrizeSymbol = topPrizeSymbol;
+        _finalTurn = finalTurn;
     }
 
     internal ForwardSymbolSelection ChooseAndCollect(
         ForwardSymbolIntent intent,
-        Func<int, int> stackForSymbol)
+        int stack = 1,
+        int? collectionTurn = null)
+    {
+        return ChooseAndCollect(
+            intent,
+            _ => stack,
+            collectionTurn);
+    }
+
+    internal ForwardSymbolSelection ChooseAndCollect(
+        ForwardSymbolIntent intent,
+        Func<int, int> stackForSymbol,
+        int? collectionTurn = null)
     {
         if (intent == ForwardSymbolIntent.ResidueOnly)
             return ChooseResidue();
 
-        var candidates = CandidateOrder(intent, stackForSymbol).ToArray();
+        var candidates = CandidateOrder(intent, stackForSymbol, collectionTurn).ToArray();
         if (candidates.Length == 0)
         {
             return new ForwardSymbolSelection(
@@ -98,7 +109,7 @@ internal sealed class ForwardSymbolSelector
                 $"stack {stack} must be positive");
         }
 
-        var check = _ledger.Collect(symbol, stack);
+        var check = _ledger.Collect(symbol, stack, collectionTurn, _topPrizeSymbol, _finalTurn);
         if (!check.IsValid)
         {
             return new ForwardSymbolSelection(
@@ -130,7 +141,10 @@ internal sealed class ForwardSymbolSelector
             "ok");
     }
 
-    internal ForwardSymbolSelection TryCollectSpecific(int symbol, int stack = 1)
+    internal ForwardSymbolSelection TryCollectSpecific(
+        int symbol,
+        int stack = 1,
+        int? collectionTurn = null)
     {
         if (stack <= 0)
         {
@@ -148,7 +162,7 @@ internal sealed class ForwardSymbolSelector
                 $"symbol {symbol} is outside 1..{_maxSymbol} or is a feature symbol");
         }
 
-        var check = _ledger.Collect(symbol, stack);
+        var check = _ledger.Collect(symbol, stack, collectionTurn, _topPrizeSymbol, _finalTurn);
         if (!check.IsValid)
         {
             return new ForwardSymbolSelection(
@@ -163,55 +177,95 @@ internal sealed class ForwardSymbolSelector
             "ok");
     }
 
-    private IEnumerable<int> CandidateOrder(ForwardSymbolIntent intent, Func<int, int> stackForSymbol)
+    private IEnumerable<int> CandidateOrder(
+        ForwardSymbolIntent intent,
+        Func<int, int> stackForSymbol,
+        int? collectionTurn)
     {
+        var topPrizeFinal = TopPrizeFinalCandidate(stackForSymbol, collectionTurn);
+        if (topPrizeFinal.Length > 0)
+            return topPrizeFinal;
+
         if (intent == ForwardSymbolIntent.MustProgressWin)
-            return LegalWinSymbols(stackForSymbol);
+        {
+            var wins = LegalWinSymbols(stackForSymbol, collectionTurn).ToArray();
+            if (wins.Length > 0)
+                return wins;
+
+            if (IsBlockedOnlyByEarlyTopPrizeCompletion(stackForSymbol, collectionTurn))
+            {
+                var fillers = WithoutBlocked(LegalFillers(stackForSymbol, collectionTurn)).ToArray();
+                return fillers.Length > 0 ? fillers : WithoutBlocked(LegalNearMissSymbols(stackForSymbol, collectionTurn));
+            }
+
+            return wins;
+        }
 
         if (intent == ForwardSymbolIntent.PreferNearMiss)
         {
-            var nearMiss = WithoutBlocked(LegalNearMissBelowMinimum(stackForSymbol)).ToArray();
-            return nearMiss.Length > 0 ? nearMiss : WithoutBlocked(LegalFillers(stackForSymbol));
+            var nearMiss = WithoutBlocked(LegalNearMissBelowMinimum(stackForSymbol, collectionTurn)).ToArray();
+            return nearMiss.Length > 0 ? nearMiss : WithoutBlocked(LegalFillers(stackForSymbol, collectionTurn));
         }
 
         if (intent == ForwardSymbolIntent.SafeFiller)
         {
-            var fillers = WithoutBlocked(LegalFillers(stackForSymbol)).ToArray();
-            return fillers.Length > 0 ? fillers : WithoutBlocked(LegalNearMissSymbols(stackForSymbol));
+            var fillers = WithoutBlocked(LegalFillers(stackForSymbol, collectionTurn)).ToArray();
+            return fillers.Length > 0 ? fillers : WithoutBlocked(LegalNearMissSymbols(stackForSymbol, collectionTurn));
         }
 
         return Enumerable.Empty<int>();
     }
 
-    private IEnumerable<int> LegalWinSymbols(Func<int, int> stackForSymbol) =>
-        _winSymbols
+    private IEnumerable<int> LegalWinSymbols(
+        Func<int, int> stackForSymbol,
+        int? collectionTurn)
+    {
+        var legal = _winSymbols
             .Where(symbol => _ledger.RemainingWinCount(symbol) > 0)
             .Where(symbol => stackForSymbol(symbol) > 0)
-            .Where(symbol => _ledger.CheckCollect(symbol, stackForSymbol(symbol)).IsValid)
+            .Where(symbol => _ledger.CheckCollect(symbol, stackForSymbol(symbol), collectionTurn, _topPrizeSymbol, _finalTurn).IsValid)
             .OrderByDescending(symbol => _ledger.RemainingWinCount(symbol))
-            .ThenBy(symbol => symbol);
+            .ThenBy(symbol => symbol)
+            .ToArray();
 
-    private IEnumerable<int> LegalNearMissBelowMinimum(Func<int, int> stackForSymbol) =>
+        if (IsFinalCollection(collectionTurn)
+            && _topPrizeSymbol > 0
+            && legal.Contains(_topPrizeSymbol)
+            && _ledger.RemainingWinCount(_topPrizeSymbol) > 0)
+        {
+            return new[] { _topPrizeSymbol };
+        }
+
+        return legal;
+    }
+
+    private IEnumerable<int> LegalNearMissBelowMinimum(
+        Func<int, int> stackForSymbol,
+        int? collectionTurn) =>
         _nearMissMinimums
             .Where(kv => _ledger.CollectedCount(kv.Key) < kv.Value)
             .Select(kv => kv.Key)
             .Where(symbol => stackForSymbol(symbol) > 0)
-            .Where(symbol => _ledger.CheckCollect(symbol, stackForSymbol(symbol)).IsValid)
+            .Where(symbol => _ledger.CheckCollect(symbol, stackForSymbol(symbol), collectionTurn, _topPrizeSymbol, _finalTurn).IsValid)
             .OrderByDescending(symbol => _nearMissMinimums[symbol] - _ledger.CollectedCount(symbol))
             .ThenBy(symbol => symbol);
 
-    private IEnumerable<int> LegalNearMissSymbols(Func<int, int> stackForSymbol) =>
+    private IEnumerable<int> LegalNearMissSymbols(
+        Func<int, int> stackForSymbol,
+        int? collectionTurn) =>
         _nearMissMinimums.Keys
             .Where(symbol => stackForSymbol(symbol) > 0)
-            .Where(symbol => _ledger.CheckCollect(symbol, stackForSymbol(symbol)).IsValid)
+            .Where(symbol => _ledger.CheckCollect(symbol, stackForSymbol(symbol), collectionTurn, _topPrizeSymbol, _finalTurn).IsValid)
             .OrderBy(symbol => symbol);
 
-    private IEnumerable<int> LegalFillers(Func<int, int> stackForSymbol) =>
+    private IEnumerable<int> LegalFillers(
+        Func<int, int> stackForSymbol,
+        int? collectionTurn) =>
         _fillerSymbols
             .Where(symbol => !_winSymbols.Contains(symbol))
             .Where(symbol => !_nearMissMinimums.ContainsKey(symbol))
             .Where(symbol => stackForSymbol(symbol) > 0)
-            .Where(symbol => _ledger.CheckCollect(symbol, stackForSymbol(symbol)).IsValid)
+            .Where(symbol => _ledger.CheckCollect(symbol, stackForSymbol(symbol), collectionTurn, _topPrizeSymbol, _finalTurn).IsValid)
             .OrderBy(symbol => symbol);
 
     private IEnumerable<int> AllVisualCandidates() =>
@@ -225,6 +279,54 @@ internal sealed class ForwardSymbolSelector
 
     private IEnumerable<int> WithoutBlocked(IEnumerable<int> symbols) =>
         symbols.Where(symbol => !_blockedCollectSymbols.Contains(symbol));
+
+    private int[] TopPrizeFinalCandidate(
+        Func<int, int> stackForSymbol,
+        int? collectionTurn)
+    {
+        if (!IsFinalCollection(collectionTurn)
+            || _topPrizeSymbol <= 0
+            || !_winSymbols.Contains(_topPrizeSymbol)
+            || _ledger.RemainingWinCount(_topPrizeSymbol) <= 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var stack = stackForSymbol(_topPrizeSymbol);
+        return stack > 0
+            && _ledger.CheckCollect(_topPrizeSymbol, stack, collectionTurn, _topPrizeSymbol, _finalTurn).IsValid
+            ? new[] { _topPrizeSymbol }
+            : Array.Empty<int>();
+    }
+
+    private bool IsBlockedOnlyByEarlyTopPrizeCompletion(
+        Func<int, int> stackForSymbol,
+        int? collectionTurn)
+    {
+        if (IsFinalCollection(collectionTurn)
+            || _topPrizeSymbol <= 0
+            || !_winSymbols.Contains(_topPrizeSymbol)
+            || _ledger.RemainingWinCount(_topPrizeSymbol) <= 0)
+        {
+            return false;
+        }
+
+        var stack = stackForSymbol(_topPrizeSymbol);
+        if (stack <= 0)
+            return false;
+
+        var untimed = _ledger.CheckCollect(_topPrizeSymbol, stack);
+        if (!untimed.IsValid)
+            return false;
+
+        return _ledger.CheckCollect(_topPrizeSymbol, stack, collectionTurn, _topPrizeSymbol, _finalTurn).Status
+            == SymbolCollectionStatus.TopPrizeCompletesBeforeFinalTurn;
+    }
+
+    private bool IsFinalCollection(int? collectionTurn) =>
+        collectionTurn.HasValue
+        && _finalTurn > 0
+        && collectionTurn.Value == _finalTurn;
 
     private int Pick(IReadOnlyList<int> symbols) =>
         symbols.Count == 1 ? symbols[0] : symbols[_rng.Next(symbols.Count)];

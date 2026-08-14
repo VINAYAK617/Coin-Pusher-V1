@@ -7,6 +7,7 @@ internal enum SymbolCollectionStatus
     InvalidStack,
     WouldExceedWinTarget,
     WouldExceedNonWinCap,
+    TopPrizeCompletesBeforeFinalTurn,
     WinTargetNotReached,
     NearMissMinimumNotReached,
 }
@@ -92,7 +93,12 @@ internal sealed class SymbolLedger
         return Math.Max(0, target - CollectedCount(symbol));
     }
 
-    internal SymbolCollectionCheck CheckCollect(int symbol, int stack = 1)
+    internal SymbolCollectionCheck CheckCollect(
+        int symbol,
+        int stack = 1,
+        int? collectionTurn = null,
+        int topPrizeSymbol = 0,
+        int finalTurn = 0)
     {
         if (symbol < 1 || symbol > _maxSymbol || _settings.IsFeat(symbol))
         {
@@ -130,6 +136,21 @@ internal sealed class SymbolLedger
                     $"symbol {symbol} would collect {projected}, above win target {target}");
             }
 
+            if (symbol == topPrizeSymbol
+                && collectionTurn.HasValue
+                && finalTurn > 0
+                && collectionTurn.Value < finalTurn
+                && projected >= target)
+            {
+                return new SymbolCollectionCheck(
+                    SymbolCollectionStatus.TopPrizeCompletesBeforeFinalTurn,
+                    symbol,
+                    current,
+                    projected,
+                    target,
+                    $"top prize symbol {symbol} would complete on turn {collectionTurn.Value}, before final turn {finalTurn}");
+            }
+
             return new SymbolCollectionCheck(
                 SymbolCollectionStatus.Valid,
                 symbol,
@@ -160,9 +181,14 @@ internal sealed class SymbolLedger
             "ok");
     }
 
-    internal SymbolCollectionCheck Collect(int symbol, int stack = 1)
+    internal SymbolCollectionCheck Collect(
+        int symbol,
+        int stack = 1,
+        int? collectionTurn = null,
+        int topPrizeSymbol = 0,
+        int finalTurn = 0)
     {
-        var check = CheckCollect(symbol, stack);
+        var check = CheckCollect(symbol, stack, collectionTurn, topPrizeSymbol, finalTurn);
         if (!check.IsValid) return check;
 
         _collected[symbol] = check.Projected;

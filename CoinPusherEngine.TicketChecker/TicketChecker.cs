@@ -322,6 +322,7 @@ public static class TicketChecker
             else
                 Add("Payout", $"Win symbol {w.Id} exact count", Status.Pass, $"{got}/{w.Target}");
         }
+        CheckTopPrizeCompletionTurn(t, replay, Add);
 
         // ── 7. NEAR-MISS BOUND VERIFICATION ────────────────────────────────
         // Near-miss symbols are checked with the same hard replay standard as wins.
@@ -681,6 +682,62 @@ public static class TicketChecker
         return total;
     }
 
+    private static void CheckTopPrizeCompletionTurn(
+        TicketDto t,
+        ReplayResult replay,
+        Action<string, string, Status, string> add)
+    {
+        var topPrizeSymbol = TopPrizeSymbol();
+        if (topPrizeSymbol <= 0)
+            return;
+
+        var topWin = (t.WinInfo.WinSymbols ?? Array.Empty<WinSymbolDto>())
+            .FirstOrDefault(win => win.Id == topPrizeSymbol);
+        if (topWin == null)
+            return;
+
+        var completionTurn = replay.CumulativeTotalsByTurn
+            .Select((totals, index) => new
+            {
+                Turn = index + 1,
+                Count = totals.GetValueOrDefault(topPrizeSymbol),
+            })
+            .FirstOrDefault(item => item.Count >= topWin.Target);
+
+        if (completionTurn == null)
+        {
+            add("Payout", $"Top prize symbol {topPrizeSymbol} completes on final turn", Status.Fail,
+                $"replay never reached target {topWin.Target}");
+            return;
+        }
+
+        if (completionTurn.Turn != t.WinInfo.TotalSpins)
+        {
+            add("Payout", $"Top prize symbol {topPrizeSymbol} completes on final turn", Status.Fail,
+                $"target {topWin.Target} first reached on turn {completionTurn.Turn}, final turn is {t.WinInfo.TotalSpins}");
+            return;
+        }
+
+        add("Payout", $"Top prize symbol {topPrizeSymbol} completes on final turn", Status.Pass,
+            $"turn {completionTurn.Turn}");
+    }
+
+    private static int TopPrizeSymbol()
+    {
+        var rows = Settings.Default.PrizeLadderRows;
+        if (rows == null || rows.Count == 0) return 0;
+
+        return rows
+            .Select((row, index) => new
+            {
+                Symbol = index + 1,
+                Prize = row.Tiers?.DefaultIfEmpty(0m).Max() ?? 0m,
+            })
+            .OrderByDescending(item => item.Prize)
+            .ThenBy(item => item.Symbol)
+            .First().Symbol;
+    }
+
     private static void CheckExperienceWarnings(
         TicketDto t,
         ReplayResult replay,
@@ -1013,6 +1070,7 @@ public static class TicketChecker
         public List<WheelFireEvent> WheelFireEvents         = new();
         public Dictionary<int, int> PrupFinalTierPerSymbol   = new();
         public List<SpawnBalance>   SpawnBalances           = new();
+        public List<Dictionary<int, int>> CumulativeTotalsByTurn = new();
     }
 
     private static ReplayResult ReplayTicket(TicketDto t)
@@ -1069,6 +1127,7 @@ public static class TicketChecker
                     }
                 }
             }
+            result.CumulativeTotalsByTurn.Add(result.Totals.ToDictionary(kv => kv.Key, kv => kv.Value));
 
             // Phase 3: Rotate 90 clockwise
             board = RotCW(board);

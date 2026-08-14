@@ -172,7 +172,9 @@ internal sealed class ForwardTurnRealizer
                 objectives.MaxSymbol,
                 _settings,
                 new Random(_rng.Next()),
-                blockedCollectSymbols),
+                blockedCollectSymbols,
+                objectives.TopPrizeSymbol,
+                plannedTotalTurns),
             _fateAnalyzer,
             _settings).Plan(
                 normalRequests.Requests,

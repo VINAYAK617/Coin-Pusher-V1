@@ -79,7 +79,8 @@ internal sealed class ForwardSpawnPlanner
             return Fail(ForwardSpawnPlanStatus.MissingCellRequests, "cell request list is null");
 
         var seen = new HashSet<(int r, int c)>();
-        var spawns = new List<ForwardSpawn>(cells.Count);
+        var orderedCells = new List<(ForwardSpawnCellRequest Cell, ForwardCellFate Fate, int Order)>(cells.Count);
+        var order = 0;
         foreach (var cell in cells)
         {
             var validation = ValidateCell(cell, seen);
@@ -91,10 +92,17 @@ internal sealed class ForwardSpawnPlanner
             {
                 return Fail(
                     ForwardSpawnPlanStatus.CellFateInvalid,
-                    $"cell ({cell.Row},{cell.Col}) fate invalid: {fate.Detail}",
-                    spawns);
+                    $"cell ({cell.Row},{cell.Col}) fate invalid: {fate.Detail}");
             }
 
+            orderedCells.Add((cell, fate, order++));
+        }
+
+        var spawns = new List<ForwardSpawn>(cells.Count);
+        foreach (var (cell, fate, _) in orderedCells
+                     .OrderBy(item => item.Fate.IsCollected ? item.Fate.CollectedTurn!.Value : int.MaxValue)
+                     .ThenBy(item => item.Order))
+        {
             var selection = fate.IsCollected
                 ? _selector.ChooseAndCollect(
                     cell.CollectIntent,
@@ -103,7 +111,8 @@ internal sealed class ForwardSpawnPlanner
                         cell.LedgerCollectionValue,
                         spawnTurn,
                         fate.CollectedTurn,
-                        wheelImpacts))
+                        wheelImpacts),
+                    fate.CollectedTurn)
                 : _selector.ChooseResidue();
 
             if (!selection.IsValid)

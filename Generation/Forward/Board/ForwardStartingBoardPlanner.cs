@@ -101,7 +101,9 @@ internal sealed class ForwardStartingBoardPlanner
                 objectives.FillSymbols,
                 objectives.MaxSymbol,
                 _settings,
-                _rng),
+                _rng,
+                topPrizeSymbol: objectives.TopPrizeSymbol,
+                finalTurn: framePlan.TotalTurns),
             _fateAnalyzer,
             _settings).Plan(
                 requests,

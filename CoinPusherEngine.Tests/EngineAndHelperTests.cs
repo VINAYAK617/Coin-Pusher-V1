@@ -712,6 +712,43 @@ public sealed class EngineAndHelperTests
     }
 
     [TestMethod]
+    public void SymbolLedgerRejectsTopPrizeCompletionBeforeFinalTurn()
+    {
+        var settings = Settings.Default;
+        var topSymbol = settings.PrizeLadderRows.Count;
+        var ledger = new SymbolLedger(
+            new Dictionary<int, int> { [topSymbol] = settings.SymbolFillCap(topSymbol) },
+            new Dictionary<int, int>(),
+            topSymbol,
+            settings);
+
+        Assert.AreEqual(
+            SymbolCollectionStatus.Valid,
+            ledger.Collect(
+                topSymbol,
+                settings.SymbolFillCap(topSymbol) - 1,
+                collectionTurn: 4,
+                topPrizeSymbol: topSymbol,
+                finalTurn: 5).Status);
+
+        Assert.AreEqual(
+            SymbolCollectionStatus.TopPrizeCompletesBeforeFinalTurn,
+            ledger.CheckCollect(
+                topSymbol,
+                collectionTurn: 4,
+                topPrizeSymbol: topSymbol,
+                finalTurn: 5).Status);
+
+        Assert.AreEqual(
+            SymbolCollectionStatus.Valid,
+            ledger.Collect(
+                topSymbol,
+                collectionTurn: 5,
+                topPrizeSymbol: topSymbol,
+                finalTurn: 5).Status);
+    }
+
+    [TestMethod]
     public void ForwardSymbolSelectorPrefersNearMissThenFallsBackToFiller()
     {
         var ledger = new SymbolLedger(

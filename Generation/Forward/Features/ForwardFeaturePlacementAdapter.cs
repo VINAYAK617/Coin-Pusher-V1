@@ -134,6 +134,7 @@ internal sealed class ForwardFeaturePlacementAdapter
         {
             var placed = TryPlaceIntent(
                 intent,
+                plannedTotalTurns,
                 available,
                 futureTurns,
                 objectives,
@@ -205,6 +206,7 @@ internal sealed class ForwardFeaturePlacementAdapter
 
     private FeatureSlotAttempt TryPlaceIntent(
         ForwardFeatureIntent intent,
+        int plannedTotalTurns,
         IReadOnlyList<(int r, int c)> available,
         IReadOnlyList<ForwardFutureTurn> futureTurns,
         ForwardObjectives objectives,
@@ -224,7 +226,8 @@ internal sealed class ForwardFeaturePlacementAdapter
                 CreateSelector(
                     objectives,
                     candidateLedger,
-                    sameTurnWheelSymbols));
+                    sameTurnWheelSymbols,
+                    plannedTotalTurns));
             if (!convert.IsValid)
                 continue;
 
@@ -236,7 +239,8 @@ internal sealed class ForwardFeaturePlacementAdapter
                 futureTurns,
                 objectives,
                 candidateLedger,
-                sameTurnCollectedConvertSymbols);
+                sameTurnCollectedConvertSymbols,
+                plannedTotalTurns);
             if (!request.HasValue)
                 continue;
 
@@ -307,14 +311,14 @@ internal sealed class ForwardFeaturePlacementAdapter
 
         if (ValidSymbol(preferred, objectives))
         {
-            var selected = selector.TryCollectSpecific(preferred);
+            var selected = selector.TryCollectSpecific(preferred, collectionTurn: fate.CollectedTurn);
             if (selected.IsValid)
                 return ConvertSelection.Ok(selected.Symbol, isCollected: true);
         }
 
         foreach (var fallbackIntent in ConvertFallbackOrder())
         {
-            var selected = selector.ChooseAndCollect(fallbackIntent);
+            var selected = selector.ChooseAndCollect(fallbackIntent, collectionTurn: fate.CollectedTurn);
             if (selected.IsValid)
                 return ConvertSelection.Ok(selected.Symbol, isCollected: true);
         }
@@ -347,7 +351,8 @@ internal sealed class ForwardFeaturePlacementAdapter
         IReadOnlyList<ForwardFutureTurn> futureTurns,
         ForwardObjectives objectives,
         SymbolLedger ledger,
-        IReadOnlySet<int> sameTurnCollectedConvertSymbols) =>
+        IReadOnlySet<int> sameTurnCollectedConvertSymbols,
+        int plannedTotalTurns) =>
         intent.Kind switch
         {
             ForwardTimedFeatureKind.Wheel => BuildWheelRequest(
@@ -358,7 +363,8 @@ internal sealed class ForwardFeaturePlacementAdapter
                 futureTurns,
                 objectives,
                 ledger,
-                sameTurnCollectedConvertSymbols),
+                sameTurnCollectedConvertSymbols,
+                plannedTotalTurns),
             ForwardTimedFeatureKind.ExtraGo => ForwardFeatureSpawnRequest.ExtraGo(
                 position.r,
                 position.c,
@@ -380,7 +386,8 @@ internal sealed class ForwardFeaturePlacementAdapter
         IReadOnlyList<ForwardFutureTurn> futureTurns,
         ForwardObjectives objectives,
         SymbolLedger ledger,
-        IReadOnlySet<int> sameTurnCollectedConvertSymbols)
+        IReadOnlySet<int> sameTurnCollectedConvertSymbols,
+        int plannedTotalTurns)
     {
         var wheelStack = intent.ResultingWheelStack!.Value;
         foreach (var wheelSymbol in OrderedWheelSymbols(intent, objectives, sameTurnCollectedConvertSymbols))
@@ -395,7 +402,9 @@ internal sealed class ForwardFeaturePlacementAdapter
                 wheelSymbol,
                 wheelStack,
                 futureTurns,
-                trialLedger);
+                trialLedger,
+                objectives.TopPrizeSymbol,
+                plannedTotalTurns);
             if (!selfConversion.IsValid)
                 continue;
 
@@ -461,7 +470,9 @@ internal sealed class ForwardFeaturePlacementAdapter
         int wheelSymbol,
         int wheelStack,
         IReadOnlyList<ForwardFutureTurn> futureTurns,
-        SymbolLedger ledger)
+        SymbolLedger ledger,
+        int topPrizeSymbol,
+        int plannedTotalTurns)
     {
         if (convertSymbol != wheelSymbol)
             return WheelImpactCommitResult.Ok();
@@ -476,7 +487,12 @@ internal sealed class ForwardFeaturePlacementAdapter
         if (!fate.IsCollected)
             return WheelImpactCommitResult.Ok();
 
-        var collect = ledger.Collect(convertSymbol, stackBonus);
+        var collect = ledger.Collect(
+            convertSymbol,
+            stackBonus,
+            fate.CollectedTurn,
+            topPrizeSymbol,
+            plannedTotalTurns);
         return collect.IsValid
             ? WheelImpactCommitResult.Ok()
             : WheelImpactCommitResult.Fail(collect.Detail);
@@ -485,7 +501,8 @@ internal sealed class ForwardFeaturePlacementAdapter
     private ForwardSymbolSelector CreateSelector(
         ForwardObjectives objectives,
         SymbolLedger ledger,
-        IReadOnlySet<int>? blockedCollectSymbols = null) =>
+        IReadOnlySet<int>? blockedCollectSymbols,
+        int plannedTotalTurns) =>
         new(
             ledger,
             objectives.WinTargets,
@@ -494,7 +511,9 @@ internal sealed class ForwardFeaturePlacementAdapter
             objectives.MaxSymbol,
             _settings,
             new Random(_rng.Next()),
-            blockedCollectSymbols);
+            blockedCollectSymbols,
+            objectives.TopPrizeSymbol,
+            plannedTotalTurns);
 
     private bool ValidSymbol(int symbol, ForwardObjectives objectives) =>
         symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol);
