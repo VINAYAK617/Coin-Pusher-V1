@@ -18,7 +18,7 @@ internal readonly struct ForwardPusher
 
     internal int PushValue { get; }
     internal int? FeatureId { get; }
-    internal bool IsFlush(Settings settings) => FeatureId == settings.F_FLUSH_ID;
+    internal bool IsFlush(ICustomProfileSettings settings) => FeatureId == settings.F_FLUSH_ID;
 }
 
 internal readonly struct ForwardTurnShapeCheck
@@ -36,9 +36,9 @@ internal readonly struct ForwardTurnShapeCheck
 
 internal sealed class ForwardTurnShape
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
-    private ForwardTurnShape(IReadOnlyList<ForwardPusher> pushers, Settings settings)
+    private ForwardTurnShape(IReadOnlyList<ForwardPusher> pushers, ICustomProfileSettings settings)
     {
         Pushers = pushers.ToArray();
         _settings = settings;
@@ -69,7 +69,7 @@ internal sealed class ForwardTurnShape
 
     internal static (ForwardTurnShape? Shape, ForwardTurnShapeCheck Check) TryCreate(
         IReadOnlyList<ForwardPusher> pushers,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         var check = Validate(pushers, settings);
         return check.IsValid
@@ -79,7 +79,7 @@ internal sealed class ForwardTurnShape
 
     internal static ForwardTurnShapeCheck Validate(
         IReadOnlyList<ForwardPusher>? pushers,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         if (pushers == null || pushers.Count != settings.COLS)
         {

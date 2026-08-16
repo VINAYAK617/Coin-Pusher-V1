@@ -31,9 +31,9 @@ internal sealed class ForwardGamePlanAdapterResult
 
 internal sealed class ForwardGamePlanAdapter
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
-    internal ForwardGamePlanAdapter(Settings settings)
+    internal ForwardGamePlanAdapter(ICustomProfileSettings settings)
     {
         _settings = settings;
     }

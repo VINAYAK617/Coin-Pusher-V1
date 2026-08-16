@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Collections.Generic;
+using GameEngine;
 using Newtonsoft.Json;
 namespace CoinPusherEngine;
 
@@ -87,11 +88,12 @@ public static class TicketSerializer
 
     /// <summary>Build the plain object graph (no JSON string yet) for a verified GamePlan.</summary>
     public static TicketDto ToTicketObject(GamePlan plan) =>
-        ToTicketObject(plan, new Settings());
+        ToTicketObject(plan, Settings);
 
     /// <summary>Build the plain object graph (no JSON string yet) for a verified GamePlan.</summary>
-    public static TicketDto ToTicketObject(GamePlan plan, Settings settings)
+    public static TicketDto ToTicketObject(GamePlan plan, ICustomProfileSettings settings)
     {
+        if (settings == null) throw new ArgumentNullException(nameof(settings));
         var board = plan.Spins[0].Board;
         var startingBoard = Enumerable.Range(0, settings.ROWS).Select(r =>
             Enumerable.Range(0, settings.COLS).Select(c => new BoardCellDto { Id = board[r, c]?.Sym ?? 0 }).ToArray()
@@ -117,7 +119,7 @@ public static class TicketSerializer
     private static NonWinSymbolDto[] BuildNonWinSymbols(
         GamePlan plan,
         IReadOnlyDictionary<int, int> collectedTotals,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         var ids = plan.NonWinTargets.Keys
             .Concat(collectedTotals
@@ -147,10 +149,10 @@ public static class TicketSerializer
 
     /// <summary>Serialize a verified GamePlan straight to an indented JSON string.</summary>
     public static string ToJson(GamePlan plan) =>
-        ToJson(plan, new Settings());
+        ToJson(plan, Settings);
 
     /// <summary>Serialize a verified GamePlan straight to an indented JSON string.</summary>
-    public static string ToJson(GamePlan plan, Settings settings) =>
+    public static string ToJson(GamePlan plan, ICustomProfileSettings settings) =>
         JsonConvert.SerializeObject(ToTicketObject(plan, settings), new JsonSerializerSettings
         {
             Formatting = Formatting.None,
@@ -160,7 +162,7 @@ public static class TicketSerializer
 
     // ── Turn / spawn assembly ───────────────────────────────────────────────────
 
-    private static TurnDto[] BuildTurns(GamePlan plan, Settings settings)
+    private static TurnDto[] BuildTurns(GamePlan plan, ICustomProfileSettings settings)
     {
         var allFeatureTokens = plan.Spins
             .SelectMany(sp => sp.Spawns
@@ -224,7 +226,7 @@ public static class TicketSerializer
     private static FeatureChainPlan BuildFeatureChainPlan(
         GamePlan plan,
         IReadOnlyList<(int Spin, (int, int) Pos, Cell Cell)> featureTokens,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         if (featureTokens.Count == 0) return FeatureChainPlan.Empty;
 
@@ -267,16 +269,16 @@ public static class TicketSerializer
         return new FeatureChainPlan(start, new[] { payload }, nested);
     }
 
-    private static bool IsNoBoardEffectFeature(Cell cell, Settings settings) =>
+    private static bool IsNoBoardEffectFeature(Cell cell, ICustomProfileSettings settings) =>
         cell.Sym == settings.F_XSPIN || cell.Sym == settings.F_PRUP;
 
-    private static bool IsReTriggerChainStart(Cell cell, Settings settings) =>
+    private static bool IsReTriggerChainStart(Cell cell, ICustomProfileSettings settings) =>
         IsNoBoardEffectFeature(cell, settings);
 
     private static bool IsTimingSafeReTriggerPayload(
         (int Spin, (int, int) Pos, Cell Cell) start,
         (int Spin, (int, int) Pos, Cell Cell) payload,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         if (payload.Cell.Sym == settings.F_XSPIN)
             return false;
@@ -302,7 +304,7 @@ public static class TicketSerializer
         int spin,
         (int r, int c) pos,
         int payloadCount,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         unchecked
         {
@@ -315,7 +317,7 @@ public static class TicketSerializer
         }
     }
 
-    private static int DeterministicIndex(GamePlan plan, int count, int salt, Settings settings)
+    private static int DeterministicIndex(GamePlan plan, int count, int salt, ICustomProfileSettings settings)
     {
         if (count <= 1) return 0;
         unchecked
@@ -324,7 +326,7 @@ public static class TicketSerializer
         }
     }
 
-    private static uint FeatureChainHash(GamePlan plan, int salt, Settings settings)
+    private static uint FeatureChainHash(GamePlan plan, int salt, ICustomProfileSettings settings)
     {
         unchecked
         {
@@ -358,7 +360,7 @@ public static class TicketSerializer
         }
     }
 
-    private static SpawnDto SpawnObj(Cell c, int pos, GamePlan plan, Settings settings)
+    private static SpawnDto SpawnObj(Cell c, int pos, GamePlan plan, ICustomProfileSettings settings)
     {
         if (!c.IsFeat)
             return c.Stack > 1
@@ -407,7 +409,7 @@ public static class TicketSerializer
     private static FeatureDto FeatureObj(
         Cell c,
         GamePlan plan,
-        Settings settings,
+        ICustomProfileSettings settings,
         FeatureDto[]? reTrigger = null,
         int depth = 0,
         int? convertToOverride = null)
@@ -443,13 +445,13 @@ public static class TicketSerializer
         return dto;
     }
 
-    private static SpawnDto ConvertedSpawnObj(Cell c, int pos, Settings settings)
+    private static SpawnDto ConvertedSpawnObj(Cell c, int pos, ICustomProfileSettings settings)
     {
         int cvt = RequireConvertSymbol(c, settings, "suppressed ReTrigger payload");
         return new SpawnDto { Pos = pos, Id = cvt };
     }
 
-    private static int RequireConvertSymbol(Cell c, Settings settings, string context)
+    private static int RequireConvertSymbol(Cell c, ICustomProfileSettings settings, string context)
     {
         if (c.CvtSym > 0 && !settings.IsFeat(c.CvtSym))
             return c.CvtSym;

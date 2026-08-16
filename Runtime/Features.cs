@@ -17,7 +17,7 @@ internal sealed class WheelFeat : Feat
     private const string FeatureId = "WHEEL";
 
     internal override string Id      => FeatureId;
-    internal override int    FeatSym => Settings.Default.F_WHEEL;
+    internal override int    FeatSym => Settings.F_WHEEL;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
     {
@@ -27,7 +27,7 @@ internal sealed class WheelFeat : Feat
         // rather than re-deriving a stale ceiling from BaseSpins alone, which would
         // wrongly exclude bonus spins added by EXTRA_SPIN.
         int maxSpin = ctx.MaxSpin;
-        if (spin < ctx.MinSpin || spin >= maxSpin || col >= Settings.Default.COLS - 1) return null;
+        if (spin < ctx.MinSpin || spin >= maxSpin || col >= Settings.COLS - 1) return null;
         if (ctx.Used.Contains((spin, col))) return null;
 
         int sym = PickSym(ctx);
@@ -55,7 +55,7 @@ internal sealed class WheelFeat : Feat
                 .Sum(f => ctx.Input.Targets.TryGetValue(f.WSym, out int ft)
                     ? Math.Max(1, WMath.Zone(ft, WMath.StackFromValue(f.WN)))
                     : 0);
-        if (existZone + zone > Settings.Default.COLS - 1) return null;
+        if (existZone + zone > Settings.COLS - 1) return null;
 
         return new PlacedFeat { Id=FeatureId, Spin=spin, Col=col, WSym=sym, WN=n };
     }
@@ -64,13 +64,13 @@ internal sealed class WheelFeat : Feat
     {
         int sym = ctx.Fp.WheelSym, st = ctx.Fp.WheelStack;
         if (sym == 0 || st <= 1) return;
-        for (int r = 0; r < Settings.Default.ROWS; r++)
+        for (int r = 0; r < Settings.ROWS; r++)
         {
-            for (int c = 0; c < Settings.Default.COLS; c++)
+            for (int c = 0; c < Settings.COLS; c++)
             {
                 var cell = ctx.Board[r, c];
                 if (cell != null && !cell.IsFeat && cell.Sym == sym)
-                    cell.Stack = Math.Min(Settings.Default.MAX_COIN_STACK, cell.Stack + st - 1);
+                    cell.Stack = Math.Min(Settings.MAX_COIN_STACK, cell.Stack + st - 1);
             }
         }
     }
@@ -98,7 +98,7 @@ internal sealed class WheelFeat : Feat
         return 0;
     }
 
-    private static int PickStackValue(int target, Random rng, TicketExperienceProfile profile, Settings settings)
+    private static int PickStackValue(int target, Random rng, TicketExperienceProfile profile, ICustomProfileSettings settings)
     {
         var candidates = WMath.ValidStackValues(target).ToArray();
         if (candidates.Length == 0) return WMath.BestN(target);
@@ -121,7 +121,7 @@ internal sealed class WheelFeat : Feat
         return weighted[^1].Value;
     }
 
-    private static double StackValueWeight(int value, TicketExperienceProfile profile, Settings settings)
+    private static double StackValueWeight(int value, TicketExperienceProfile profile, ICustomProfileSettings settings)
     {
         var baseWeight = value switch
         {
@@ -147,7 +147,7 @@ internal sealed class FlushFeat : Feat
     private const string FeatureId = "FLUSH";
 
     internal override string Id       => FeatureId;
-    internal override int    FeatSym  => Settings.Default.F_COIN;
+    internal override int    FeatSym  => Settings.F_COIN;
     internal override bool   HasToken => false;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
@@ -161,7 +161,7 @@ internal sealed class FlushFeat : Feat
 
     internal override IEnumerable<Cell> Collect(FireCtx ctx)
     {
-        for (int r = 0; r < Settings.Default.ROWS; r++)
+        for (int r = 0; r < Settings.ROWS; r++)
         {
             var cell = ctx.Board[r, ctx.Col];
             if (cell == null) continue;
@@ -177,11 +177,11 @@ internal sealed class XSpinFeat : Feat
     private const string FeatureId = "EXTRA_SPIN";
 
     internal override string Id      => FeatureId;
-    internal override int    FeatSym => Settings.Default.F_XSPIN;
+    internal override int    FeatSym => Settings.F_XSPIN;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
     {
-        if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin || ctx.Col >= Settings.Default.COLS - 1) return null;
+        if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin || ctx.Col >= Settings.COLS - 1) return null;
         if (ctx.Used.Contains((ctx.Spin, ctx.Col))) return null;
         return new PlacedFeat { Id=FeatureId, Spin=ctx.Spin, Col=ctx.Col };
     }
@@ -213,12 +213,12 @@ internal sealed class PrupFeat : Feat
     private const string FeatureId = "PRIZE_UPGRADE";
 
     internal override string Id      => FeatureId;
-    internal override int    FeatSym => Settings.Default.F_PRUP;
+    internal override int    FeatSym => Settings.F_PRUP;
 
     internal override PlacedFeat? TryPlace(PlaceCtx ctx)
     {
         if (ctx.Input.PrizeTiers == null || ctx.Input.PrizeTiers.Count == 0) return null;
-        if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin || ctx.Col >= Settings.Default.COLS - 1) return null;
+        if (ctx.Spin < ctx.MinSpin || ctx.Spin >= ctx.MaxSpin || ctx.Col >= Settings.COLS - 1) return null;
         if (ctx.Used.Contains((ctx.Spin, ctx.Col))) return null;
 
         // For each declared (symbol, targetTier) pair, find how many PRIZE_UPGRADE tokens
@@ -287,15 +287,11 @@ internal static class FeatReg
         ["EXTRA_SPIN"]    = new XSpinFeat(),
         ["PRIZE_UPGRADE"] = new PrupFeat(),
     };
-    private static readonly Dictionary<int, Feat> BySym =
-        ById.Where(kv => kv.Value.HasToken)
-            .ToDictionary(kv => kv.Value.FeatSym, kv => kv.Value);
-
-    internal static IEnumerable<string> Ordered(Settings settings) =>
-        settings.OrderedFeatureIds;
+    internal static IEnumerable<string> Ordered(ICustomProfileSettings settings) =>
+        settings.OrderedFeatureIds();
 
     internal static bool Has(string id)  => ById.ContainsKey(id);
-    internal static bool HasSym(int sym) => BySym.ContainsKey(sym);
+    internal static bool HasSym(int sym) => ById.Values.Any(feat => feat.HasToken && feat.FeatSym == sym);
     internal static Feat Get(string id)  => ById[id];
-    internal static Feat GetSym(int sym) => BySym[sym];
+    internal static Feat GetSym(int sym) => ById.Values.First(feat => feat.HasToken && feat.FeatSym == sym);
 }

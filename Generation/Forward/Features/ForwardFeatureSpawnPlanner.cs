@@ -115,10 +115,10 @@ internal sealed class ForwardFeatureSpawnPlanner
     private const string ExtraGoId = "EXTRA_SPIN";
     private const string PrizeUpgradeId = "PRIZE_UPGRADE";
 
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly int _maxSymbol;
 
-    internal ForwardFeatureSpawnPlanner(Settings settings, int maxSymbol)
+    internal ForwardFeatureSpawnPlanner(ICustomProfileSettings settings, int maxSymbol)
     {
         _settings = settings;
         _maxSymbol = maxSymbol;

@@ -50,12 +50,12 @@ internal sealed class ForwardFeaturePlacementResult
 
 internal sealed class ForwardFeaturePlacementAdapter
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
     private readonly ForwardFeatureSpawnPlanner _featureSpawnPlanner;
     private readonly Random _rng;
 
-    internal ForwardFeaturePlacementAdapter(Settings settings, int maxSymbol, int seed)
+    internal ForwardFeaturePlacementAdapter(ICustomProfileSettings settings, int maxSymbol, int seed)
     {
         _settings = settings;
         _fateAnalyzer = new ForwardCellFateAnalyzer(settings);
@@ -390,9 +390,9 @@ internal sealed class ForwardFeaturePlacementAdapter
         int plannedTotalTurns)
     {
         var wheelStack = intent.ResultingWheelStack!.Value;
-        foreach (var wheelSymbol in OrderedWheelSymbols(intent, objectives, sameTurnCollectedConvertSymbols))
+        foreach (var wheelSymbol in OrderedWheelSymbols(intent, objectives, convertSymbol, sameTurnCollectedConvertSymbols))
         {
-            if (!WheelSymbolSafeOnCurrentBoard(wheelSymbol, boardAfterPushRotate, futureTurns))
+            if (!WheelSymbolCanStackOnFire(wheelSymbol, convertSymbol, boardAfterPushRotate, futureTurns))
                 continue;
 
             var trialLedger = ledger.Clone();
@@ -423,30 +423,34 @@ internal sealed class ForwardFeaturePlacementAdapter
     private IReadOnlyList<int> OrderedWheelSymbols(
         ForwardFeatureIntent intent,
         ForwardObjectives objectives,
+        int convertSymbol,
         IReadOnlySet<int> blockedSameTurnSymbols)
     {
-        return objectives.FillSymbols
+        return new[] { convertSymbol }
+            .Concat(objectives.FillSymbols
             .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
             .Where(symbol => !objectives.NearMissTargets.ContainsKey(symbol))
-            .Concat(objectives.NearMissTargets.Keys)
+            .Concat(objectives.NearMissTargets.Keys))
             .Concat(objectives.WinSymbols)
             .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol))
             .Where(symbol => !blockedSameTurnSymbols.Contains(symbol))
             .Distinct()
-            .OrderBy(symbol => symbol == intent.WheelSymbol ? 0 : 1)
+            .OrderBy(symbol => symbol == intent.WheelSymbol ? 0 : symbol == convertSymbol ? 1 : 2)
             .ThenBy(symbol => objectives.WinTargets.ContainsKey(symbol) ? 2 : objectives.NearMissTargets.ContainsKey(symbol) ? 1 : 0)
             .ThenBy(symbol => symbol)
             .ToArray();
     }
 
-    private bool WheelSymbolSafeOnCurrentBoard(
+    private bool WheelSymbolCanStackOnFire(
         int symbol,
+        int convertSymbol,
         Cell?[,]? boardAfterPushRotate,
         IReadOnlyList<ForwardFutureTurn> futureTurns)
     {
         if (boardAfterPushRotate == null)
-            return true;
+            return symbol == convertSymbol;
 
+        var stacksAtLeastOneCell = symbol == convertSymbol;
         for (var row = 0; row < _settings.ROWS; row++)
         {
             for (var col = 0; col < _settings.COLS; col++)
@@ -458,10 +462,13 @@ internal sealed class ForwardFeaturePlacementAdapter
                 var fate = _fateAnalyzer.Analyze(row, col, futureTurns);
                 if (!fate.IsValid || fate.IsCollected)
                     return false;
+
+                if (cell.Stack < _settings.MAX_COIN_STACK)
+                    stacksAtLeastOneCell = true;
             }
         }
 
-        return true;
+        return stacksAtLeastOneCell;
     }
 
     private WheelImpactCommitResult CommitWheelSelfConversionBonus(

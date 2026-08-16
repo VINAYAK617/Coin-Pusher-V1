@@ -55,10 +55,10 @@ internal sealed class ForwardTicketBuildResult
 
 internal sealed class ForwardTicketBuilder
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly int _seed;
 
-    internal ForwardTicketBuilder(Settings settings, int seed)
+    internal ForwardTicketBuilder(ICustomProfileSettings settings, int seed)
     {
         _settings = settings;
         _seed = seed;

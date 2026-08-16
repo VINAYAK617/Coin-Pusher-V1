@@ -73,10 +73,10 @@ internal sealed class ForwardTurnAssemblyResult
 
 internal sealed class ForwardTurnAssembler
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
 
-    internal ForwardTurnAssembler(Settings settings, int seed)
+    internal ForwardTurnAssembler(ICustomProfileSettings settings, int seed)
     {
         _settings = settings;
         _rng = new Random(seed);

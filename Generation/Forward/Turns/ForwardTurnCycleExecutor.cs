@@ -38,10 +38,10 @@ internal sealed class ForwardTurnCycleResult
 
 internal sealed class ForwardTurnCycleExecutor
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly int _seed;
 
-    internal ForwardTurnCycleExecutor(Settings settings, int seed)
+    internal ForwardTurnCycleExecutor(ICustomProfileSettings settings, int seed)
     {
         _settings = settings;
         _seed = seed;

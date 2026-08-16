@@ -29,9 +29,9 @@ internal sealed class ForwardMathInputResult
 
 internal sealed class ForwardMathInputResolver
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
-    internal ForwardMathInputResolver(Settings settings)
+    internal ForwardMathInputResolver(ICustomProfileSettings settings)
     {
         _settings = settings;
     }

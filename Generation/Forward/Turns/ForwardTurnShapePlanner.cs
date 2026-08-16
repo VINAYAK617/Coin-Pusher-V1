@@ -41,10 +41,10 @@ internal sealed class ForwardTurnShapePlanResult
 
 internal sealed class ForwardTurnShapePlanner
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
 
-    internal ForwardTurnShapePlanner(Settings settings, Random rng)
+    internal ForwardTurnShapePlanner(ICustomProfileSettings settings, Random rng)
     {
         _settings = settings;
         _rng = rng;
@@ -160,7 +160,7 @@ internal sealed class ForwardTurnShapePlanner
         }
     }
 
-    internal static long PushBagKey(ForwardTurnShape shape, Settings settings) =>
+    internal static long PushBagKey(ForwardTurnShape shape, ICustomProfileSettings settings) =>
         BuildPushBagKey(shape, settings);
 
     private IReadOnlyList<Candidate> PreferFreshPushBags(
@@ -299,7 +299,7 @@ internal sealed class ForwardTurnShapePlanner
         return ascending || descending;
     }
 
-    private static long BuildPushBagKey(ForwardTurnShape shape, Settings settings)
+    private static long BuildPushBagKey(ForwardTurnShape shape, ICustomProfileSettings settings)
     {
         var key = 0L;
         for (var push = settings.MIN_PUSH; push <= settings.MAX_PUSH; push++)
@@ -321,7 +321,7 @@ internal sealed class ForwardTurnShapePlanner
 
     private sealed class Candidate
     {
-        internal Candidate(ForwardTurnShape shape, Settings settings)
+        internal Candidate(ForwardTurnShape shape, ICustomProfileSettings settings)
         {
             Shape = shape;
             PoppedCellCount = shape.PoppedCellCount;

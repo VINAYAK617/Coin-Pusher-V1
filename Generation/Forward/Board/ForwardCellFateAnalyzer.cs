@@ -62,9 +62,9 @@ internal readonly struct ForwardCellFate
 
 internal sealed class ForwardCellFateAnalyzer
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
-    internal ForwardCellFateAnalyzer(Settings settings)
+    internal ForwardCellFateAnalyzer(ICustomProfileSettings settings)
     {
         _settings = settings;
     }

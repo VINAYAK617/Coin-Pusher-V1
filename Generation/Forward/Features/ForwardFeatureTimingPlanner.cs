@@ -83,10 +83,10 @@ internal sealed class ForwardFeatureTimingResult
 
 internal sealed class ForwardFeatureTimingPlanner
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
 
-    internal ForwardFeatureTimingPlanner(Settings settings, int seed)
+    internal ForwardFeatureTimingPlanner(ICustomProfileSettings settings, int seed)
     {
         _settings = settings;
         _rng = new Random(seed);

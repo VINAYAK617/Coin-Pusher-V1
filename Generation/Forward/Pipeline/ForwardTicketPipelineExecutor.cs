@@ -62,10 +62,10 @@ internal sealed class ForwardTicketPipelineResult
 
 internal sealed class ForwardTicketPipelineExecutor
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly int _seed;
 
-    internal ForwardTicketPipelineExecutor(Settings settings, int seed)
+    internal ForwardTicketPipelineExecutor(ICustomProfileSettings settings, int seed)
     {
         _settings = settings;
         _seed = seed;

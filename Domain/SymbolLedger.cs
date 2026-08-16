@@ -45,13 +45,13 @@ internal sealed class SymbolLedger
     private readonly Dictionary<int, int> _nearMissMinimums;
     private readonly Dictionary<int, int> _collected = new();
     private readonly int _maxSymbol;
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
     internal SymbolLedger(
         IReadOnlyDictionary<int, int> winTargets,
         IReadOnlyDictionary<int, int> nearMissMinimums,
         int maxSymbol,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         _winTargets = winTargets.ToDictionary(kv => kv.Key, kv => kv.Value);
         _nearMissMinimums = nearMissMinimums.ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -64,7 +64,7 @@ internal sealed class SymbolLedger
         Dictionary<int, int> nearMissMinimums,
         Dictionary<int, int> collected,
         int maxSymbol,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         _winTargets = winTargets.ToDictionary(kv => kv.Key, kv => kv.Value);
         _nearMissMinimums = nearMissMinimums.ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -160,7 +160,7 @@ internal sealed class SymbolLedger
                 "ok");
         }
 
-        var cap = _settings.SymbolFillCap(symbol);
+        var cap = NonWinningCollectionLimit(symbol);
         if (projected >= cap)
         {
             return new SymbolCollectionCheck(
@@ -230,6 +230,19 @@ internal sealed class SymbolLedger
         }
 
         return failures;
+    }
+
+    private int NonWinningCollectionLimit(int symbol)
+    {
+        var prizeCap = _settings.SymbolFillCap(symbol);
+        var displayCap = prizeCap > _settings.FILL_CAP
+            ? Math.Min(prizeCap, _settings.FILL_CAP + _settings.COLS)
+            : Math.Min(prizeCap, _settings.FILL_CAP);
+
+        if (_nearMissMinimums.TryGetValue(symbol, out var target))
+            return Math.Min(prizeCap, Math.Max(displayCap, target + 1));
+
+        return displayCap;
     }
 
     private SymbolCollectionCheck Fail(

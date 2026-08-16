@@ -77,9 +77,9 @@ internal sealed class ForwardFeatureBudgetPlanner
     private const string ExtraSpin = "EXTRA_SPIN";
     private const string PrizeUpgrade = "PRIZE_UPGRADE";
 
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
-    internal ForwardFeatureBudgetPlanner(Settings settings)
+    internal ForwardFeatureBudgetPlanner(ICustomProfileSettings settings)
     {
         _settings = settings;
     }
@@ -170,6 +170,7 @@ internal sealed class ForwardFeatureBudgetPlanner
 
         var optionalFeatureTicket = rng.NextDouble() < _settings.POptionalFeatureTicket;
         if (!optionalFeatureTicket
+            && !objectives.IsNoWin
             && CanAddOptionalWheel(
                 objectives,
                 input.BaseSpins,

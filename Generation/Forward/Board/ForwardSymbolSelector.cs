@@ -41,7 +41,7 @@ internal sealed class ForwardSymbolSelector
     private readonly Dictionary<int, int> _nearMissMinimums;
     private readonly int[] _fillerSymbols;
     private readonly int _maxSymbol;
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
     private readonly HashSet<int> _blockedCollectSymbols;
     private readonly int _topPrizeSymbol;
@@ -53,7 +53,7 @@ internal sealed class ForwardSymbolSelector
         IReadOnlyDictionary<int, int> nearMissMinimums,
         IReadOnlyList<int> fillerSymbols,
         int maxSymbol,
-        Settings settings,
+        ICustomProfileSettings settings,
         Random rng,
         IReadOnlySet<int>? blockedCollectSymbols = null,
         int topPrizeSymbol = 0,

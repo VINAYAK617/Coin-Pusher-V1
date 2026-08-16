@@ -95,10 +95,10 @@ internal readonly struct ForwardBoardAdvanceResult
 
 internal sealed class ForwardBoardState
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private Cell?[,] _board;
 
-    internal ForwardBoardState(Cell?[,] board, Settings settings)
+    internal ForwardBoardState(Cell?[,] board, ICustomProfileSettings settings)
     {
         _settings = settings;
         _board = CloneBoard(board, settings);
@@ -315,7 +315,7 @@ internal sealed class ForwardBoardState
         return positions;
     }
 
-    private static Cell?[,] CloneBoard(Cell?[,] source, Settings settings)
+    private static Cell?[,] CloneBoard(Cell?[,] source, ICustomProfileSettings settings)
     {
         var clone = new Cell?[settings.ROWS, settings.COLS];
         for (var row = 0; row < settings.ROWS; row++)
@@ -326,7 +326,7 @@ internal sealed class ForwardBoardState
         return clone;
     }
 
-    private static Cell?[,] RotateClockwise(Cell?[,] source, Settings settings)
+    private static Cell?[,] RotateClockwise(Cell?[,] source, ICustomProfileSettings settings)
     {
         var rotated = new Cell?[settings.ROWS, settings.COLS];
         for (var row = 0; row < settings.ROWS; row++)

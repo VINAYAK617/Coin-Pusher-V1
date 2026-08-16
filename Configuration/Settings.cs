@@ -1,9 +1,7 @@
 namespace CoinPusherEngine;
 
-public sealed class Settings
+public sealed class DefaultProfileSettings : ICustomProfileSettings
 {
-    public static Settings Default { get; } = new();
-
     private static readonly string[] FeatureIds =
     {
         "WHEEL",
@@ -11,6 +9,71 @@ public sealed class Settings
         "EXTRA_SPIN",
         "PRIZE_UPGRADE",
     };
+
+    public static DefaultProfileSettings From(ICustomProfileSettings settings)
+    {
+        if (settings == null) throw new ArgumentNullException(nameof(settings));
+        if (settings is DefaultProfileSettings concrete) return concrete;
+
+        return new DefaultProfileSettings
+        {
+            ROWS = settings.ROWS,
+            COLS = settings.COLS,
+            MIN_PUSH = settings.MIN_PUSH,
+            MAX_PUSH = settings.MAX_PUSH,
+            FILL_CAP = settings.FILL_CAP,
+            BASE_SPINS = settings.BASE_SPINS,
+            MAX_SPINS = settings.MAX_SPINS,
+            MAX_COIN_STACK = settings.MAX_COIN_STACK,
+            MIN_WHEEL_STACK_VALUE = settings.MIN_WHEEL_STACK_VALUE,
+            MAX_WHEEL_STACK_VALUE = settings.MAX_WHEEL_STACK_VALUE,
+            NONWIN_MIN_TARGET = settings.NONWIN_MIN_TARGET,
+            F_WHEEL = settings.F_WHEEL,
+            F_XSPIN = settings.F_XSPIN,
+            F_FLUSH_ID = settings.F_FLUSH_ID,
+            F_PRUP = settings.F_PRUP,
+            F_COIN = settings.F_COIN,
+            MaxPlanAttempts = settings.MaxPlanAttempts,
+            LocalRealizationAttempts = settings.LocalRealizationAttempts,
+            WheelFeatureConfig = settings.WheelFeatureConfig,
+            FlushFeatureConfig = settings.FlushFeatureConfig,
+            ExtraSpinFeatureConfig = settings.ExtraSpinFeatureConfig,
+            PrizeUpgradeFeatureConfig = settings.PrizeUpgradeFeatureConfig,
+            PrizeLadderRows = settings.PrizeLadderRows,
+            PWheelStackValue1 = settings.PWheelStackValue1,
+            PWheelStackValue2 = settings.PWheelStackValue2,
+            PWheelRepeatOptional = settings.PWheelRepeatOptional,
+            WExpBalanced = settings.WExpBalanced,
+            WExpNearMiss = settings.WExpNearMiss,
+            WExpFeature = settings.WExpFeature,
+            WExpStack = settings.WExpStack,
+            WExpLateWin = settings.WExpLateWin,
+            POptionalFeatureTicket = settings.POptionalFeatureTicket,
+            POptionalTicketWheel = settings.POptionalTicketWheel,
+            POptionalTicketFlush = settings.POptionalTicketFlush,
+            POptionalTicketPrizeUpgrade = settings.POptionalTicketPrizeUpgrade,
+            PNoWinExtraGoOptional = settings.PNoWinExtraGoOptional,
+            PWheelOptional = settings.PWheelOptional,
+            PFlushOptional = settings.PFlushOptional,
+            PNonWinWheel = settings.PNonWinWheel,
+            PNonWinPrizeUpgrade = settings.PNonWinPrizeUpgrade,
+            PWinLateCompletion = settings.PWinLateCompletion,
+            WinLateTailSpins = settings.WinLateTailSpins,
+            WinLateMinTail = settings.WinLateMinTail,
+            WinLateTailFraction = settings.WinLateTailFraction,
+            NonWinTargetProfiles = settings.NonWinTargetProfiles,
+            NonWinCountWeights = settings.NonWinCountWeights,
+            WNonWinLow = settings.WNonWinLow,
+            WNonWinMid = settings.WNonWinMid,
+            WNonWinHigh = settings.WNonWinHigh,
+            PFeatureRetriggerChain = settings.PFeatureRetriggerChain,
+            PFeatureLatePlacement = settings.PFeatureLatePlacement,
+            WPusherLowPop = settings.WPusherLowPop,
+            WPusherMidPop = settings.WPusherMidPop,
+            WPusherHighPop = settings.WPusherHighPop,
+            FeatureRetriggerBridgeIds = settings.FeatureRetriggerBridgeIds,
+        };
+    }
 
     public int ROWS { get; init; } = 5;
     public int COLS { get; init; } = 5;
@@ -122,9 +185,9 @@ public sealed class Settings
         Weight("COINPUSHER_W_NONWIN_COUNT_5", 0.15),
     };
 
-    public double WNonWinLow { get; init; } = Weight("COINPUSHER_W_NONWIN_LOW", 0.40);
+    public double WNonWinLow { get; init; } = Weight("COINPUSHER_W_NONWIN_LOW", 0.55);
     public double WNonWinMid { get; init; } = Weight("COINPUSHER_W_NONWIN_MID", 0.40);
-    public double WNonWinHigh { get; init; } = Weight("COINPUSHER_W_NONWIN_HIGH", 0.20);
+    public double WNonWinHigh { get; init; } = Weight("COINPUSHER_W_NONWIN_HIGH", 0.05);
 
     public double PFeatureRetriggerChain { get; init; } = Probability("COINPUSHER_P_FEATURE_RETRIGGER_CHAIN", 0.25);
     public double PFeatureLatePlacement { get; init; } = Probability("COINPUSHER_P_FEATURE_LATE_PLACEMENT", 0.90);

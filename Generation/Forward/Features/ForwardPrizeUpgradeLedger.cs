@@ -43,14 +43,14 @@ internal sealed class ForwardPrizeUpgradeLedger
     private readonly Dictionary<int, int> _targetTiers;
     private readonly IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>> _prizeValues;
     private readonly int _maxSymbol;
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly Dictionary<int, int> _currentTiers = new();
 
     internal ForwardPrizeUpgradeLedger(
         IReadOnlyDictionary<int, int> targetTiers,
         IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>> prizeValues,
         int maxSymbol,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         _targetTiers = targetTiers
             .Where(kv => kv.Value > 0)
@@ -64,7 +64,7 @@ internal sealed class ForwardPrizeUpgradeLedger
         Dictionary<int, int> targetTiers,
         IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>> prizeValues,
         int maxSymbol,
-        Settings settings,
+        ICustomProfileSettings settings,
         Dictionary<int, int> currentTiers)
     {
         _targetTiers = targetTiers.ToDictionary(kv => kv.Key, kv => kv.Value);

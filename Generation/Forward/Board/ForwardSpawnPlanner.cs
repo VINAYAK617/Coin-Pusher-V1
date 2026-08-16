@@ -57,12 +57,12 @@ internal sealed class ForwardSpawnPlanner
 {
     private readonly ForwardSymbolSelector _selector;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
     internal ForwardSpawnPlanner(
         ForwardSymbolSelector selector,
         ForwardCellFateAnalyzer fateAnalyzer,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         _selector = selector;
         _fateAnalyzer = fateAnalyzer;

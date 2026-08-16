@@ -51,11 +51,11 @@ internal sealed class ForwardTurnRealizationResult
 
 internal sealed class ForwardTurnRealizer
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
 
-    internal ForwardTurnRealizer(Settings settings, int seed)
+    internal ForwardTurnRealizer(ICustomProfileSettings settings, int seed)
     {
         _settings = settings;
         _rng = new Random(seed);

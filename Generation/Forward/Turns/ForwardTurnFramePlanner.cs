@@ -80,10 +80,10 @@ internal sealed class ForwardTurnFrameResult
 
 internal sealed class ForwardTurnFramePlanner
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
 
-    internal ForwardTurnFramePlanner(Settings settings, int seed)
+    internal ForwardTurnFramePlanner(ICustomProfileSettings settings, int seed)
     {
         _settings = settings;
         _rng = new Random(seed);

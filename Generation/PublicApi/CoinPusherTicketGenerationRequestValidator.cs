@@ -1,5 +1,7 @@
 namespace CoinPusherEngine;
 
+using GameEngine;
+
 public enum CoinPusherTicketGenerationRequestStatus
 {
     Valid,
@@ -33,16 +35,16 @@ public sealed class CoinPusherTicketGenerationRequestValidationResult
 
 public sealed class CoinPusherTicketGenerationRequestValidator
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
     public CoinPusherTicketGenerationRequestValidator()
-        : this(new Settings())
+        : this(Settings)
     {
     }
 
-    public CoinPusherTicketGenerationRequestValidator(Settings settings)
+    internal CoinPusherTicketGenerationRequestValidator(ICustomProfileSettings settings)
     {
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _settings = settings;
     }
 
     public CoinPusherTicketGenerationRequestValidationResult Validate(

@@ -69,9 +69,9 @@ internal sealed class ForwardTurnRecordResult
 
 internal sealed class ForwardTurnRecorder
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
-    internal ForwardTurnRecorder(Settings settings)
+    internal ForwardTurnRecorder(ICustomProfileSettings settings)
     {
         _settings = settings;
     }

@@ -1,6 +1,8 @@
 #pragma warning disable S2245 // Ladder selection randomness is intentionally seedable for reproducible math review.
 namespace CoinPusherEngine;
 
+using GameEngine;
+
 /// <summary>
 /// One symbol's full prize ladder, as fully specified by the math team. Unlike
 /// PrizeCombinator (which INVENTS a symbol/target for a flat dollar amount),
@@ -93,14 +95,14 @@ public sealed class LadderCombinator
     private readonly List<PrizeLadderRow>                _rows;
     private readonly Dictionary<decimal, List<LadderCandidate>> _lookup;
     private readonly Random                              _rng;
-    private readonly Settings                            _settings;
+    private readonly ICustomProfileSettings              _settings;
 
-    public LadderCombinator(IReadOnlyList<PrizeLadderRow> rows, int? seed = null, Settings? settings = null)
+    public LadderCombinator(IReadOnlyList<PrizeLadderRow> rows, int? seed = null, ICustomProfileSettings? settings = null)
     {
         _rows   = rows.ToList();
         _lookup = BuildLookup(_rows);
         _rng    = seed.HasValue ? new Random(seed.Value) : new Random();
-        _settings = settings ?? Settings.Default;
+        _settings = settings ?? Settings;
     }
 
     /// <summary>All amounts that have at least one candidate, sorted ascending.</summary>
@@ -411,7 +413,7 @@ public sealed class LadderCombinator
             {
                 for (var extras = 0; extras <= maxExtras; extras++)
                 {
-                    var totalSpins = Settings.Default.BASE_SPINS + extras;
+                    var totalSpins = Settings.BASE_SPINS + extras;
                     var wheelFireSpins = Math.Min(wheels, Math.Max(0, totalSpins - 2));
                     var physWins = CapacityAnalyzer.PhysicalWins(targets, wheels);
                     var tokenLoad = wheels + extras + requiredPrizeUpgrades;
@@ -608,7 +610,7 @@ public sealed class LadderCombinator
     }
 
     /// <summary>
-    /// BaseSpins is always fixed at Settings.Default.BASE_SPINS (=5) — never computed from physWins
+    /// BaseSpins is always fixed at Settings.BASE_SPINS (=5) — never computed from physWins
     /// or filler capacity. Any additional spin capacity needed comes from the
     /// EXTRA_SPIN feature (decided later, in Planner.ResolveFeatures, alongside
     /// WHEEL/FLUSH), not from this method.

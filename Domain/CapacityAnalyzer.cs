@@ -5,9 +5,9 @@ internal static class CapacityAnalyzer
     internal static int TotalCapacity(int totalSpins, int flushTokens, int wheelFireSpins)
     {
         _ = wheelFireSpins;
-        var normalSpinCapacity = Settings.Default.MixedPushCapacity(Settings.Default.COLS);
+        var normalSpinCapacity = Settings.MixedPushCapacity(Settings.COLS);
         var baseCapacity = totalSpins * normalSpinCapacity;
-        var flushSpinCapacity = Settings.Default.ROWS + Settings.Default.MixedPushCapacity(Settings.Default.COLS - 1);
+        var flushSpinCapacity = Settings.ROWS + Settings.MixedPushCapacity(Settings.COLS - 1);
         var flushBonus = flushTokens * (flushSpinCapacity - normalSpinCapacity);
         return baseCapacity + flushBonus;
     }
@@ -29,7 +29,7 @@ internal static class CapacityAnalyzer
         int wheelFireSpins = 0)
     {
         var budget = FillerBudget(physWins, totalSpins, tokenLoad, flushTokens, wheelFireSpins);
-        var maxFiller = fillSymCount * (Settings.Default.FILL_CAP - 2);
+        var maxFiller = fillSymCount * (Settings.FILL_CAP - 2);
         return budget >= 0 && budget <= maxFiller;
     }
 
@@ -42,7 +42,7 @@ internal static class CapacityAnalyzer
         int wheelFireSpins = 0)
     {
         var budget = FillerBudget(physWins, totalSpins, tokenLoad, flushTokens, wheelFireSpins);
-        var maxFiller = fillSymbols.Sum(sym => Settings.Default.SymbolFillCap(sym) - 2);
+        var maxFiller = fillSymbols.Sum(sym => Settings.SymbolFillCap(sym) - 2);
         return budget >= 0 && budget <= maxFiller;
     }
 
@@ -53,12 +53,12 @@ internal static class CapacityAnalyzer
         int flushTokens = 0,
         int wheelFireSpins = 0)
     {
-        var maxExtras = Settings.Default.MAX_SPINS - Settings.Default.BASE_SPINS;
+        var maxExtras = Settings.MAX_SPINS - Settings.BASE_SPINS;
         for (var extras = 0; extras <= maxExtras; extras++)
         {
             if (IsFeasible(
                     physWins,
-                    Settings.Default.BASE_SPINS + extras,
+                    Settings.BASE_SPINS + extras,
                     fillSymCount,
                     tokenLoad + extras,
                     flushTokens,

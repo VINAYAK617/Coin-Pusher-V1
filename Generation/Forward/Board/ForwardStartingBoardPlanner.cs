@@ -47,11 +47,11 @@ internal sealed class ForwardStartingBoardResult
 
 internal sealed class ForwardStartingBoardPlanner
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
 
-    internal ForwardStartingBoardPlanner(Settings settings, int seed)
+    internal ForwardStartingBoardPlanner(ICustomProfileSettings settings, int seed)
     {
         _settings = settings;
         _rng = new Random(seed);

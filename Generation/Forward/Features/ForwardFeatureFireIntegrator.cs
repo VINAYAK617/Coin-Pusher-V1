@@ -36,10 +36,10 @@ internal sealed class ForwardFeatureFireIntegrationResult
 
 internal sealed class ForwardFeatureFireIntegrator
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly ForwardFeatureExecutor _executor;
 
-    internal ForwardFeatureFireIntegrator(Settings settings)
+    internal ForwardFeatureFireIntegrator(ICustomProfileSettings settings)
     {
         _settings = settings;
         _executor = new ForwardFeatureExecutor(settings);

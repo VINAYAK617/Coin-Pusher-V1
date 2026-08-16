@@ -50,10 +50,10 @@ internal sealed class ForwardNormalIntentResult
 
 internal sealed class ForwardNormalIntentPlanner
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
 
-    internal ForwardNormalIntentPlanner(Settings settings)
+    internal ForwardNormalIntentPlanner(ICustomProfileSettings settings)
     {
         _settings = settings;
         _fateAnalyzer = new ForwardCellFateAnalyzer(settings);

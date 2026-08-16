@@ -49,10 +49,10 @@ internal sealed class ForwardTicketEnvelopeResult
 
 internal sealed class ForwardTicketEnvelopeValidator
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
 
-    internal ForwardTicketEnvelopeValidator(Settings settings)
+    internal ForwardTicketEnvelopeValidator(ICustomProfileSettings settings)
     {
         _settings = settings;
         _fateAnalyzer = new ForwardCellFateAnalyzer(settings);

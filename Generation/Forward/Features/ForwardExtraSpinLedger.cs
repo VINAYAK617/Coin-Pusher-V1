@@ -38,12 +38,12 @@ internal readonly struct ForwardExtraSpinCheck
 
 internal sealed class ForwardExtraSpinLedger
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly int _plannedTotalTurns;
     private int _earnedTurns;
     private int _logicalExtraGoAwards;
 
-    internal ForwardExtraSpinLedger(int plannedTotalTurns, Settings settings)
+    internal ForwardExtraSpinLedger(int plannedTotalTurns, ICustomProfileSettings settings)
     {
         _settings = settings;
         _plannedTotalTurns = plannedTotalTurns;
@@ -52,7 +52,7 @@ internal sealed class ForwardExtraSpinLedger
 
     private ForwardExtraSpinLedger(
         int plannedTotalTurns,
-        Settings settings,
+        ICustomProfileSettings settings,
         int earnedTurns,
         int logicalExtraGoAwards)
     {

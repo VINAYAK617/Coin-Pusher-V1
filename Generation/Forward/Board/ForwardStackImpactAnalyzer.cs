@@ -58,12 +58,12 @@ internal sealed class ForwardStackImpactAnalyzer
 {
     private readonly IReadOnlyList<ForwardWheelImpact> _wheels;
     private readonly int _maxSymbol;
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
     internal ForwardStackImpactAnalyzer(
         IReadOnlyList<ForwardWheelImpact> wheels,
         int maxSymbol,
-        Settings settings)
+        ICustomProfileSettings settings)
     {
         _wheels = wheels.OrderBy(wheel => wheel.FireTurn).ToArray();
         _maxSymbol = maxSymbol;

@@ -77,9 +77,9 @@ internal sealed class ForwardObjectiveResult
 
 internal sealed class ForwardObjectivePlanner
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
 
-    internal ForwardObjectivePlanner(Settings settings)
+    internal ForwardObjectivePlanner(ICustomProfileSettings settings)
     {
         _settings = settings;
     }
@@ -256,7 +256,7 @@ internal sealed class ForwardObjectivePlanner
         {
             var maxTarget = Math.Min(profile.Max, symbolCaps[symbol] - 1);
             if (maxTarget < minTarget) continue;
-            targets[symbol] = rng.Next(minTarget, maxTarget + 1);
+            targets[symbol] = PickNearMissTarget(minTarget, maxTarget, rng);
         }
 
         return NearMissResolveResult.Ok(targets);
@@ -394,6 +394,51 @@ internal sealed class ForwardObjectivePlanner
             1 => _settings.WNonWinMid,
             _ => _settings.WNonWinHigh,
         };
+
+    private int PickNearMissTarget(int minTarget, int maxTarget, Random rng)
+    {
+        if (minTarget >= maxTarget) return minTarget;
+
+        var values = Enumerable.Range(minTarget, maxTarget - minTarget + 1).ToArray();
+        var groups = values
+            .GroupBy(value => TargetBand(value, minTarget, maxTarget))
+            .Select(group => new
+            {
+                Band = group.Key,
+                Values = group.ToArray(),
+                Weight = NearMissBandWeight(group.Key),
+            })
+            .Where(group => group.Weight > 0)
+            .ToArray();
+        if (groups.Length == 0)
+            return values[rng.Next(values.Length)];
+
+        var total = groups.Sum(group => group.Weight);
+        var roll = rng.NextDouble() * total;
+        var acc = 0.0;
+        var chosen = groups[^1];
+        foreach (var group in groups)
+        {
+            acc += group.Weight;
+            if (roll <= acc)
+            {
+                chosen = group;
+                break;
+            }
+        }
+
+        return chosen.Values[rng.Next(chosen.Values.Length)];
+    }
+
+    private static int TargetBand(int value, int minTarget, int maxTarget)
+    {
+        var range = maxTarget - minTarget + 1;
+        var index = value - minTarget;
+        var lowLimit = (int)Math.Ceiling(range / 3.0);
+        var midLimit = (int)Math.Ceiling(range * 2 / 3.0);
+        if (index < lowLimit) return 0;
+        return index < midLimit ? 1 : 2;
+    }
 
     private bool ValidSymbol(int symbol, int maxSymbol) =>
         symbol >= 1 && symbol <= maxSymbol && !_settings.IsFeat(symbol);

@@ -1,5 +1,7 @@
 namespace CoinPusherEngine;
 
+using GameEngine;
+
 public enum CoinPusherTicketGenerationStatus
 {
     Valid,
@@ -48,17 +50,17 @@ public sealed class CoinPusherTicketGenerator
     private static readonly Random SeedRng = new();
     private static readonly object SeedLock = new();
 
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly CoinPusherTicketGenerationRequestValidator _requestValidator;
 
     public CoinPusherTicketGenerator()
-        : this(new Settings())
+        : this(Settings)
     {
     }
 
-    public CoinPusherTicketGenerator(Settings settings)
+    internal CoinPusherTicketGenerator(ICustomProfileSettings settings)
     {
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _settings = settings;
         _requestValidator = new CoinPusherTicketGenerationRequestValidator(_settings);
     }
 

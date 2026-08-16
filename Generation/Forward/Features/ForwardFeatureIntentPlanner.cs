@@ -119,10 +119,10 @@ internal sealed class ForwardFeatureIntentResult
 
 internal sealed class ForwardFeatureIntentPlanner
 {
-    private readonly Settings _settings;
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
 
-    internal ForwardFeatureIntentPlanner(Settings settings, int seed)
+    internal ForwardFeatureIntentPlanner(ICustomProfileSettings settings, int seed)
     {
         _settings = settings;
         _rng = new Random(seed);

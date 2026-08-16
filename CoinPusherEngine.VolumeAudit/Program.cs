@@ -2,14 +2,16 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using CoinPusherEngine;
 using CoinPusherEngine.VolumeAudit;
+using GameEngine;
 
-var count = ArgInt(args, 0, 1000);
+var count = ArgInt(args, 0, 5000000);
 var seed = ArgInt(args, 1, 20260806);
-var progressEvery = Math.Max(1, ArgInt(args, 2, Math.Max(1, count / 20)));
+var progressEvery = 5000;// Math.Max(1, ArgInt(args, 2, Math.Max(1, count / 20)));
 var maxFailures = Math.Max(1, ArgInt(args, 3, 20));
 var degreeOfParallelism = Math.Max(1, ArgInt(args, 4, Environment.ProcessorCount));
-var settings = new Settings();
-var checker = new CoinPusherTicketCheckerPlugin();
+var settings = new DefaultProfileSettings();
+GameEngine.Engine.Settings = settings;
+var checker = new CoinPusherTicketCheckerPlugin(settings);
 
 var rng = new Random(seed);
 var sw = Stopwatch.StartNew();
@@ -59,7 +61,7 @@ Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = degreeOfPa
     Increment(prizeCaseCounts, prizeKey);
 
     var generationStage = Stopwatch.StartNew();
-    var result = new CoinPusherTicketJsonGenerator(settings).Generate(item.Prizes, item.Seed);
+    var result = new CoinPusherTicketJsonGenerator().Generate(item.Prizes, item.Seed);
     generationStage.Stop();
     Interlocked.Add(ref generationTicks, generationStage.ElapsedTicks);
     if (!result.IsValid || result.Ticket == null || result.Plan == null || string.IsNullOrWhiteSpace(result.Json))
@@ -165,7 +167,7 @@ void AddFailure(string failure, ParallelLoopState state)
     }
 }
 
-string? ValidateReleaseInvariants(CoinPusherTicketJsonGenerationResult result, Settings settings)
+string? ValidateReleaseInvariants(CoinPusherTicketJsonGenerationResult result, ICustomProfileSettings settings)
 {
     var ticket = result.Ticket!;
     var plan = result.Plan!;
@@ -213,13 +215,13 @@ static string FirstFailures(TicketChecker.Report report) =>
         .Select(c => $"{c.Category}/{c.Name}: {c.Detail}")
         .Take(5));
 
-static bool HasAnyTicketFeature(TicketSerializer.TicketDto ticket, Settings settings) =>
+static bool HasAnyTicketFeature(TicketSerializer.TicketDto ticket, ICustomProfileSettings settings) =>
     ticket.Turns.Any(turn => HasAnyTurnFeature(turn, settings));
 
-static bool HasEligibleNearMissSymbol(GamePlan plan, Settings settings) =>
+static bool HasEligibleNearMissSymbol(GamePlan plan, ICustomProfileSettings settings) =>
     plan.FillSyms.Any(symbol => settings.SymbolFillCap(symbol) > settings.NONWIN_MIN_TARGET);
 
-static bool HasAnyTurnFeature(TicketSerializer.TurnDto turn, Settings settings) =>
+static bool HasAnyTurnFeature(TicketSerializer.TurnDto turn, ICustomProfileSettings settings) =>
     turn.Spawns.Any(spawn => spawn.Feature != null)
     || turn.Pushers.Any(pusher => pusher.FeatureId == settings.F_FLUSH_ID);
 
@@ -229,7 +231,7 @@ void AccumulatePushes(TicketSerializer.TicketDto ticket)
         Increment(pushCounts, pusher.PushValue);
 }
 
-void AccumulateFeatures(TicketSerializer.TicketDto ticket, Settings settings)
+void AccumulateFeatures(TicketSerializer.TicketDto ticket, ICustomProfileSettings settings)
 {
     foreach (var pusher in ticket.Turns.SelectMany(turn => turn.Pushers))
     {

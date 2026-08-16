@@ -6,7 +6,7 @@ internal static class WMath
     // without exceeding the target. Public value N means collected stack 1 + N.
     internal static int BestStackValue(int target)
     {
-        int bestValue = Settings.Default.MIN_WHEEL_STACK_VALUE, bestPost = 0, bestZone = 0;
+        int bestValue = Settings.MIN_WHEEL_STACK_VALUE, bestPost = 0, bestZone = 0;
         foreach (var value in ValidStackValues(target))
         {
             int stack = StackFromValue(value);
@@ -19,15 +19,15 @@ internal static class WMath
                 bestZone = zone;
             }
         }
-        return bestPost > 0 ? bestValue : Settings.Default.MAX_WHEEL_STACK_VALUE;
+        return bestPost > 0 ? bestValue : Settings.MAX_WHEEL_STACK_VALUE;
     }
 
     internal static int BestN(int target) => BestStackValue(target);
 
     internal static IEnumerable<int> ValidStackValues(int target)
     {
-        var maxValue = Math.Min(Settings.Default.MAX_WHEEL_STACK_VALUE, Settings.Default.MAX_COIN_STACK - 1);
-        for (int value = Settings.Default.MIN_WHEEL_STACK_VALUE; value <= maxValue; value++)
+        var maxValue = Math.Min(Settings.MAX_WHEEL_STACK_VALUE, Settings.MAX_COIN_STACK - 1);
+        for (int value = Settings.MIN_WHEEL_STACK_VALUE; value <= maxValue; value++)
         {
             int stack = StackFromValue(value);
             int zone = CollectibleZone(target, stack);
@@ -42,7 +42,7 @@ internal static class WMath
     internal static int StackFromValue(int wheelStackValue) => wheelStackValue + 1;
 
     internal static int Zone(int target, int stack) =>
-        Math.Min(target / stack, Settings.Default.COLS - 1);
+        Math.Min(target / stack, Settings.COLS - 1);
 
     internal static int CollectibleZone(int target, int stack) =>
         Math.Max(0, Zone(target, stack) - 1);
@@ -101,8 +101,8 @@ internal static class WMath
         for (int d = 1; d <= maxDl; d++)
         {
             cap += wSpins.Contains(d)
-                ? Settings.Default.COLS * Settings.Default.MIN_PUSH
-                : Settings.Default.MixedPushCapacity(Settings.Default.COLS);
+                ? Settings.COLS * Settings.MIN_PUSH
+                : Settings.MixedPushCapacity(Settings.COLS);
             while (ti < tasks.Count && tasks[ti].deadline <= d) dem += tasks[ti++].demand;
             if (dem > cap) return false;
         }
