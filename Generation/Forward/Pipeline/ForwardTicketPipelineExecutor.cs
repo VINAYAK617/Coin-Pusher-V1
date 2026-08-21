@@ -88,7 +88,8 @@ internal sealed class ForwardTicketPipelineExecutor
             objectives.WinTargets,
             objectives.NearMissTargets,
             objectives.MaxSymbol,
-            _settings);
+            _settings,
+            objectives.WinningRoundPlan?.WinningCompletionTurn);
         var extraSpinLedger = new ForwardExtraSpinLedger(framePlan.TotalTurns, _settings);
         var prizeUpgradeLedger = BuildPrizeUpgradeLedger(objectives);
 

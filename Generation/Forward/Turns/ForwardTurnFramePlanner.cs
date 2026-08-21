@@ -56,7 +56,7 @@ internal sealed class ForwardTurnFramePlan
         Frames
             .Where(frame => frame.Turn > turn)
             .OrderBy(frame => frame.Turn)
-            .Select(frame => new ForwardFutureTurn(frame.Turn, frame.Shape))
+            .Select(frame => new ForwardFutureTurn(frame.Turn, frame.Shape, frame.FeatureIntents))
             .ToArray();
 }
 
@@ -118,6 +118,11 @@ internal sealed class ForwardTurnFramePlanner
 
         var frames = new List<ForwardTurnFrame>(budget.TotalTurns);
         var usedPushBags = new Dictionary<long, int>();
+        var capacityDirected = objectives != null
+            && RequiresCapacityDirectedShapes(budget, intentPlan, objectives);
+        var capacityTargets = capacityDirected
+            ? BuildCapacityTargets(budget, intentPlan, objectives!)
+            : new Dictionary<int, int>();
         for (var turn = 1; turn <= budget.TotalTurns; turn++)
         {
             var intents = intentPlan.ByTurn.TryGetValue(turn, out var turnIntents)
@@ -132,7 +137,15 @@ internal sealed class ForwardTurnFramePlanner
             }
 
             var flushColumns = PickFlushColumns(flushCount);
-            var shape = BuildShape(turn, budget, objectives, flushColumns, usedPushBags);
+            var shape = BuildShape(
+                turn,
+                budget,
+                objectives,
+                flushColumns,
+                usedPushBags,
+                capacityTargets.TryGetValue(turn, out var capacityTarget)
+                    ? capacityTarget
+                    : (int?)null);
             if (!shape.IsValid)
             {
                 return Fail(
@@ -193,7 +206,8 @@ internal sealed class ForwardTurnFramePlanner
         ForwardFeatureBudget budget,
         ForwardObjectives? objectives,
         IReadOnlySet<int> flushColumns,
-        IReadOnlyDictionary<long, int> usedPushBags)
+        IReadOnlyDictionary<long, int> usedPushBags,
+        int? preferredPoppedCells)
     {
         var totalTurns = budget.TotalTurns;
         var normalColumns = _settings.COLS - flushColumns.Count;
@@ -203,9 +217,6 @@ internal sealed class ForwardTurnFramePlanner
             + (normalColumns * _settings.MAX_PUSH);
         var pressureMode = objectives != null
             && IsPressureTurnPlan(budget, objectives);
-        var preferredPoppedCells = pressureMode && objectives != null
-            ? PressurePreferredPoppedCells(budget, objectives, minPopped, maxPopped)
-            : (int?)null;
 
         return new ForwardTurnShapePlanner(_settings, _rng).Plan(
             minPopped,
@@ -218,19 +229,276 @@ internal sealed class ForwardTurnFramePlanner
             preferredPoppedCells);
     }
 
-    private int PressurePreferredPoppedCells(
+    private Dictionary<int, int> BuildCapacityTargets(
         ForwardFeatureBudget budget,
-        ForwardObjectives objectives,
-        int minPopped,
-        int maxPopped)
+        ForwardFeatureIntentPlan intentPlan,
+        ForwardObjectives objectives)
     {
-        var required = objectives.WinTargets.Values.Sum()
-            + objectives.NearMissTargets.Values.Sum();
-        var averageDemand = budget.TotalTurns <= 0
-            ? maxPopped
-            : (int)Math.Ceiling(required / (double)budget.TotalTurns);
+        var bounds = Enumerable.Range(1, budget.TotalTurns)
+            .ToDictionary(turn => turn, turn => TurnPopBounds(turn, intentPlan));
+        var required = RawCollectionTarget(objectives, intentPlan);
+        var safeExtraCapacity = SafeExtraCollectionCapacity(objectives);
+        var unpressuredFloor = bounds.Values.Sum(bound =>
+            ForwardTurnShapePlanner.MinimumUnpressuredPopCount(bound.Min, bound.Max));
+        var deadlineFloor = WinningDeadlineCollectionFloor(bounds, intentPlan, objectives);
+        var preferredTotal = Math.Max(required, Math.Max(unpressuredFloor, deadlineFloor));
+        preferredTotal = Math.Min(preferredTotal, required + safeExtraCapacity);
+        var remaining = Math.Clamp(
+            preferredTotal,
+            bounds.Values.Sum(bound => bound.Min),
+            bounds.Values.Sum(bound => bound.Max));
+        var targets = new Dictionary<int, int>();
+        var useCounts = new Dictionary<int, int>();
 
-        return Math.Clamp(averageDemand, minPopped, maxPopped);
+        // Solve the exact total while limiting repeated pop totals. Shape selection
+        // then randomizes among the legal mixed pusher bags for each chosen total.
+        if (TryBuildCapacityTargets(
+                turn: 1,
+                remaining,
+                budget.TotalTurns,
+                bounds,
+                useCounts,
+                targets))
+        {
+            ShiftCapacityIntoWinningWindow(targets, bounds, intentPlan, objectives);
+            return targets;
+        }
+
+        targets.Clear();
+        useCounts.Clear();
+
+        for (var turn = 1; turn <= budget.TotalTurns; turn++)
+        {
+            var current = bounds[turn];
+            var future = bounds
+                .Where(entry => entry.Key > turn)
+                .Select(entry => entry.Value)
+                .ToArray();
+            var futureMin = future.Sum(bound => bound.Min);
+            var futureMax = future.Sum(bound => bound.Max);
+            var low = Math.Max(current.Min, remaining - futureMax);
+            var high = Math.Min(current.Max, remaining - futureMin);
+            var turnsLeft = budget.TotalTurns - turn + 1;
+            var average = remaining / (double)turnsLeft;
+            var candidates = Enumerable.Range(low, high - low + 1).ToArray();
+            var minimumUse = candidates.Min(candidate => useCounts.GetValueOrDefault(candidate));
+            var leastUsed = candidates
+                .Where(candidate => useCounts.GetValueOrDefault(candidate) == minimumUse)
+                .ToArray();
+            var minimumDistance = leastUsed.Min(candidate => Math.Abs(candidate - average));
+            var closest = leastUsed
+                .Where(candidate => Math.Abs(candidate - average) == minimumDistance)
+                .OrderBy(_ => _rng.Next())
+                .ToArray();
+            var selected = closest[0];
+
+            targets[turn] = selected;
+            useCounts[selected] = useCounts.GetValueOrDefault(selected) + 1;
+            remaining -= selected;
+        }
+
+        ShiftCapacityIntoWinningWindow(targets, bounds, intentPlan, objectives);
+        return targets;
+    }
+
+    private void ShiftCapacityIntoWinningWindow(
+        Dictionary<int, int> targets,
+        IReadOnlyDictionary<int, (int Min, int Max)> bounds,
+        ForwardFeatureIntentPlan intentPlan,
+        ForwardObjectives objectives)
+    {
+        var completionTurn = objectives.WinningRoundPlan?.WinningCompletionTurn;
+        if (!completionTurn.HasValue || objectives.WinTargets.Count == 0)
+            return;
+
+        var requiredWheelBonus = intentPlan.Intents
+            .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel)
+            .Where(intent => intent.IsCapacityRequiredWheel)
+            .Where(intent => intent.WheelSymbol.HasValue
+                && objectives.WinTargets.ContainsKey(intent.WheelSymbol.Value))
+            .Sum(intent => Math.Max(0, intent.PlannedWheelCollectionBonus));
+        var requiredByDeadline = Math.Max(0, objectives.WinTargets.Values.Sum() - requiredWheelBonus);
+        var capacityByDeadline = targets
+            .Where(entry => entry.Key <= completionTurn.Value)
+            .Sum(entry => entry.Value);
+        var deficit = requiredByDeadline - capacityByDeadline;
+
+        while (deficit > 0)
+        {
+            var receiver = targets
+                .Where(entry => entry.Key <= completionTurn.Value)
+                .Where(entry => entry.Value < bounds[entry.Key].Max)
+                .OrderBy(entry => entry.Value)
+                .ThenBy(_ => _rng.Next())
+                .Select(entry => entry.Key)
+                .FirstOrDefault();
+            var donor = targets
+                .Where(entry => entry.Key > completionTurn.Value)
+                .Where(entry => entry.Value > bounds[entry.Key].Min)
+                .OrderByDescending(entry => entry.Value)
+                .ThenBy(_ => _rng.Next())
+                .Select(entry => entry.Key)
+                .FirstOrDefault();
+            if (receiver == 0 || donor == 0)
+                return;
+
+            targets[receiver]++;
+            targets[donor]--;
+            deficit--;
+        }
+    }
+
+    private bool TryBuildCapacityTargets(
+        int turn,
+        int remaining,
+        int totalTurns,
+        IReadOnlyDictionary<int, (int Min, int Max)> bounds,
+        Dictionary<int, int> useCounts,
+        Dictionary<int, int> targets)
+    {
+        if (turn > totalTurns)
+            return remaining == 0;
+
+        var current = bounds[turn];
+        var future = bounds
+            .Where(entry => entry.Key > turn)
+            .Select(entry => entry.Value)
+            .ToArray();
+        var low = Math.Max(current.Min, remaining - future.Sum(bound => bound.Max));
+        var high = Math.Min(current.Max, remaining - future.Sum(bound => bound.Min));
+        if (low > high) return false;
+
+        var average = remaining / (double)(totalTurns - turn + 1);
+        var candidates = Enumerable.Range(low, high - low + 1)
+            .Where(candidate => useCounts.GetValueOrDefault(candidate) < 2)
+            .Select(candidate => new
+            {
+                Value = candidate,
+                UseCount = useCounts.GetValueOrDefault(candidate),
+                Distance = Math.Abs(candidate - average),
+                TieBreak = _rng.Next(),
+            })
+            .OrderBy(candidate => candidate.UseCount)
+            .ThenBy(candidate => candidate.Distance)
+            .ThenBy(candidate => candidate.TieBreak)
+            .ToArray();
+
+        foreach (var candidate in candidates)
+        {
+            targets[turn] = candidate.Value;
+            useCounts[candidate.Value] = candidate.UseCount + 1;
+            if (TryBuildCapacityTargets(
+                    turn + 1,
+                    remaining - candidate.Value,
+                    totalTurns,
+                    bounds,
+                    useCounts,
+                    targets))
+            {
+                return true;
+            }
+
+            if (candidate.UseCount == 0)
+                useCounts.Remove(candidate.Value);
+            else
+                useCounts[candidate.Value] = candidate.UseCount;
+            targets.Remove(turn);
+        }
+
+        return false;
+    }
+
+    private (int Min, int Max) TurnPopBounds(
+        int turn,
+        ForwardFeatureIntentPlan intentPlan)
+    {
+        var flushCount = intentPlan.ByTurn.TryGetValue(turn, out var intents)
+            ? intents.Count(intent => intent.Kind == ForwardTimedFeatureKind.Flush)
+            : 0;
+        var normalColumns = _settings.COLS - flushCount;
+        return (
+            (flushCount * _settings.ROWS) + (normalColumns * _settings.MIN_PUSH),
+            (flushCount * _settings.ROWS) + (normalColumns * _settings.MAX_PUSH));
+    }
+
+    private bool RequiresCapacityDirectedShapes(
+        ForwardFeatureBudget budget,
+        ForwardFeatureIntentPlan intentPlan,
+        ForwardObjectives objectives)
+    {
+        if (objectives.WinningRoundPlan?.WinningCompletionTurn != null)
+            return true;
+
+        var required = RawCollectionTarget(objectives, intentPlan);
+        var unpressuredFloor = 0;
+
+        for (var turn = 1; turn <= budget.TotalTurns; turn++)
+        {
+            var flushCount = intentPlan.ByTurn.TryGetValue(turn, out var intents)
+                ? intents.Count(intent => intent.Kind == ForwardTimedFeatureKind.Flush)
+                : 0;
+            var normalColumns = _settings.COLS - flushCount;
+            var minPopped = (flushCount * _settings.ROWS)
+                + (normalColumns * _settings.MIN_PUSH);
+            var maxPopped = (flushCount * _settings.ROWS)
+                + (normalColumns * _settings.MAX_PUSH);
+            unpressuredFloor += ForwardTurnShapePlanner.MinimumUnpressuredPopCount(
+                minPopped,
+                maxPopped);
+        }
+
+        return required > unpressuredFloor;
+    }
+
+    private static int RawCollectionTarget(
+        ForwardObjectives objectives,
+        ForwardFeatureIntentPlan intentPlan)
+    {
+        var exactTargets = objectives.WinTargets.Values.Sum()
+            + objectives.NearMissTargets.Values.Sum();
+        var plannedWheelBonus = intentPlan.Intents
+            .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel && intent.IsCapacityRequiredWheel)
+            .Sum(intent => Math.Max(0, intent.PlannedWheelCollectionBonus));
+
+        return Math.Max(0, exactTargets - plannedWheelBonus);
+    }
+
+    private static int WinningDeadlineCollectionFloor(
+        IReadOnlyDictionary<int, (int Min, int Max)> bounds,
+        ForwardFeatureIntentPlan intentPlan,
+        ForwardObjectives objectives)
+    {
+        var completionTurn = objectives.WinningRoundPlan?.WinningCompletionTurn;
+        if (!completionTurn.HasValue)
+            return 0;
+
+        var requiredWheelBonus = intentPlan.Intents
+            .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel)
+            .Where(intent => intent.IsCapacityRequiredWheel)
+            .Where(intent => intent.WheelSymbol.HasValue
+                && objectives.WinTargets.ContainsKey(intent.WheelSymbol.Value))
+            .Sum(intent => Math.Max(0, intent.PlannedWheelCollectionBonus));
+        var winningRaw = Math.Max(0, objectives.WinTargets.Values.Sum() - requiredWheelBonus);
+        var mandatoryAfterDeadline = bounds
+            .Where(entry => entry.Key > completionTurn.Value)
+            .Sum(entry => entry.Value.Min);
+        return winningRaw + mandatoryAfterDeadline;
+    }
+
+    private int SafeExtraCollectionCapacity(ForwardObjectives objectives)
+    {
+        return objectives.FillSymbols
+            .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
+            .Distinct()
+            .Sum(symbol =>
+            {
+                var minimum = objectives.NearMissTargets.GetValueOrDefault(symbol);
+                var limit = SymbolLedger.NonWinningCollectionLimit(
+                    symbol,
+                    objectives.NearMissTargets.ContainsKey(symbol) ? minimum : (int?)null,
+                    _settings);
+                return Math.Max(0, (limit - 1) - minimum);
+            });
     }
 
     private bool IsPressureTurnPlan(

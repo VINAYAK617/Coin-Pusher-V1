@@ -100,8 +100,11 @@ internal sealed class ForwardTurnShapePlanner
         var preferredPopCount = preferredPoppedCells.HasValue
             ? ClosestLegalPopCount(legal, preferredPoppedCells.Value)
             : PickPreferredPopCount(legal, pressureMode);
+        var capacityMatched = legal
+            .Where(candidate => candidate.PoppedCellCount == preferredPopCount)
+            .ToArray();
         var eligible = PreferLeastUsedPushBags(
-            PreferFreshPushBags(legal, avoidedPushBags),
+            PreferFreshPushBags(capacityMatched, avoidedPushBags),
             pushBagUseCounts);
         var scored = eligible
             .Select(candidate => new ScoredCandidate(candidate, Score(candidate, pressureMode, preferredPopCount)))
@@ -218,7 +221,7 @@ internal sealed class ForwardTurnShapePlanner
         var span = max - min;
         var lower = pressureMode
             ? min + Math.Max(0, (int)Math.Round(span * 0.60))
-            : min + Math.Max(0, (int)Math.Round(span * 0.35));
+            : MinimumUnpressuredPopCount(min, max);
         var upper = pressureMode
             ? max
             : min + Math.Max(0, (int)Math.Round(span * 0.80));
@@ -240,6 +243,9 @@ internal sealed class ForwardTurnShapePlanner
         var chosen = PickPopBucket(low, mid, high);
         return chosen[_rng.Next(chosen.Length)];
     }
+
+    internal static int MinimumUnpressuredPopCount(int min, int max) =>
+        min + Math.Max(0, (int)Math.Round((max - min) * 0.35));
 
     private int[] PickPopBucket(int[] low, int[] mid, int[] high)
     {

@@ -73,7 +73,7 @@ internal sealed class ForwardStartingBoardPlanner
         var futureTurns = framePlan.FutureTurnsAfter(0);
         var positions = AllPositions().ToArray();
         var trialLedger = symbolLedger.Clone();
-        var intents = new ForwardNormalIntentPlanner(_settings).Plan(
+        var intents = new ForwardNormalIntentPlanner(_settings, _rng.Next()).Plan(
             turn: 0 + 1,
             objectives,
             positions,
@@ -91,7 +91,15 @@ internal sealed class ForwardStartingBoardPlanner
         var ordered = OrderPositionsByFate(positions, futureTurns);
         if (!ordered.IsValid) return ordered.Result!;
 
-        var requests = BuildRequests(ordered.Positions, intents.Intents);
+        var requests = BuildRequests(ordered.Positions, intents.Intents, futureTurns);
+        if (requests == null)
+        {
+            return Fail(
+                ForwardStartingBoardStatus.IntentPlanningFailed,
+                "starting-board intents cannot be assigned to cells within their collection deadlines",
+                intents.CollectingSlots,
+                intents.ResidueSlots);
+        }
 
         var spawns = new ForwardSpawnPlanner(
             new ForwardSymbolSelector(
@@ -171,14 +179,18 @@ internal sealed class ForwardStartingBoardPlanner
         return OrderedPositionResult.Ok(ordered);
     }
 
-    private IReadOnlyList<ForwardSpawnCellRequest> BuildRequests(
+    private IReadOnlyList<ForwardSpawnCellRequest>? BuildRequests(
         IReadOnlyList<(int r, int c)> positions,
-        IReadOnlyList<ForwardNormalSpawnIntent> intents)
+        IReadOnlyList<ForwardNormalSpawnIntent> intents,
+        IReadOnlyList<ForwardFutureTurn> futureTurns)
     {
+        var collectingCount = intents.Count(intent => intent.RequiresCollected)
+            + intents.Count(intent => !intent.RequiresCollected && !intent.RequiresResidue);
         var collecting = positions
-            .Take(intents.Count(intent => intent.RequiresCollected)
-                + intents.Count(intent => !intent.RequiresCollected && !intent.RequiresResidue))
-            .OrderBy(_ => _rng.Next())
+            .Take(collectingCount)
+            .Select(position => (Position: position, Fate: _fateAnalyzer.Analyze(position.r, position.c, futureTurns)))
+            .OrderBy(item => item.Fate.CollectedTurn)
+            .ThenBy(_ => _rng.Next())
             .ToList();
         var residue = positions
             .Skip(collecting.Count)
@@ -186,12 +198,38 @@ internal sealed class ForwardStartingBoardPlanner
             .ToList();
         var requests = new List<ForwardSpawnCellRequest>(intents.Count);
 
-        foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresCollected)))
-            AddRequest(requests, collecting, intent);
+        var collectedIntents = Shuffled(intents
+                .Where(intent => intent.RequiresCollected && intent.LatestCollectionTurn.HasValue))
+            .Concat(Shuffled(intents
+                .Where(intent => intent.RequiresCollected && !intent.LatestCollectionTurn.HasValue)));
+        foreach (var intent in collectedIntents)
+        {
+            var eligible = collecting
+                .Select((item, index) => (item, index))
+                .Where(candidate => !intent.LatestCollectionTurn.HasValue
+                    || candidate.item.Fate.CollectedTurn <= intent.LatestCollectionTurn.Value)
+                .ToArray();
+            if (eligible.Length == 0)
+                return null;
+            var index = eligible[_rng.Next(eligible.Length)].index;
+            AddRequest(requests, collecting[index].Position, intent);
+            collecting.RemoveAt(index);
+        }
         foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresResidue)))
             AddRequest(requests, residue, intent);
         foreach (var intent in Shuffled(intents.Where(intent => !intent.RequiresCollected && !intent.RequiresResidue)))
-            AddRequest(requests, collecting.Count > 0 ? collecting : residue, intent);
+        {
+            if (collecting.Count > 0)
+            {
+                var index = _rng.Next(collecting.Count);
+                AddRequest(requests, collecting[index].Position, intent);
+                collecting.RemoveAt(index);
+            }
+            else
+            {
+                AddRequest(requests, residue, intent);
+            }
+        }
 
         return requests;
     }
@@ -211,6 +249,17 @@ internal sealed class ForwardStartingBoardPlanner
             intent.LedgerCollectionValue,
             intent.SpawnStack));
     }
+
+    private static void AddRequest(
+        List<ForwardSpawnCellRequest> requests,
+        (int r, int c) position,
+        ForwardNormalSpawnIntent intent) =>
+        requests.Add(new ForwardSpawnCellRequest(
+            position.r,
+            position.c,
+            intent.CollectIntent,
+            intent.LedgerCollectionValue,
+            intent.SpawnStack));
 
     private IReadOnlyList<ForwardNormalSpawnIntent> Shuffled(IEnumerable<ForwardNormalSpawnIntent> intents) =>
         intents.OrderBy(_ => _rng.Next()).ToArray();

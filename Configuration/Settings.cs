@@ -40,9 +40,12 @@ public sealed class DefaultProfileSettings : ICustomProfileSettings
             ExtraSpinFeatureConfig = settings.ExtraSpinFeatureConfig,
             PrizeUpgradeFeatureConfig = settings.PrizeUpgradeFeatureConfig,
             PrizeLadderRows = settings.PrizeLadderRows,
+            WinningRoundRules = settings.WinningRoundRules,
             PWheelStackValue1 = settings.PWheelStackValue1,
             PWheelStackValue2 = settings.PWheelStackValue2,
             PWheelRepeatOptional = settings.PWheelRepeatOptional,
+            PWheelStackCollection = settings.PWheelStackCollection,
+            PWheelPreferDenseTarget = settings.PWheelPreferDenseTarget,
             WExpBalanced = settings.WExpBalanced,
             WExpNearMiss = settings.WExpNearMiss,
             WExpFeature = settings.WExpFeature,
@@ -60,6 +63,7 @@ public sealed class DefaultProfileSettings : ICustomProfileSettings
             PWinLateCompletion = settings.PWinLateCompletion,
             WinLateTailSpins = settings.WinLateTailSpins,
             WinLateMinTail = settings.WinLateMinTail,
+            MaxDeferredCollectionsPerTurn = settings.MaxDeferredCollectionsPerTurn,
             WinLateTailFraction = settings.WinLateTailFraction,
             NonWinTargetProfiles = settings.NonWinTargetProfiles,
             NonWinCountWeights = settings.NonWinCountWeights,
@@ -68,6 +72,7 @@ public sealed class DefaultProfileSettings : ICustomProfileSettings
             WNonWinHigh = settings.WNonWinHigh,
             PFeatureRetriggerChain = settings.PFeatureRetriggerChain,
             PFeatureLatePlacement = settings.PFeatureLatePlacement,
+            PFeatureSameTurn = settings.PFeatureSameTurn,
             WPusherLowPop = settings.WPusherLowPop,
             WPusherMidPop = settings.WPusherMidPop,
             WPusherHighPop = settings.WPusherHighPop,
@@ -87,7 +92,7 @@ public sealed class DefaultProfileSettings : ICustomProfileSettings
     public int MAX_EXTRA_GO_PER_TURN => MAX_SPINS - BASE_SPINS;
     public int MIN_WHEEL_STACK_VALUE { get; init; } = 1;
     public int MAX_WHEEL_STACK_VALUE { get; init; } = 3;
-    public int NONWIN_MIN_TARGET { get; init; } = 10;
+    public int NONWIN_MIN_TARGET { get; init; } = 1;
 
     public int F_WHEEL { get; init; } = 11;
     public int F_XSPIN { get; init; } = 12;
@@ -138,16 +143,69 @@ public sealed class DefaultProfileSettings : ICustomProfileSettings
         new[]
         {
             new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 1, 2, 5 } },
-            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 2, 5, 10 } },
+            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 2, 4, 8 } },
             new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 5, 10, 25 } },
-            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 10, 25, 100 } },
-            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 100, 250, 1000 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 10, 20, 50 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 100, 200, 500 } },
             new PrizeLadderRow { Target = 30, Tiers = new decimal[] { 10000 } },
+        };
+
+    public IReadOnlyList<WinningRoundRule> WinningRoundRules { get; init; } =
+        new[]
+        {
+            new WinningRoundRule
+            {
+                MinWinInclusive = 0m,
+                MaxWinExclusive = 1m,
+                ExtraGoCounts = new[] { 0, 1 },
+            },
+            new WinningRoundRule
+            {
+                MinWinInclusive = 1m,
+                MaxWinExclusive = 3m,
+                ExtraGoCounts = new[] { 0, 1 },
+                MinWinningTurn = 4,
+                MaxWinningTurn = 6,
+            },
+            new WinningRoundRule
+            {
+                MinWinInclusive = 3m,
+                MaxWinExclusive = 5m,
+                ExtraGoCounts = new[] { 1, 2 },
+                MinWinningTurn = 6,
+                MaxWinningTurn = 7,
+            },
+            new WinningRoundRule
+            {
+                MinWinInclusive = 5m,
+                MaxWinExclusive = 10m,
+                ExtraGoCounts = new[] { 1, 2 },
+                MinWinningTurn = 6,
+                MaxWinningTurn = 7,
+            },
+            new WinningRoundRule
+            {
+                MinWinInclusive = 10m,
+                MaxWinExclusive = 50m,
+                ExtraGoCounts = new[] { 2, 3 },
+                MinWinningTurn = 7,
+                MaxWinningTurn = 8,
+            },
+            new WinningRoundRule
+            {
+                MinWinInclusive = 50m,
+                MaxWinExclusive = null,
+                ExtraGoCounts = new[] { 3 },
+                MinWinningTurn = 8,
+                MaxWinningTurn = 8,
+            },
         };
 
     public double PWheelStackValue1 { get; init; } = Probability("COINPUSHER_P_WHEEL_STACK_VALUE_1", 0.45);
     public double PWheelStackValue2 { get; init; } = Probability("COINPUSHER_P_WHEEL_STACK_VALUE_2", 0.35);
     public double PWheelRepeatOptional { get; init; } = Probability("COINPUSHER_P_WHEEL_REPEAT_OPTIONAL", 0.35);
+    public double PWheelStackCollection { get; init; } = Probability("COINPUSHER_P_WHEEL_STACK_COLLECTION", 0.75);
+    public double PWheelPreferDenseTarget { get; init; } = Probability("COINPUSHER_P_WHEEL_PREFER_DENSE_TARGET", 0.75);
 
     public double WExpBalanced { get; init; } = Weight("COINPUSHER_W_EXP_BALANCED", 0.30);
     public double WExpNearMiss { get; init; } = Weight("COINPUSHER_W_EXP_NEARMISS", 0.25);
@@ -159,21 +217,25 @@ public sealed class DefaultProfileSettings : ICustomProfileSettings
     public double POptionalTicketWheel { get; init; } = Probability("COINPUSHER_P_OPTIONAL_TICKET_WHEEL", 1.0 / 3.0);
     public double POptionalTicketFlush { get; init; } = Probability("COINPUSHER_P_OPTIONAL_TICKET_FLUSH", 1.0 / 3.0);
     public double POptionalTicketPrizeUpgrade { get; init; } = Probability("COINPUSHER_P_OPTIONAL_TICKET_PRIZE_UPGRADE", 1.0 / 4.0);
-    public double PNoWinExtraGoOptional { get; init; } = Probability("COINPUSHER_P_NOWIN_EXTRA_GO_OPTIONAL", 1.0 / 100.0);
+    public double PNoWinExtraGoOptional { get; init; } = Probability("COINPUSHER_P_NOWIN_EXTRA_GO_OPTIONAL", 0.13);
 
     public double PWheelOptional { get; init; } = Probability("COINPUSHER_P_WHEEL_OPTIONAL", 1.0);
-    public double PFlushOptional { get; init; } = Probability("COINPUSHER_P_FLUSH_OPTIONAL", 1.0);
-    public double PNonWinWheel { get; init; } = Probability("COINPUSHER_P_NONWIN_WHEEL", 0.0);
+    public double PFlushOptional { get; init; } = Probability("COINPUSHER_P_FLUSH_OPTIONAL", 0.40);
+    public double PNonWinWheel { get; init; } = Probability("COINPUSHER_P_NONWIN_WHEEL", 0.18);
     public double PNonWinPrizeUpgrade { get; init; } = Probability("COINPUSHER_P_NONWIN_PRIZE_UPGRADE", 1.0);
 
     public double PWinLateCompletion { get; init; } = Probability("COINPUSHER_P_WIN_LATE_COMPLETION", 0.90);
     public int WinLateTailSpins { get; init; } = 2;
     public int WinLateMinTail { get; init; } = 2;
+    public int MaxDeferredCollectionsPerTurn { get; init; } = 1;
     public double WinLateTailFraction { get; init; } = 0.20;
 
     public (double P, int Min, int Max, int MaxSymbols)[] NonWinTargetProfiles { get; init; } =
     {
-        (1.0, 10, 19, 5),
+        (0.20, 1, 5, 5),
+        (0.35, 6, 10, 4),
+        (0.30, 11, 15, 3),
+        (0.15, 16, 24, 2),
     };
 
     public double[] NonWinCountWeights { get; init; } =
@@ -191,6 +253,7 @@ public sealed class DefaultProfileSettings : ICustomProfileSettings
 
     public double PFeatureRetriggerChain { get; init; } = Probability("COINPUSHER_P_FEATURE_RETRIGGER_CHAIN", 0.25);
     public double PFeatureLatePlacement { get; init; } = Probability("COINPUSHER_P_FEATURE_LATE_PLACEMENT", 0.90);
+    public double PFeatureSameTurn { get; init; } = Probability("COINPUSHER_P_FEATURE_SAME_TURN", 0.20);
     public double WPusherLowPop { get; init; } = Weight("COINPUSHER_W_PUSHER_LOW_POP", 0.25);
     public double WPusherMidPop { get; init; } = Weight("COINPUSHER_W_PUSHER_MID_POP", 0.50);
     public double WPusherHighPop { get; init; } = Weight("COINPUSHER_W_PUSHER_HIGH_POP", 0.25);

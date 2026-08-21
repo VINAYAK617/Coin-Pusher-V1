@@ -8,6 +8,7 @@ internal enum ForwardObjectiveFinalizationStatus
     MissingFramePlan,
     EnvelopeInvalid,
     WinCollectionsExceedCapacity,
+    ExplicitNearMissExceedsCapacity,
     ProtectedNearMissExceedsCapacity,
     BalanceFailed,
 }
@@ -114,7 +115,7 @@ internal sealed class ForwardObjectiveFinalizer
         var wheelWinBonus = WheelWinBonus(objectives, framePlan);
         var usableBaseSlots = Math.Min(
             availableCollectionSlots,
-            NormalProgressCapacity(framePlan) + NoSafeFillerCapacityAllowance(objectives));
+            NormalProgressCapacity(framePlan, objectives) + NoSafeFillerCapacityAllowance(objectives));
         var normalWinNeed = Math.Max(0, winRequired - wheelWinBonus);
         if (usableBaseSlots < normalWinNeed)
         {
@@ -124,59 +125,48 @@ internal sealed class ForwardObjectiveFinalizer
         }
 
         var rawNearMissCapacity = Math.Max(0, usableBaseSlots - normalWinNeed);
-        var nearMissBudget = Math.Max(0, rawNearMissCapacity - TemporalReserve(framePlan));
-        if (objectives.NearMissTargets.Count > 0
-            && nearMissBudget < _settings.NONWIN_MIN_TARGET
-            && rawNearMissCapacity >= _settings.NONWIN_MIN_TARGET)
-        {
-            nearMissBudget = _settings.NONWIN_MIN_TARGET;
-        }
-
+        var temporalReserve = TemporalReserve(framePlan);
         var protectedSymbols = featureIntents.EffectiveNonWinPrizeTiers.Keys
             .Concat(featureIntents.Intents
                 .Where(intent => intent.Kind == ForwardTimedFeatureKind.PrizeUpgrade && intent.UpgradeSymbol.HasValue)
                 .Select(intent => intent.UpgradeSymbol!.Value))
             .ToHashSet();
-
-        var constrained = objectives.NearMissTargets.Values.Sum() > nearMissBudget;
-        var targets = new Dictionary<int, int>();
-        var remaining = nearMissBudget;
-
-        foreach (var entry in objectives.NearMissTargets
-                     .Where(kv => protectedSymbols.Contains(kv.Key))
-                     .OrderBy(kv => kv.Key))
+        if (objectives.NearMissTargetsAreExplicit)
         {
-            var minTarget = MinimumTarget(entry.Value);
-            if (remaining < minTarget)
+            var requested = objectives.NearMissTargets.Values.Sum();
+            if (requested > rawNearMissCapacity)
             {
                 return BalanceResult.Fail(Fail(
-                    ForwardObjectiveFinalizationStatus.ProtectedNearMissExceedsCapacity,
-                    $"protected near-miss symbol {entry.Key} needs at least {minTarget}, remaining capacity={remaining}"));
+                    ForwardObjectiveFinalizationStatus.ExplicitNearMissExceedsCapacity,
+                    $"explicit near-miss targets need {requested}, raw capacity={rawNearMissCapacity}"));
             }
 
-            var assigned = constrained
-                ? minTarget
-                : Math.Min(entry.Value, remaining);
-            targets[entry.Key] = assigned;
-            remaining -= assigned;
+            return BalanceResult.Ok(objectives.NearMissTargets.ToDictionary(kv => kv.Key, kv => kv.Value));
         }
 
-        foreach (var entry in objectives.NearMissTargets
-                     .Where(kv => !protectedSymbols.Contains(kv.Key))
-                     .OrderBy(kv => kv.Key))
+        var protectedTargetCount = objectives.NearMissTargets.Keys.Count(protectedSymbols.Contains);
+        if (protectedTargetCount > rawNearMissCapacity)
         {
-            var minTarget = MinimumTarget(entry.Value);
-            if (remaining < minTarget)
-                continue;
-
-            var assigned = constrained
-                ? minTarget
-                : Math.Min(entry.Value, remaining);
-            targets[entry.Key] = assigned;
-            remaining -= assigned;
+            return BalanceResult.Fail(Fail(
+                ForwardObjectiveFinalizationStatus.ProtectedNearMissExceedsCapacity,
+                $"{protectedTargetCount} protected near-miss symbols need one collection each, " +
+                $"raw capacity={rawNearMissCapacity}, temporal reserve={temporalReserve}"));
         }
 
-        return BalanceResult.Ok(targets);
+        var discretionaryCapacity = Math.Max(
+            0,
+            rawNearMissCapacity - protectedTargetCount - temporalReserve);
+        var nearMissBudget = protectedTargetCount + discretionaryCapacity;
+
+        if (objectives.NearMissTargets.Values.Sum() <= nearMissBudget)
+            return BalanceResult.Ok(objectives.NearMissTargets.ToDictionary(kv => kv.Key, kv => kv.Value));
+
+        return AllocateAutomaticTargets(
+            objectives.NearMissTargets,
+            protectedSymbols,
+            nearMissBudget,
+            rawNearMissCapacity,
+            temporalReserve);
     }
 
     private int TemporalReserve(ForwardTurnFramePlan framePlan)
@@ -186,7 +176,9 @@ internal sealed class ForwardObjectiveFinalizer
         return _settings.COLS + (framePlan.TotalTurns * 2) + _settings.NONWIN_MIN_TARGET + boardFeatureCount;
     }
 
-    private int NormalProgressCapacity(ForwardTurnFramePlan framePlan)
+    private int NormalProgressCapacity(
+        ForwardTurnFramePlan framePlan,
+        ForwardObjectives objectives)
     {
         var analyzer = new ForwardCellFateAnalyzer(_settings);
         var total = AllPositions()
@@ -197,8 +189,7 @@ internal sealed class ForwardObjectiveFinalizer
             var futureTurns = framePlan.FutureTurnsAfter(frame.Turn);
             var collectingSpawnSlots = EmptyPositionsAfterPushRotate(frame.Shape)
                 .Count(position => analyzer.Analyze(position.r, position.c, futureTurns).IsCollected);
-            var boardFeatureCount = frame.FeatureIntents.Count(intent => intent.IsBoardFeature);
-            total += Math.Max(0, collectingSpawnSlots - boardFeatureCount);
+            total += collectingSpawnSlots;
         }
 
         return total;
@@ -262,8 +253,72 @@ internal sealed class ForwardObjectiveFinalizer
         }
     }
 
-    private int MinimumTarget(int requestedTarget) =>
-        Math.Max(1, _settings.NONWIN_MIN_TARGET);
+    private static BalanceResult AllocateAutomaticTargets(
+        IReadOnlyDictionary<int, int> requestedTargets,
+        IReadOnlySet<int> protectedSymbols,
+        int budget,
+        int rawCapacity,
+        int temporalReserve)
+    {
+        var protectedEntries = requestedTargets
+            .Where(kv => protectedSymbols.Contains(kv.Key))
+            .OrderBy(kv => kv.Key)
+            .ToArray();
+        if (protectedEntries.Length > budget)
+        {
+            return BalanceResult.Fail(Fail(
+                ForwardObjectiveFinalizationStatus.ProtectedNearMissExceedsCapacity,
+                $"{protectedEntries.Length} protected near-miss symbols need one collection each, " +
+                $"available capacity={budget}, raw capacity={rawCapacity}, temporal reserve={temporalReserve}"));
+        }
+
+        var selected = new List<KeyValuePair<int, int>>(protectedEntries);
+        var remaining = budget - protectedEntries.Length;
+        selected.AddRange(requestedTargets
+            .Where(kv => !protectedSymbols.Contains(kv.Key))
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key)
+            .Take(remaining));
+
+        var targets = selected.ToDictionary(kv => kv.Key, _ => 1);
+        remaining = budget - targets.Count;
+        if (remaining <= 0)
+            return BalanceResult.Ok(targets);
+
+        var additionalDemand = selected.Sum(kv => Math.Max(0, kv.Value - 1));
+        if (additionalDemand <= 0)
+            return BalanceResult.Ok(targets);
+
+        var shares = selected
+            .Select(kv =>
+            {
+                var demand = Math.Max(0, kv.Value - 1);
+                var exact = remaining * (double)demand / additionalDemand;
+                return new
+                {
+                    kv.Key,
+                    Demand = demand,
+                    Whole = Math.Min(demand, (int)Math.Floor(exact)),
+                    Fraction = exact - Math.Floor(exact),
+                };
+            })
+            .ToArray();
+
+        foreach (var share in shares)
+            targets[share.Key] += share.Whole;
+
+        var left = remaining - shares.Sum(share => share.Whole);
+        foreach (var share in shares
+                     .Where(share => targets[share.Key] < requestedTargets[share.Key])
+                     .OrderByDescending(share => share.Fraction)
+                     .ThenBy(share => share.Key)
+                     .Take(left))
+        {
+            targets[share.Key]++;
+        }
+
+        return BalanceResult.Ok(targets);
+    }
 
     private static ForwardObjectives Copy(
         ForwardObjectives source,
@@ -283,7 +338,9 @@ internal sealed class ForwardObjectiveFinalizer
             nonWinPrizeTiers.ToDictionary(kv => kv.Key, kv => kv.Value),
             source.MaxSymbol,
             source.IsNoWin,
-            source.TopPrizeSymbol);
+            source.TopPrizeSymbol,
+            source.NearMissTargetsAreExplicit,
+            source.WinningRoundPlan);
 
     private static ForwardObjectiveFinalizationResult Ok(
         string detail,

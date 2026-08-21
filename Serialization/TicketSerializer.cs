@@ -17,9 +17,9 @@ namespace CoinPusherEngine;
 ///   PRIZE_UPGRADE -> { FeatureId, ConvertToId, UpgradeSymbolId, UpgradePrizeValue }
 ///
 /// ReTrigger chaining: with configurable probability, a same-turn cosmetic
-/// PRIZE_UPGRADE or WHEEL token may be folded into another feature token's ReTrigger array.
-/// EXTRA_SPIN always stays physical because TotalSpins is load-bearing. WHEEL may
-/// be nested only as a same-turn child so stack timing remains replayable.
+/// PRIZE_UPGRADE token may be folded into another no-board-effect feature token's
+/// ReTrigger array. EXTRA_SPIN always stays physical because TotalSpins is
+/// load-bearing. WHEEL always stays physical because board position affects stacking.
 /// ReTrigger depth is intentionally capped at one nested feature.
 ///
 /// Pos field: every spawn carries "Pos": row*5+col (flat index), per the established schema.
@@ -93,12 +93,12 @@ public static class TicketSerializer
     /// <summary>Build the plain object graph (no JSON string yet) for a verified GamePlan.</summary>
     public static TicketDto ToTicketObject(GamePlan plan, ICustomProfileSettings settings)
     {
-        if (settings == null) throw new ArgumentNullException(nameof(settings));
+        TicketSerializationValidator.Validate(plan, settings);
         var board = plan.Spins[0].Board;
         var startingBoard = Enumerable.Range(0, settings.ROWS).Select(r =>
             Enumerable.Range(0, settings.COLS).Select(c => new BoardCellDto { Id = board[r, c]?.Sym ?? 0 }).ToArray()
         ).ToArray();
-        var collectedTotals = Sim.Run(plan);
+        var collectedTotals = Sim.Run(plan, settings);
 
         return new TicketDto
         {
@@ -157,7 +157,8 @@ public static class TicketSerializer
         {
             Formatting = Formatting.None,
             NullValueHandling = NullValueHandling.Ignore,
-            DefaultValueHandling = DefaultValueHandling.Ignore
+            // Pos=0 is a valid board position and must never be omitted.
+            DefaultValueHandling = DefaultValueHandling.Include
         });
 
     // ── Turn / spawn assembly ───────────────────────────────────────────────────
@@ -230,34 +231,36 @@ public static class TicketSerializer
     {
         if (featureTokens.Count == 0) return FeatureChainPlan.Empty;
 
+        if (featureTokens.Count < 2) return FeatureChainPlan.Empty;
+
         var chainable = featureTokens
             .Where(token => token.Spin < plan.TotalSpins)
             .Where(token => IsReTriggerChainStart(token.Cell, settings))
-            .ToList();
-        if (chainable.Count == 0) return FeatureChainPlan.Empty;
-
-        if (featureTokens.Count < 2) return FeatureChainPlan.Empty;
-
-        var ordered = chainable
             .OrderBy(token => token.Spin)
             .ThenBy(token => token.Pos.Item1 * settings.COLS + token.Pos.Item2)
             .ThenBy(token => token.Cell.Sym)
             .ToList();
-
-        var start = ordered[DeterministicIndex(plan, ordered.Count, salt: 97, settings)];
-        var payloadCandidates = featureTokens
-            .OrderBy(token => token.Spin)
-            .ThenBy(token => token.Pos.Item1 * settings.COLS + token.Pos.Item2)
-            .ThenBy(token => token.Cell.Sym)
-            .Where(token => token.Spin != start.Spin || token.Pos != start.Pos)
-            .Where(token => IsTimingSafeReTriggerPayload(start, token, settings))
+        var candidates = chainable
+            .Select(start => new FeatureChainCandidate(
+                start,
+                featureTokens
+                    .OrderBy(token => token.Spin)
+                    .ThenBy(token => token.Pos.Item1 * settings.COLS + token.Pos.Item2)
+                    .ThenBy(token => token.Cell.Sym)
+                    .Where(token => token.Spin != start.Spin || token.Pos != start.Pos)
+                    .Where(token => IsTimingSafeReTriggerPayload(start, token, settings))
+                    .ToArray()))
+            .Where(candidate => candidate.Payloads.Count > 0)
             .ToList();
-        if (payloadCandidates.Count == 0) return FeatureChainPlan.Empty;
+        if (candidates.Count == 0) return FeatureChainPlan.Empty;
 
-        var roll = DeterministicUnitInterval(plan, start.Cell.Sym, start.Spin, start.Pos, payloadCandidates.Count, settings);
+        var selected = candidates[DeterministicIndex(plan, candidates.Count, salt: 97, settings)];
+        var start = selected.Start;
+
+        var roll = DeterministicUnitInterval(plan, start.Cell.Sym, start.Spin, start.Pos, selected.Payloads.Count, settings);
         if (roll >= settings.PFeatureRetriggerChain) return FeatureChainPlan.Empty;
 
-        var payload = payloadCandidates[DeterministicIndex(plan, payloadCandidates.Count, salt: 193, settings)];
+        var payload = selected.Payloads[DeterministicIndex(plan, selected.Payloads.Count, salt: 193, settings)];
         var startConvertToId = RequireConvertSymbol(start.Cell, settings, "ReTrigger chain start");
         var nested = FeatureObj(
             payload.Cell,
@@ -288,6 +291,10 @@ public static class TicketSerializer
 
         return payload.Cell.Sym == settings.F_PRUP;
     }
+
+    private sealed record FeatureChainCandidate(
+        (int Spin, (int, int) Pos, Cell Cell) Start,
+        IReadOnlyList<(int Spin, (int, int) Pos, Cell Cell)> Payloads);
 
     private sealed record FeatureChainPlan(
         (int Spin, (int, int) Pos, Cell Cell)? Start,
@@ -428,18 +435,15 @@ public static class TicketSerializer
 
         if (c.Sym == settings.F_WHEEL)
         {
-            dto.WheelSymbolId = c.Fp?.WheelSym ?? 0;
+            dto.WheelSymbolId = c.Fp!.WheelSym;
             // Public JSON uses bonus semantics: N means a collected cell counts
             // as 1 + N. Internally Fp.WheelStack stores the total stack value.
-            dto.WheelStackValue = Math.Clamp(
-                Math.Max(0, (c.Fp?.WheelStack ?? 1) - 1),
-                settings.MIN_WHEEL_STACK_VALUE,
-                settings.MAX_WHEEL_STACK_VALUE);
+            dto.WheelStackValue = c.Fp.WheelStack - 1;
         }
         else if (c.Sym == settings.F_PRUP)
         {
-            dto.UpgradeSymbolId = c.Fp?.PrupSym ?? 0;
-            dto.UpgradePrizeValue = PrizeValueFor(plan, c.Fp?.PrupSym ?? 0, c.Fp?.PrupTier ?? 0);
+            dto.UpgradeSymbolId = c.Fp!.PrupSym;
+            dto.UpgradePrizeValue = PrizeValueFor(plan, c.Fp.PrupSym, c.Fp.PrupTier);
         }
 
         return dto;
@@ -453,7 +457,9 @@ public static class TicketSerializer
 
     private static int RequireConvertSymbol(Cell c, ICustomProfileSettings settings, string context)
     {
-        if (c.CvtSym > 0 && !settings.IsFeat(c.CvtSym))
+        if (c.CvtSym >= 1
+            && c.CvtSym <= settings.PrizeLadderRows.Count
+            && !settings.IsFeat(c.CvtSym))
             return c.CvtSym;
 
         throw new InvalidOperationException(
@@ -467,8 +473,7 @@ public static class TicketSerializer
             && tiers.TryGetValue(tier, out decimal value))
             return value;
 
-        // Hand-authored MathInput may only provide PrizeTiers. Keep serialization usable
-        // while LadderCombinator-backed tickets emit actual prize values.
-        return tier;
+        throw new InvalidOperationException(
+            $"No configured prize value exists for symbol {sym}, tier {tier}.");
     }
 }

@@ -77,7 +77,7 @@ public sealed class Engine
         {
             Collected  = totals,
             SymbolsHit = symbolsHit,
-            Win        = symbolsHit.Values.All(v => v),
+            Win        = symbolsHit.Count > 0 && symbolsHit.Values.All(v => v),
         };
     }
 }

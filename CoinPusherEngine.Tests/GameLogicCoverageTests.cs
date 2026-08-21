@@ -26,11 +26,11 @@ public sealed class GameLogicCoverageTests
             {
                 ["WHEEL"] = 1,
                 ["FLUSH"] = 1,
-                ["EXTRA_SPIN"] = 1,
+                ["EXTRA_SPIN"] = 3,
                 ["PRIZE_UPGRADE"] = 1,
             },
             PrizeTiers = new Dictionary<int, int> { [2] = 1 },
-            PrizeValues = PrizeValues(6, tiers: 3),
+            PrizeValues = ConfiguredPrizeValues(TestSettings.Default),
             MaxSym = 6,
         };
 
@@ -118,7 +118,7 @@ public sealed class GameLogicCoverageTests
     [TestMethod]
     public void LadderBundleBacktracksToPreserveFuturePrizeOptions()
     {
-        var prizes = new decimal[] { 100, 250 };
+        var prizes = new decimal[] { 50, 200 };
 
         for (var seed = 1; seed <= 20; seed++)
         {
@@ -145,7 +145,7 @@ public sealed class GameLogicCoverageTests
 
         Assert.ThrowsException<InvalidOperationException>(() =>
             new LadderCombinator(StandardRows(), seed: 31313, settings)
-                .Bundle(new decimal[] { 100, 250 }));
+                .Bundle(new decimal[] { 50, 200 }));
     }
 
     [DataTestMethod]
@@ -232,6 +232,25 @@ public sealed class GameLogicCoverageTests
 
         Assert.AreEqual(30, Sim.Run(plan)[6]);
         AssertValid(JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(TicketSerializer.ToJson(plan))!);
+    }
+
+    [TestMethod]
+    public void GeneratorAvoidsNoOpRepeatedWheelPlacements()
+    {
+        var cases = new[]
+        {
+            (Prizes: new decimal[] { 10m }, Seed: 162789259),
+            (Prizes: new decimal[] { 25m, 100m }, Seed: 1680382235),
+        };
+
+        foreach (var item in cases)
+        {
+            var result = new CoinPusherTicketJsonGenerator(TestSettings.Default)
+                .Generate(item.Prizes, item.Seed);
+
+            Assert.IsTrue(result.IsValid, result.Detail);
+            AssertValid(result.Ticket!);
+        }
     }
 
     [DataTestMethod]
@@ -351,7 +370,7 @@ public sealed class GameLogicCoverageTests
             BaseSpins = 5,
             Required = new Dictionary<string, int> { ["PRIZE_UPGRADE"] = 2 },
             PrizeTiers = new Dictionary<int, int> { [2] = 1, [4] = 1 },
-            PrizeValues = PrizeValues(6, tiers: 3),
+            PrizeValues = ConfiguredPrizeValues(TestSettings.Default),
             MaxSym = 6,
         };
 
@@ -380,7 +399,7 @@ public sealed class GameLogicCoverageTests
                 ["PRIZE_UPGRADE"] = 1,
             },
             PrizeTiers = new Dictionary<int, int> { [2] = 1 },
-            PrizeValues = PrizeValues(6, tiers: 3),
+            PrizeValues = ConfiguredPrizeValues(settings),
             MaxSym = 6,
         };
 
@@ -503,7 +522,7 @@ public sealed class GameLogicCoverageTests
     public void CheckerRejectsFrameworkCashWinMismatchAgainstPrizeLadder()
     {
         var bundle = new LadderCombinator(StandardRows(), seed: 31313)
-            .Bundle(new decimal[] { 100, 250 });
+            .Bundle(new decimal[] { 50, 200 });
         var gameData = PlanTicket(bundle.Input, seed: 31313);
         var ticket = FrameworkTicket(gameData, cashWin: 999m);
 
@@ -839,7 +858,7 @@ public sealed class GameLogicCoverageTests
 
         var mutations = new (string Name, Action<TicketSerializer.TicketDto> Mutate, string? Category)[]
         {
-            ("normal spawn id changed", ChangeNormalSpawnId, null),
+            ("normal spawn changed to feature id without payload", ChangeNormalSpawnId, "Schema"),
             ("spawn removed", RemoveOneSpawn, "Geometry"),
             ("spawn moved onto occupied cell", MoveSpawnOntoOccupiedCell, "Replay"),
             ("normal pusher value changed", IncreaseNormalPusherValue, "Geometry"),
@@ -923,7 +942,7 @@ public sealed class GameLogicCoverageTests
             Required = new Dictionary<string, int>
             {
                 ["FLUSH"] = settings.FeatureConfig("FLUSH").Max,
-                ["EXTRA_SPIN"] = 2,
+                ["EXTRA_SPIN"] = 1,
             },
             BaseSpins = settings.BASE_SPINS,
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
@@ -942,6 +961,7 @@ public sealed class GameLogicCoverageTests
         var settings = new DefaultProfileSettings { PFeatureRetriggerChain = 1.0 };
         var plan = new GamePlan
         {
+            Verified = true,
             TotalSpins = 3,
             Targets = new Dictionary<int, int> { [2] = 1 },
             WinSyms = new[] { 2 },
@@ -970,6 +990,7 @@ public sealed class GameLogicCoverageTests
         var settings = new DefaultProfileSettings { PFeatureRetriggerChain = 1.0 };
         var plan = new GamePlan
         {
+            Verified = true,
             TotalSpins = 3,
             Targets = new Dictionary<int, int> { [2] = 1 },
             WinSyms = new[] { 2 },
@@ -1000,6 +1021,7 @@ public sealed class GameLogicCoverageTests
         var settings = new DefaultProfileSettings { PFeatureRetriggerChain = 1.0 };
         var plan = new GamePlan
         {
+            Verified = true,
             TotalSpins = 3,
             Targets = new Dictionary<int, int>(),
             WinSyms = Array.Empty<int>(),
@@ -1033,6 +1055,7 @@ public sealed class GameLogicCoverageTests
         var settings = new DefaultProfileSettings { PFeatureRetriggerChain = 0.0 };
         var plan = new GamePlan
         {
+            Verified = true,
             TotalSpins = 3,
             Targets = new Dictionary<int, int>(),
             WinSyms = Array.Empty<int>(),
@@ -1061,7 +1084,7 @@ public sealed class GameLogicCoverageTests
         AssertRejected(report, "nested WHEEL retrigger", "Schema");
         Assert.IsTrue(report.Checks.Any(check =>
             check.Result == TicketChecker.Status.Fail
-            && check.Name.Contains("WHEEL ReTrigger payload")));
+            && check.Name.Contains("ReTrigger payload type")));
     }
 
     [TestMethod]
@@ -1102,6 +1125,49 @@ public sealed class GameLogicCoverageTests
         Assert.IsTrue(report.Checks.Any(check =>
             check.Result == TicketChecker.Status.Fail
             && check.Name.Contains("WHEEL fire turn 1 sym 2 affects board")),
+            string.Join(" | ", report.Checks
+                .Where(check => check.Result == TicketChecker.Status.Fail)
+                .Select(check => $"{check.Category}/{check.Name}: {check.Detail}")));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsRepeatedWheelStackOverflowEvenWhenEachWheelValueIsLegal()
+    {
+        var settings = TestSettings.Default;
+        var result = new CoinPusherTicketJsonGenerator(settings)
+            .Generate(new decimal[] { 100 }, seed: 202608659);
+        Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, result.Status, result.Detail);
+        Assert.IsNotNull(result.Ticket);
+
+        var ticket = CloneTicket(result.Ticket!);
+        var targetTurn = ticket.Turns
+            .Select(turn => new
+            {
+                Turn = turn,
+                NormalSpawns = turn.Spawns.Where(spawn => spawn.Feature == null).Take(4).ToArray(),
+            })
+            .First(item => item.NormalSpawns.Length == 4);
+        var repeatedSymbol = targetTurn.NormalSpawns[0].Id;
+        foreach (var spawn in targetTurn.NormalSpawns.Skip(1))
+        {
+            spawn.Id = settings.F_WHEEL;
+            spawn.Feature = new TicketSerializer.FeatureDto
+            {
+                FeatureId = settings.F_WHEEL,
+                ConvertToId = repeatedSymbol,
+                WheelSymbolId = repeatedSymbol,
+                WheelStackValue = settings.MAX_WHEEL_STACK_VALUE,
+                ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
+            };
+        }
+
+        var report = new TicketChecker(settings).CheckTicket(ticket);
+
+        AssertRejected(report, "repeated WHEEL stack overflow", "Feature");
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail
+            && check.Name.Contains("stack cap", StringComparison.Ordinal)
+            && check.Detail.Contains("above MAX_COIN_STACK", StringComparison.Ordinal)),
             string.Join(" | ", report.Checks
                 .Where(check => check.Result == TicketChecker.Status.Fail)
                 .Select(check => $"{check.Category}/{check.Name}: {check.Detail}")));
@@ -1185,11 +1251,11 @@ public sealed class GameLogicCoverageTests
             {
                 ["WHEEL"] = 1,
                 ["FLUSH"] = 1,
-                ["EXTRA_SPIN"] = 1,
+                ["EXTRA_SPIN"] = 2,
                 ["PRIZE_UPGRADE"] = 1,
             },
             PrizeTiers = new Dictionary<int, int> { [2] = 1 },
-            PrizeValues = PrizeValues(TestSettings.Default.PrizeLadderRows.Count, tiers: 3),
+            PrizeValues = ConfiguredPrizeValues(TestSettings.Default),
             MaxSym = TestSettings.Default.PrizeLadderRows.Count,
         }, seed);
 
@@ -1203,8 +1269,8 @@ public sealed class GameLogicCoverageTests
 
     private static void ChangeNormalSpawnId(TicketSerializer.TicketDto ticket)
     {
-        var spawn = FirstNormalSpawn(ticket, spawn => spawn.Id != TestSettings.Default.F_COIN);
-        spawn.Id = TestSettings.Default.F_COIN;
+        var spawn = FirstNormalSpawn(ticket, _ => true);
+        spawn.Id = TestSettings.Default.F_WHEEL;
     }
 
     private static void RemoveOneSpawn(TicketSerializer.TicketDto ticket)
@@ -1399,16 +1465,26 @@ public sealed class GameLogicCoverageTests
         int seed,
         ICustomProfileSettings actualSettings)
     {
-        var objectives = new ForwardObjectivePlanner(actualSettings).Resolve(input, seed + 1);
+        var policy = new ForwardWinningRoundPolicyPlanner(actualSettings).Plan(
+            ConfiguredCashWin(input, actualSettings),
+            seed);
+        if (!policy.IsValid) return (null, $"{policy.Status}: {policy.Detail}");
+
+        var objectives = new ForwardObjectivePlanner(actualSettings).Resolve(input, seed + 1, policy.Plan);
         if (!objectives.IsValid) return (null, $"{objectives.Status}: {objectives.Detail}");
 
         var budget = new ForwardFeatureBudgetPlanner(actualSettings).Plan(input, objectives.Objectives, seed + 2);
         if (!budget.IsValid) return (null, $"{budget.Status}: {budget.Detail}");
 
-        var timing = new ForwardFeatureTimingPlanner(actualSettings, seed + 3).Plan(budget.Budget);
+        var timing = new ForwardFeatureTimingPlanner(actualSettings, seed + 3).Plan(
+            budget.Budget,
+            objectives.Objectives);
         if (!timing.IsValid) return (null, $"{timing.Status}: {timing.Detail}");
 
-        var intents = new ForwardFeatureIntentPlanner(actualSettings, seed + 4).Plan(objectives.Objectives, timing.Timing);
+        var intents = new ForwardFeatureIntentPlanner(actualSettings, seed + 4).Plan(
+            objectives.Objectives,
+            timing.Timing,
+            budget.Budget);
         if (!intents.IsValid) return (null, $"{intents.Status}: {intents.Detail}");
 
         var frames = new ForwardTurnFramePlanner(actualSettings, seed + 5).Plan(
@@ -1456,6 +1532,15 @@ public sealed class GameLogicCoverageTests
         return adapted.Plan.Verified
             ? (adapted.Plan, "ok")
             : (null, "adapted plan was not verified");
+    }
+
+    private static decimal ConfiguredCashWin(MathInput input, ICustomProfileSettings settings)
+    {
+        return input.Targets.Keys.Sum(symbol =>
+        {
+            var tier = input.PrizeTiers?.GetValueOrDefault(symbol) ?? 0;
+            return settings.PrizeLadderRows[symbol - 1].Tiers[tier];
+        });
     }
 
     private static int AttemptSeed(int seed, int attempt)
@@ -1656,10 +1741,10 @@ public sealed class GameLogicCoverageTests
         new[]
         {
             new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 1, 2, 5 } },
-            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 2, 5, 10 } },
+            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 2, 4, 8 } },
             new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 5, 10, 25 } },
-            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 10, 25, 100 } },
-            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 100, 250, 1000 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 10, 20, 50 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 100, 200, 500 } },
             new PrizeLadderRow { Target = 30, Tiers = new decimal[] { 10000 } },
         };
 
@@ -1699,4 +1784,16 @@ public sealed class GameLogicCoverageTests
         }
         return result;
     }
+
+    private static Dictionary<int, IReadOnlyDictionary<int, decimal>> ConfiguredPrizeValues(
+        ICustomProfileSettings settings) =>
+        settings.PrizeLadderRows
+            .Select((row, index) => new
+            {
+                Symbol = index + 1,
+                Values = (IReadOnlyDictionary<int, decimal>)row.Tiers
+                    .Select((value, tier) => (value, tier))
+                    .ToDictionary(item => item.tier, item => item.value),
+            })
+            .ToDictionary(item => item.Symbol, item => item.Values);
 }

@@ -85,7 +85,7 @@ public sealed class CoinPusherTicketGenerator
 
         var actualSeed = seed ?? NextSeed();
         var requestedPrizeAmounts = prizeAmounts!.ToArray();
-        var maxAttempts = Math.Min(_settings.MaxPlanAttempts, 8);
+        var maxAttempts = Math.Max(1, _settings.MaxPlanAttempts);
         ForwardTicketGenerationResult? lastGeneration = null;
         string? lastValidationDetail = null;
         var lastSeed = actualSeed;

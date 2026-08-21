@@ -25,16 +25,19 @@ internal readonly struct ForwardNormalSpawnIntent
     internal ForwardNormalSpawnIntent(
         ForwardSymbolIntent collectIntent,
         int ledgerCollectionValue = 1,
-        int spawnStack = 1)
+        int spawnStack = 1,
+        int? latestCollectionTurn = null)
     {
         CollectIntent = collectIntent;
         LedgerCollectionValue = ledgerCollectionValue;
         SpawnStack = spawnStack;
+        LatestCollectionTurn = latestCollectionTurn;
     }
 
     internal ForwardSymbolIntent CollectIntent { get; }
     internal int LedgerCollectionValue { get; }
     internal int SpawnStack { get; }
+    internal int? LatestCollectionTurn { get; }
     internal bool RequiresCollected =>
         CollectIntent == ForwardSymbolIntent.MustProgressWin
         || CollectIntent == ForwardSymbolIntent.PreferNearMiss;
@@ -146,6 +149,7 @@ internal sealed class ForwardTurnAssembler
 
         var remainingPositions = preview.EmptyPositions
             .Except(featurePlacement.UsedPositions)
+            .Except(featurePlacement.AnchorSpawns.Select(spawn => (spawn.Row, spawn.Col)))
             .ToArray();
         var normalRequests = BuildNormalRequests(normalIntents, remainingPositions, futureTurns);
         if (!normalRequests.IsValid)
@@ -182,6 +186,7 @@ internal sealed class ForwardTurnAssembler
         }
 
         var spawns = featurePlacement.Spawns
+            .Concat(featurePlacement.AnchorSpawns)
             .Concat(normalSpawns.Spawns)
             .OrderBy(spawn => spawn.Row)
             .ThenBy(spawn => spawn.Col)
@@ -246,7 +251,6 @@ internal sealed class ForwardTurnAssembler
             .Where(item => item.Fate.IsCollected)
             .OrderBy(item => item.Fate.CollectedTurn)
             .ThenBy(_ => _rng.Next())
-            .Select(item => item.Position)
             .ToList();
         var residue = fates
             .Where(item => !item.Fate.IsCollected)
@@ -255,12 +259,21 @@ internal sealed class ForwardTurnAssembler
             .ToList();
 
         var requests = new List<ForwardSpawnCellRequest>(intents.Count);
-        foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresCollected)))
+        var collectedIntents = Shuffled(intents
+                .Where(intent => intent.RequiresCollected && intent.LatestCollectionTurn.HasValue))
+            .Concat(Shuffled(intents
+                .Where(intent => intent.RequiresCollected && !intent.LatestCollectionTurn.HasValue)));
+        foreach (var intent in collectedIntents)
         {
-            if (collected.Count == 0)
-                return CannotPlace(intent, "requires a future-collected cell");
-            var index = _rng.Next(collected.Count);
-            AddRequest(requests, collected[index], intent);
+            var eligible = collected
+                .Select((item, index) => (item, index))
+                .Where(candidate => !intent.LatestCollectionTurn.HasValue
+                    || candidate.item.Fate.CollectedTurn <= intent.LatestCollectionTurn.Value)
+                .ToArray();
+            if (eligible.Length == 0)
+                return CannotPlace(intent, $"requires a future-collected cell by turn {intent.LatestCollectionTurn?.ToString() ?? "any"}");
+            var index = eligible[_rng.Next(eligible.Length)].index;
+            AddRequest(requests, collected[index].Position, intent);
             collected.RemoveAt(index);
         }
 
@@ -275,12 +288,20 @@ internal sealed class ForwardTurnAssembler
 
         foreach (var intent in Shuffled(intents.Where(intent => !intent.RequiresCollected && !intent.RequiresResidue)))
         {
-            var targetList = collected.Count > 0 ? collected : residue;
-            if (targetList.Count == 0)
+            if (collected.Count == 0 && residue.Count == 0)
                 return CannotPlace(intent, "has no remaining cell");
-            var index = _rng.Next(targetList.Count);
-            AddRequest(requests, targetList[index], intent);
-            targetList.RemoveAt(index);
+            if (collected.Count > 0)
+            {
+                var index = _rng.Next(collected.Count);
+                AddRequest(requests, collected[index].Position, intent);
+                collected.RemoveAt(index);
+            }
+            else
+            {
+                var index = _rng.Next(residue.Count);
+                AddRequest(requests, residue[index], intent);
+                residue.RemoveAt(index);
+            }
         }
 
         return NormalRequestBuildResult.Ok(requests);

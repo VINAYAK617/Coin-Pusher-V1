@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoinPusherEngine.Tests;
 
@@ -24,6 +25,7 @@ public sealed class TicketCheckerHardeningTests
         {
             ("starting board contains feature id", AnyTicket, t => t.StartingBoard[0][0].Id = settings.F_WHEEL, "Schema"),
             ("starting board contains zero id", AnyTicket, t => t.StartingBoard[0][0].Id = 0, "Schema"),
+            ("starting board contains out-of-range coin id", AnyTicket, t => t.StartingBoard[0][0].Id = settings.PrizeLadderRows.Count + 1, "Schema"),
             ("pusher array contains null item", AnyTicket, t => t.Turns[0].Pushers[0] = null!, "Checker"),
             ("spawn array contains null item", AnyTicket, t => t.Turns[0].Spawns[0] = null!, "Checker"),
             ("spawn position outside board", AnyTicket, t => t.Turns[0].Spawns[0].Pos = settings.ROWS * settings.COLS, "Geometry"),
@@ -31,17 +33,22 @@ public sealed class TicketCheckerHardeningTests
             ("spawn removed", AnyTicket, RemoveFirstSpawn, "Geometry"),
             ("normal pusher below min", AnyTicket, t => t.Turns[0].Pushers[0].PushValue = 0, "Geometry"),
             ("normal spawn uses pusher-only id", AnyTicket, SetNormalSpawnToFlushId, "Schema"),
+            ("final residue uses out-of-range coin id", AnyTicket, SetFinalNormalSpawnOutOfRange, "Schema"),
+            ("final residue exceeds stack cap", AnyTicket, SetFinalNormalSpawnOversizedStack, "Schema"),
             ("declared win target changed", WinningTicket, t => t.WinInfo.WinSymbols[0].Target++, "Payout"),
             ("near-miss threshold made impossible", AnyTicketWithNearMiss, BreakNearMissThreshold, "WinInfo"),
+            ("near-miss threshold differs from configured ladder", AnyTicketWithNearMiss, BreakNearMissConfiguredThreshold, "WinInfo"),
             ("TotalSpins no longer matches turns", AnyTicket, t => t.WinInfo.TotalSpins++, "SpinCount"),
             ("board feature placed on final turn", AnyTicket, AddFinalTurnWheel, "Feature"),
             ("FLUSH/PUSH placed on final turn", AnyTicket, AddFinalTurnFlush, "Feature"),
             ("EXTRA_SPIN removed but bonus turn remains", ExtraSpinTicket, RemoveFirstExtraSpinToken, "Feature"),
             ("EXTRA_SPIN has invalid ConvertToId", ExtraSpinTicket, BreakFirstExtraSpinConvert, "Schema"),
             ("ReTrigger has more than one child", ExtraSpinTicket, AddTwoRetriggerChildren, "Schema"),
+            ("nested EXTRA_SPIN is not serializer-supported", ExtraSpinTicket, AddNestedExtraSpin, "Schema"),
             ("WHEEL stack value outside range", WheelTicket, t => FirstFeature(t, settings.F_WHEEL).WheelStackValue = settings.MAX_WHEEL_STACK_VALUE + 1, "Schema"),
             ("WHEEL symbol points at feature id", WheelTicket, t => FirstFeature(t, settings.F_WHEEL).WheelSymbolId = settings.F_XSPIN, "Schema"),
             ("PRIZE_UPGRADE missing upgrade value", PrizeUpgradeTicket, t => FirstFeature(t, settings.F_PRUP).UpgradePrizeValue = null, "Schema"),
+            ("PRIZE_UPGRADE value differs from sequential ladder tier", PrizeUpgradeTicket, BreakFirstPrizeUpgradeValue, "Feature"),
             ("framework CashWin mismatch", FrameworkWinningTicket, t => { }, "Framework"),
         };
 
@@ -64,6 +71,134 @@ public sealed class TicketCheckerHardeningTests
             var report = new TicketChecker(settings).CheckTicket(ticket);
             AssertRejected(report, testCase.Name, testCase.Category);
         }
+    }
+
+    [TestMethod]
+    public void CheckerEnforcesConfiguredPrizeUpgradeMaximum()
+    {
+        var ticket = PrizeUpgradeTicket();
+        var current = TestSettings.Default.PrizeUpgradeFeatureConfig;
+        var checkerSettings = new DefaultProfileSettings
+        {
+            PrizeUpgradeFeatureConfig = (current.P, 0, current.MinS, current.MaxS, current.Ord),
+        };
+
+        var report = new TicketChecker(checkerSettings).CheckTicket(ticket);
+
+        AssertRejected(report, "PRIZE_UPGRADE exceeds configured maximum", "Feature");
+        Assert.IsTrue(
+            report.Checks.Any(check =>
+                check.Result == TicketChecker.Status.Fail
+                && check.Name.Contains("PRIZE_UPGRADE count within max", StringComparison.Ordinal)),
+            string.Join(Environment.NewLine, report.Checks.Select(check => check.Detail)));
+    }
+
+    [TestMethod]
+    public void CheckerEnforcesConfiguredFeatureTurnWindow()
+    {
+        var ticket = WheelTicket();
+        var current = TestSettings.Default.WheelFeatureConfig;
+        var checkerSettings = new DefaultProfileSettings
+        {
+            WheelFeatureConfig = (current.P, current.Max, 98, 98, current.Ord),
+        };
+
+        var report = new TicketChecker(checkerSettings).CheckTicket(ticket);
+
+        AssertRejected(report, "WHEEL outside configured timing window", "Feature");
+        Assert.IsTrue(
+            report.Checks.Any(check =>
+                check.Result == TicketChecker.Status.Fail
+                && check.Name.Contains("timing", StringComparison.Ordinal)),
+            string.Join(Environment.NewLine, report.Checks.Select(check => check.Detail)));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsExtraGoCountOutsideResolvedPrizeBand()
+    {
+        var ticket = GenerateValid(new decimal[] { 100 }, 202608201);
+        var rules = TestSettings.Default.WinningRoundRules
+            .Select(rule => rule.MinWinInclusive == 50m
+                ? CopyRule(rule, extraGoCounts: new[] { 2 })
+                : CopyRule(rule))
+            .ToArray();
+        var report = new TicketChecker(new DefaultProfileSettings { WinningRoundRules = rules })
+            .CheckTicket(ticket);
+
+        AssertRejected(report, "wrong prize-band Extra Go count", "WinningRound");
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail
+            && check.Name == "Extra Go count matches prize band"));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsWinningCompletionOutsideResolvedPrizeBand()
+    {
+        TicketSerializer.TicketDto? ticket = null;
+        for (var seed = 202608210; seed < 202608260; seed++)
+        {
+            var candidate = GenerateValid(new decimal[] { 1 }, seed);
+            if (candidate.WinInfo.TotalSpins == TestSettings.Default.BASE_SPINS)
+            {
+                ticket = candidate;
+                break;
+            }
+        }
+
+        Assert.IsNotNull(ticket, "test needs a one-unit win ticket with no Extra Go");
+        var rules = TestSettings.Default.WinningRoundRules
+            .Select(rule => rule.MinWinInclusive == 1m
+                ? CopyRule(rule, minWinningTurn: 6, maxWinningTurn: 6)
+                : CopyRule(rule))
+            .ToArray();
+        var report = new TicketChecker(new DefaultProfileSettings { WinningRoundRules = rules })
+            .CheckTicket(ticket);
+
+        AssertRejected(report, "wrong prize-band completion turn", "WinningRound");
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail
+            && check.Name == "All winning symbols complete in allowed round"));
+    }
+
+    [TestMethod]
+    public void JsonSerializerKeepsZeroSpawnPositionAndCheckerRejectsMissingSpawnPos()
+    {
+        var settings = TestSettings.Default;
+        TicketSerializer.TicketDto? ticket = null;
+        string? json = null;
+
+        for (var seed = 202608180; seed < 202608260; seed++)
+        {
+            var result = new CoinPusherTicketJsonGenerator(settings).Generate(new decimal[] { 1 }, seed);
+            Assert.IsTrue(result.IsValid, $"generation failed seed={seed}: {result.Detail}");
+            if (result.Json!.Contains("\"Pos\":0"))
+            {
+                ticket = result.Ticket;
+                json = result.Json;
+                break;
+            }
+        }
+
+        Assert.IsNotNull(ticket, "test needs a generated ticket with at least one spawn at Pos=0");
+        Assert.IsNotNull(json, "test needs serialized JSON");
+        StringAssert.Contains(json!, "\"Pos\":0");
+
+        var root = JObject.Parse(json!);
+        var firstZeroPosSpawn = root["Turns"]!
+            .SelectMany(turn => turn["Spawns"]!)
+            .OfType<JObject>()
+            .First(spawn => spawn["Pos"]?.Value<int>() == 0);
+        firstZeroPosSpawn.Property("Pos")!.Remove();
+
+        var resultAfterMutation = new TicketChecker(settings).CheckJson(root.ToString(Formatting.None));
+
+        Assert.IsFalse(resultAfterMutation.IsValid, "missing spawn Pos should not deserialize as implicit position 0");
+        Assert.IsTrue(
+            resultAfterMutation.Errors.Any(error =>
+                error.Contains(".Spawns[", StringComparison.Ordinal)
+                && error.Contains(".Pos", StringComparison.Ordinal)
+                && error.Contains("required JSON property is missing", StringComparison.Ordinal)),
+            string.Join(Environment.NewLine, resultAfterMutation.Errors));
     }
 
     [TestMethod]
@@ -255,6 +390,18 @@ public sealed class TicketCheckerHardeningTests
         spawn.Id = TestSettings.Default.F_FLUSH_ID;
     }
 
+    private static void SetFinalNormalSpawnOutOfRange(TicketSerializer.TicketDto ticket)
+    {
+        var spawn = ticket.Turns[^1].Spawns.First(item => item.Feature == null);
+        spawn.Id = TestSettings.Default.PrizeLadderRows.Count + 1;
+    }
+
+    private static void SetFinalNormalSpawnOversizedStack(TicketSerializer.TicketDto ticket)
+    {
+        var spawn = ticket.Turns[^1].Spawns.First(item => item.Feature == null);
+        spawn.Stack = TestSettings.Default.MAX_COIN_STACK + 1;
+    }
+
     private static void BreakNearMissThreshold(TicketSerializer.TicketDto ticket)
     {
         if (ticket.WinInfo.NonWinSymbols.Length == 0)
@@ -265,6 +412,18 @@ public sealed class TicketCheckerHardeningTests
 
         var nearMiss = ticket.WinInfo.NonWinSymbols[0];
         nearMiss.MaxThreshold = nearMiss.MinTarget;
+    }
+
+    private static void BreakNearMissConfiguredThreshold(TicketSerializer.TicketDto ticket)
+    {
+        var nearMiss = ticket.WinInfo.NonWinSymbols[0];
+        nearMiss.MaxThreshold = TestSettings.Default.SymbolFillCap(nearMiss.Id) + 1;
+    }
+
+    private static void BreakFirstPrizeUpgradeValue(TicketSerializer.TicketDto ticket)
+    {
+        var feature = FirstFeature(ticket, TestSettings.Default.F_PRUP);
+        feature.UpgradePrizeValue = feature.UpgradePrizeValue.GetValueOrDefault() + 123m;
     }
 
     private static void AddFinalTurnWheel(TicketSerializer.TicketDto ticket)
@@ -321,6 +480,35 @@ public sealed class TicketCheckerHardeningTests
                 UpgradePrizeValue = 1m,
                 ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
             },
+            new TicketSerializer.FeatureDto
+            {
+                FeatureId = TestSettings.Default.F_XSPIN,
+                ConvertToId = TestSettings.Default.F_COIN,
+                ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
+            },
+        };
+    }
+
+    private static WinningRoundRule CopyRule(
+        WinningRoundRule rule,
+        IReadOnlyList<int>? extraGoCounts = null,
+        int? minWinningTurn = null,
+        int? maxWinningTurn = null) =>
+        new()
+        {
+            MinWinInclusive = rule.MinWinInclusive,
+            MaxWinExclusive = rule.MaxWinExclusive,
+            ExtraGoCounts = extraGoCounts ?? rule.ExtraGoCounts.ToArray(),
+            MinWinningTurn = minWinningTurn ?? rule.MinWinningTurn,
+            MaxWinningTurn = maxWinningTurn ?? rule.MaxWinningTurn,
+        };
+
+    private static void AddNestedExtraSpin(TicketSerializer.TicketDto ticket)
+    {
+        var feature = FirstFeature(ticket, TestSettings.Default.F_XSPIN);
+        feature.ConvertToId = TestSettings.Default.F_XSPIN;
+        feature.ReTrigger = new[]
+        {
             new TicketSerializer.FeatureDto
             {
                 FeatureId = TestSettings.Default.F_XSPIN,

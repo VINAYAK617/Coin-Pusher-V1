@@ -242,7 +242,7 @@ internal sealed class ForwardFeatureSpawnPlanner
         if (request.Kind == ForwardFeatureKind.Wheel)
         {
             var minStack = _settings.MIN_WHEEL_STACK_VALUE + 1;
-            var maxStack = _settings.MAX_WHEEL_STACK_VALUE + 1;
+            var maxStack = Math.Min(_settings.MAX_COIN_STACK, Math.Min(_settings.MAX_WHEEL_STACK_VALUE, 3) + 1);
             if (!request.WheelSymbol.HasValue
                 || !request.WheelStack.HasValue
                 || !ValidSymbol(request.WheelSymbol.Value)

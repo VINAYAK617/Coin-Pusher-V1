@@ -133,8 +133,9 @@ internal sealed class ForwardTurnRealizer
             .ToHashSet();
         var normalPositions = preview.EmptyPositions
             .Except(featurePlacement.UsedPositions)
+            .Except(featurePlacement.AnchorSpawns.Select(spawn => (spawn.Row, spawn.Col)))
             .ToArray();
-        var normalIntentResult = new ForwardNormalIntentPlanner(_settings).Plan(
+        var normalIntentResult = new ForwardNormalIntentPlanner(_settings, _rng.Next()).Plan(
             frame.Turn,
             objectives,
             normalPositions,
@@ -191,6 +192,7 @@ internal sealed class ForwardTurnRealizer
         }
 
         var spawns = featurePlacement.Spawns
+            .Concat(featurePlacement.AnchorSpawns)
             .Concat(normalSpawns.Spawns)
             .OrderBy(spawn => spawn.Row)
             .ThenBy(spawn => spawn.Col)
@@ -249,7 +251,6 @@ internal sealed class ForwardTurnRealizer
             .Where(item => item.Fate.IsCollected)
             .OrderBy(item => item.Fate.CollectedTurn)
             .ThenBy(_ => _rng.Next())
-            .Select(item => item.Position)
             .ToList();
         var residue = fates
             .Where(item => !item.Fate.IsCollected)
@@ -258,12 +259,23 @@ internal sealed class ForwardTurnRealizer
             .ToList();
 
         var requests = new List<ForwardSpawnCellRequest>(intents.Count);
-        foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresCollected)))
+        var collectedIntents = Shuffled(intents
+                .Where(intent => intent.RequiresCollected && intent.LatestCollectionTurn.HasValue))
+            .Concat(Shuffled(intents
+                .Where(intent => intent.RequiresCollected && !intent.LatestCollectionTurn.HasValue)));
+        foreach (var intent in collectedIntents)
         {
-            if (collected.Count == 0)
-                return NormalRequestBuildResult.Fail($"{intent.CollectIntent} requires a future-collected cell");
-            var index = _rng.Next(collected.Count);
-            AddRequest(requests, collected[index], intent);
+            var eligible = collected
+                .Select((item, index) => (item, index))
+                .Where(candidate => !intent.LatestCollectionTurn.HasValue
+                    || candidate.item.Fate.CollectedTurn <= intent.LatestCollectionTurn.Value)
+                .ToArray();
+            if (eligible.Length == 0)
+                return NormalRequestBuildResult.Fail(
+                    $"{intent.CollectIntent} requires a future-collected cell by turn " +
+                    $"{intent.LatestCollectionTurn?.ToString() ?? "any"}");
+            var index = eligible[_rng.Next(eligible.Length)].index;
+            AddRequest(requests, collected[index].Position, intent);
             collected.RemoveAt(index);
         }
 
@@ -278,12 +290,20 @@ internal sealed class ForwardTurnRealizer
 
         foreach (var intent in Shuffled(intents.Where(intent => !intent.RequiresCollected && !intent.RequiresResidue)))
         {
-            var targetList = collected.Count > 0 ? collected : residue;
-            if (targetList.Count == 0)
+            if (collected.Count == 0 && residue.Count == 0)
                 return NormalRequestBuildResult.Fail($"{intent.CollectIntent} has no remaining cell");
-            var index = _rng.Next(targetList.Count);
-            AddRequest(requests, targetList[index], intent);
-            targetList.RemoveAt(index);
+            if (collected.Count > 0)
+            {
+                var index = _rng.Next(collected.Count);
+                AddRequest(requests, collected[index].Position, intent);
+                collected.RemoveAt(index);
+            }
+            else
+            {
+                var index = _rng.Next(residue.Count);
+                AddRequest(requests, residue[index], intent);
+                residue.RemoveAt(index);
+            }
         }
 
         return NormalRequestBuildResult.Ok(requests);

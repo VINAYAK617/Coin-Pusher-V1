@@ -2,7 +2,9 @@ namespace CoinPusherEngine;
 
 internal static class WMath
 {
-    // Best public WheelStackValue (1..3) that maximizes safe WHEEL contribution
+    private const int MaxPublicWheelStackValue = 3;
+
+    // Best public WheelStackValue that maximizes safe WHEEL contribution
     // without exceeding the target. Public value N means collected stack 1 + N.
     internal static int BestStackValue(int target)
     {
@@ -26,7 +28,7 @@ internal static class WMath
 
     internal static IEnumerable<int> ValidStackValues(int target)
     {
-        var maxValue = Math.Min(Settings.MAX_WHEEL_STACK_VALUE, Settings.MAX_COIN_STACK - 1);
+        var maxValue = Math.Min(Math.Min(Settings.MAX_WHEEL_STACK_VALUE, Settings.MAX_COIN_STACK - 1), MaxPublicWheelStackValue);
         for (int value = Settings.MIN_WHEEL_STACK_VALUE; value <= maxValue; value++)
         {
             int stack = StackFromValue(value);

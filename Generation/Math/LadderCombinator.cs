@@ -401,7 +401,6 @@ public sealed class LadderCombinator
         var fillSymbols = Enumerable.Range(1, maxSym)
             .Except(targets.Keys)
             .ToArray();
-        if (fillSymbols.Length < 2) return false;
 
         var maxWheels = Math.Min(_settings.WheelFeatureConfig.Max, list.Count);
         var maxFlushes = Math.Min(_settings.FlushFeatureConfig.Max, _settings.COLS - 1);
@@ -413,18 +412,14 @@ public sealed class LadderCombinator
             {
                 for (var extras = 0; extras <= maxExtras; extras++)
                 {
-                    var totalSpins = Settings.BASE_SPINS + extras;
-                    var wheelFireSpins = Math.Min(wheels, Math.Max(0, totalSpins - 2));
-                    var physWins = CapacityAnalyzer.PhysicalWins(targets, wheels);
-                    var tokenLoad = wheels + extras + requiredPrizeUpgrades;
+                    var totalSpins = _settings.BASE_SPINS + extras;
+                    var physWins = CapacityAnalyzer.PhysicalWins(targets, wheels, _settings);
 
-                    if (CapacityAnalyzer.IsFeasible(
+                    if (HasCollectionEnvelope(
                             physWins,
                             totalSpins,
                             fillSymbols,
-                            tokenLoad,
-                            flushes,
-                            wheelFireSpins))
+                            flushes))
                     {
                         return true;
                     }
@@ -433,6 +428,27 @@ public sealed class LadderCombinator
         }
 
         return false;
+    }
+
+    private bool HasCollectionEnvelope(
+        int requiredWinCells,
+        int totalSpins,
+        IReadOnlyList<int> fillSymbols,
+        int flushTokens)
+    {
+        var normalMin = _settings.COLS * _settings.MIN_PUSH;
+        var normalMax = _settings.COLS * _settings.MAX_PUSH;
+        var flushMinBonus = _settings.ROWS - _settings.MIN_PUSH;
+        var flushMaxBonus = _settings.ROWS - _settings.MAX_PUSH;
+
+        var minCollectibleCells = (totalSpins * normalMin) + (flushTokens * flushMinBonus);
+        var maxCollectibleCells = (totalSpins * normalMax) + (flushTokens * flushMaxBonus);
+        var maxFillerCollections = fillSymbols.Sum(symbol => Math.Max(0, _settings.SymbolFillCap(symbol) - 1));
+
+        var minUsableCollections = Math.Max(minCollectibleCells, requiredWinCells);
+        var maxUsableCollections = Math.Min(maxCollectibleCells, requiredWinCells + maxFillerCollections);
+
+        return minUsableCollections <= maxUsableCollections;
     }
 
     /// <summary>
@@ -610,7 +626,7 @@ public sealed class LadderCombinator
     }
 
     /// <summary>
-    /// BaseSpins is always fixed at Settings.BASE_SPINS (=5) — never computed from physWins
+    /// BaseSpins is always fixed at the configured BASE_SPINS — never computed from physWins
     /// or filler capacity. Any additional spin capacity needed comes from the
     /// EXTRA_SPIN feature (decided later, in Planner.ResolveFeatures, alongside
     /// WHEEL/FLUSH), not from this method.
@@ -631,6 +647,9 @@ public sealed class LadderCombinator
         return _settings.BASE_SPINS;
     }
 
-    private int SymbolPoolSizeFor(int targetCount) =>
-        Math.Max(_rows.Count, targetCount + 2);
+    private int SymbolPoolSizeFor(int targetCount)
+    {
+        _ = targetCount;
+        return _rows.Count;
+    }
 }

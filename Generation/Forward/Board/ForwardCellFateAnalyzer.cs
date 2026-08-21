@@ -16,14 +16,19 @@ internal enum ForwardCellFateKind
 
 internal readonly struct ForwardFutureTurn
 {
-    internal ForwardFutureTurn(int turnNumber, ForwardTurnShape shape)
+    internal ForwardFutureTurn(
+        int turnNumber,
+        ForwardTurnShape shape,
+        IReadOnlyList<ForwardFeatureIntent>? featureIntents = null)
     {
         TurnNumber = turnNumber;
         Shape = shape;
+        FeatureIntents = featureIntents ?? Array.Empty<ForwardFeatureIntent>();
     }
 
     internal int TurnNumber { get; }
     internal ForwardTurnShape Shape { get; }
+    internal IReadOnlyList<ForwardFeatureIntent> FeatureIntents { get; }
 }
 
 internal readonly struct ForwardCellFate

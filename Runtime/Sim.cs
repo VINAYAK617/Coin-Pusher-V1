@@ -13,47 +13,54 @@ namespace CoinPusherEngine;
 /// </summary>
 internal static class Sim
 {
-    internal static Dictionary<int, int> Run(GamePlan plan)
+    internal static Dictionary<int, int> Run(GamePlan plan) =>
+        Run(plan, Settings);
+
+    internal static Dictionary<int, int> Run(GamePlan plan, ICustomProfileSettings settings)
     {
+        if (settings == null) throw new ArgumentNullException(nameof(settings));
         var totals   = new Dictionary<int, int>();
-        var board    = Grid.Clone(plan.Spins[0].Board);
-        int fallback = plan.FillSyms.Count > 0 ? plan.FillSyms[0] : Settings.F_COIN;
+        var board    = CloneBoard(plan.Spins[0].Board, settings);
+        int fallback = plan.FillSyms.Count > 0 ? plan.FillSyms[0] : settings.F_COIN;
 
         for (int i = 0; i < plan.Spins.Count; i++)
         {
             var sp   = plan.Spins[i];
             var next = i + 1 < plan.Spins.Count ? plan.Spins[i + 1] : null;
 
-            FlatStale(board);
-            Collect(board, sp, totals);
-            board = Grid.RotCW(board);
+            FlatStale(board, settings);
+            Collect(board, sp, totals, settings);
+            board = RotCW(board, settings);
             ApplySpawns(board, sp);
-            FireAll(board, sp, next, fallback);
+            FireAll(board, sp, next, fallback, settings);
         }
         return totals;
     }
 
     // ── Phase 2: Collect ───────────────────────────────────────────────────
-    private static void Collect(Cell?[,] board, SpinPlan sp, Dictionary<int, int> totals)
+    private static void Collect(
+        Cell?[,] board,
+        SpinPlan sp,
+        Dictionary<int, int> totals,
+        ICustomProfileSettings settings)
     {
-        for (int col = 0; col < Settings.COLS; col++)
+        for (int col = 0; col < settings.COLS; col++)
         {
             if (sp.Flush[col])
             {
-                var ctx = new FireCtx { Board = board, Col = col, Fp = new FP() };
-                foreach (var cell in FeatReg.Get("FLUSH").Collect(ctx))
-                    Acc(totals, cell.Sym, cell.Stack);
+                for (int row = 0; row < settings.ROWS; row++)
+                {
+                    Acc(totals, board[row, col], settings);
+                    board[row, col] = null;
+                }
             }
             else
             {
                 int push = sp.Push[col];
-                for (int r = Settings.ROWS - push; r < Settings.ROWS; r++)
-                {
-                    if (board[r, col] != null)
-                        Acc(totals, board[r, col]!.Sym, board[r, col]!.Stack);
-                }
+                for (int r = settings.ROWS - push; r < settings.ROWS; r++)
+                    Acc(totals, board[r, col], settings);
 
-                for (int r = Settings.ROWS - 1; r >= 0; r--)
+                for (int r = settings.ROWS - 1; r >= 0; r--)
                 {
                     int src = r - push;
                     board[r, col] = src >= 0 ? board[src, col]?.Clone() : null;
@@ -65,35 +72,45 @@ internal static class Sim
     // ── Phase 5: FireAll ───────────────────────────────────────────────────
     internal static void FireAll(Cell?[,] board, SpinPlan sp, SpinPlan? next, int fallback)
     {
-        FireFeaturePass(board, next, fallback, wheelPass: false);
-        FireFeaturePass(board, next, fallback, wheelPass: true);
+        FireAll(board, sp, next, fallback, Settings);
     }
 
-    private static void FireFeaturePass(Cell?[,] board, SpinPlan? next, int fallback, bool wheelPass)
+    internal static void FireAll(
+        Cell?[,] board,
+        SpinPlan sp,
+        SpinPlan? next,
+        int fallback,
+        ICustomProfileSettings settings)
+    {
+        FireFeaturePass(board, next, fallback, wheelPass: false, settings);
+        FireFeaturePass(board, next, fallback, wheelPass: true, settings);
+    }
+
+    private static void FireFeaturePass(
+        Cell?[,] board,
+        SpinPlan? next,
+        int fallback,
+        bool wheelPass,
+        ICustomProfileSettings settings)
     {
         bool any;
         do
         {
             any = false;
-            for (int r = 0; r < Settings.ROWS; r++)
+            for (int r = 0; r < settings.ROWS; r++)
             {
-                for (int c = 0; c < Settings.COLS; c++)
+                for (int c = 0; c < settings.COLS; c++)
                 {
                     var fc = board[r, c];
                     if (fc?.IsFeat != true) continue;
 
-                    Feat? feat = fc.FeatId != null && FeatReg.Has(fc.FeatId)
-                                 ? FeatReg.Get(fc.FeatId)
-                                 : FeatReg.HasSym(fc.Sym) ? FeatReg.GetSym(fc.Sym) : null;
-
-                    var isWheel = feat?.Id == "WHEEL" || fc.Sym == Settings.F_WHEEL;
+                    var isWheel = fc.Sym == settings.F_WHEEL || fc.FeatId == "WHEEL";
                     if (isWheel != wheelPass) continue;
 
-                    if (feat == null) { board[r, c] = Cvt(fc); any = true; continue; }
+                    if (isWheel)
+                        FireWheel(board, fc.Fp, settings);
 
-                    feat.Fire(new FireCtx { Board=board, Col=c, Fp=fc.Fp ?? new FP { FeatId=feat.Id } });
-
-                    board[r, c] = Cvt(fc);
+                    board[r, c] = Cvt(fc, settings);
                     any = true;
                 }
             }
@@ -101,9 +118,26 @@ internal static class Sim
         while (any && board.Cast<Cell?>().Any(x =>
         {
             if (x?.IsFeat != true) return false;
-            var isWheel = x.Sym == Settings.F_WHEEL || x.FeatId == "WHEEL";
+            var isWheel = x.Sym == settings.F_WHEEL || x.FeatId == "WHEEL";
             return isWheel == wheelPass;
         }));
+    }
+
+    private static void FireWheel(Cell?[,] board, FP? fp, ICustomProfileSettings settings)
+    {
+        int sym = fp?.WheelSym ?? 0;
+        int stack = fp?.WheelStack ?? 1;
+        if (sym == 0 || stack <= 1) return;
+
+        for (int row = 0; row < settings.ROWS; row++)
+        {
+            for (int col = 0; col < settings.COLS; col++)
+            {
+                var cell = board[row, col];
+                if (cell != null && !cell.IsFeat && cell.Sym == sym)
+                    cell.Stack = Math.Min(settings.MAX_COIN_STACK, cell.Stack + stack - 1);
+            }
+        }
     }
 
     private static void ApplySpawns(Cell?[,] board, SpinPlan sp)
@@ -117,46 +151,73 @@ internal static class Sim
     // ── Phase 1: FlatStale ─────────────────────────────────────────────────
     internal static void FlatStale(Cell?[,] board)
     {
-        for (int r = 0; r < Settings.ROWS; r++)
+        FlatStale(board, Settings);
+    }
+
+    internal static void FlatStale(Cell?[,] board, ICustomProfileSettings settings)
+    {
+        for (int r = 0; r < settings.ROWS; r++)
         {
-            for (int c = 0; c < Settings.COLS; c++)
+            for (int c = 0; c < settings.COLS; c++)
             {
                 var cell = board[r, c];
                 if (cell?.IsFeat != true) continue;
-                board[r, c] = Cvt(cell);
+                board[r, c] = Cvt(cell, settings);
             }
         }
     }
 
-    private static void Acc(Dictionary<int, int> d, int sym, int n)
+    private static void Acc(Dictionary<int, int> totals, Cell? cell, ICustomProfileSettings settings)
     {
-        if (Settings.IsFeat(sym)) return;
-        d.TryGetValue(sym, out int ex);
-        d[sym] = ex + n;
+        if (cell == null || settings.IsFeat(cell.Sym)) return;
+        totals.TryGetValue(cell.Sym, out int existing);
+        totals[cell.Sym] = existing + Math.Max(1, cell.Stack);
     }
 
-    private static Cell Cvt(Cell fc)
+    private static Cell Cvt(Cell fc, ICustomProfileSettings settings)
     {
-        int id = RequireConvertSymbol(fc);
+        int id = RequireConvertSymbol(fc, settings);
         var converted = Grid.Norm(id);
-        if ((fc.Sym == Settings.F_WHEEL || fc.FeatId == "WHEEL")
+        if ((fc.Sym == settings.F_WHEEL || fc.FeatId == "WHEEL")
             && fc.Fp?.WheelSym == id)
         {
             converted.Stack = Math.Min(
-                Settings.MAX_COIN_STACK,
+                settings.MAX_COIN_STACK,
                 Math.Max(1, fc.Fp?.WheelStack ?? 1));
         }
 
         return converted;
     }
 
-    private static int RequireConvertSymbol(Cell fc)
+    private static int RequireConvertSymbol(Cell fc, ICustomProfileSettings settings)
     {
-        if (fc.CvtSym > 0 && !Settings.IsFeat(fc.CvtSym))
+        if (fc.CvtSym > 0 && !settings.IsFeat(fc.CvtSym))
             return fc.CvtSym;
 
         throw new InvalidOperationException(
             $"Feature symbol {fc.Sym} has invalid ConvertToId={fc.CvtSym}; " +
             "feature conversion must target a normal symbol.");
+    }
+
+    private static Cell?[,] CloneBoard(Cell?[,] source, ICustomProfileSettings settings)
+    {
+        var clone = new Cell?[settings.ROWS, settings.COLS];
+        for (int row = 0; row < settings.ROWS; row++)
+        {
+            for (int col = 0; col < settings.COLS; col++)
+                clone[row, col] = source[row, col]?.Clone();
+        }
+        return clone;
+    }
+
+    private static Cell?[,] RotCW(Cell?[,] source, ICustomProfileSettings settings)
+    {
+        var rotated = new Cell?[settings.ROWS, settings.COLS];
+        for (int row = 0; row < settings.ROWS; row++)
+        {
+            for (int col = 0; col < settings.COLS; col++)
+                rotated[col, settings.ROWS - 1 - row] = source[row, col]?.Clone();
+        }
+        return rotated;
     }
 }

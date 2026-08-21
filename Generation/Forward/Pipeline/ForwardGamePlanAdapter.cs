@@ -83,7 +83,7 @@ internal sealed class ForwardGamePlanAdapter
             Verified = false,
         };
 
-        var replay = Sim.Run(plan);
+        var replay = Sim.Run(plan, _settings);
         var mismatch = CompareCollections(
             replay,
             pipelinePlan.ActualCollected,

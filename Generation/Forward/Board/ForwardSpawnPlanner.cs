@@ -98,25 +98,43 @@ internal sealed class ForwardSpawnPlanner
             orderedCells.Add((cell, fate, order++));
         }
 
+        var chronological = orderedCells
+            .OrderBy(item => item.Fate.IsCollected ? item.Fate.CollectedTurn!.Value : int.MaxValue)
+            .ThenBy(item => item.Order)
+            .ToArray();
+        var collecting = chronological
+            .Where(item => item.Fate.IsCollected)
+            .Select(item => new ForwardCollectingSpawnRequest(item.Cell, item.Fate, item.Order))
+            .ToArray();
+        var initialLedger = _selector.SnapshotLedger();
+        var assignment = new ForwardNormalSpawnAssignmentPlanner(_selector).Plan(
+            collecting,
+            (item, symbol) => EffectiveCollectionValue(
+                symbol,
+                item.Cell.LedgerCollectionValue,
+                spawnTurn,
+                item.Fate.CollectedTurn,
+                wheelImpacts));
+        if (!assignment.IsValid)
+        {
+            return Fail(
+                ForwardSpawnPlanStatus.NoSafeSymbolForCollectingCell,
+                assignment.Detail);
+        }
+
         var spawns = new List<ForwardSpawn>(cells.Count);
-        foreach (var (cell, fate, _) in orderedCells
-                     .OrderBy(item => item.Fate.IsCollected ? item.Fate.CollectedTurn!.Value : int.MaxValue)
-                     .ThenBy(item => item.Order))
+        foreach (var (cell, fate, originalOrder) in chronological)
         {
             var selection = fate.IsCollected
-                ? _selector.ChooseAndCollect(
-                    cell.CollectIntent,
-                    symbol => EffectiveCollectionValue(
-                        symbol,
-                        cell.LedgerCollectionValue,
-                        spawnTurn,
-                        fate.CollectedTurn,
-                        wheelImpacts),
-                    fate.CollectedTurn)
+                ? new ForwardSymbolSelection(
+                    ForwardSymbolSelectionStatus.Valid,
+                    assignment.SymbolsByOrder[originalOrder],
+                    "assigned atomically")
                 : _selector.ChooseResidue();
 
             if (!selection.IsValid)
             {
+                _selector.RestoreLedger(initialLedger);
                 return Fail(
                     fate.IsCollected
                         ? ForwardSpawnPlanStatus.NoSafeSymbolForCollectingCell
@@ -153,7 +171,11 @@ internal sealed class ForwardSpawnPlanner
             if (wheel.FireTurn < spawnTurn) continue;
             if (wheel.FireTurn >= collectionTurn.Value) continue;
 
-            value = Math.Min(_settings.MAX_COIN_STACK, value + wheel.StackAdd);
+            var next = value + wheel.StackAdd;
+            if (next > _settings.MAX_COIN_STACK)
+                return 0;
+
+            value = next;
         }
 
         return value;

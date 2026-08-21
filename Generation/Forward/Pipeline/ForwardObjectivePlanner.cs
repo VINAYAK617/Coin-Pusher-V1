@@ -14,6 +14,7 @@ internal enum ForwardObjectiveStatus
     NonWinOverlapsWin,
     InvalidNonWinTarget,
     InvalidNonWinPrizeTier,
+    WinningPolicyMismatch,
 }
 
 internal sealed class ForwardObjectives
@@ -29,7 +30,9 @@ internal sealed class ForwardObjectives
         IReadOnlyDictionary<int, int> nonWinPrizeTiers,
         int maxSymbol,
         bool isNoWin,
-        int topPrizeSymbol)
+        int topPrizeSymbol,
+        bool nearMissTargetsAreExplicit,
+        ForwardWinningRoundPlan? winningRoundPlan = null)
     {
         WinTargets = winTargets;
         WinSymbols = winSymbols;
@@ -42,6 +45,8 @@ internal sealed class ForwardObjectives
         MaxSymbol = maxSymbol;
         IsNoWin = isNoWin;
         TopPrizeSymbol = topPrizeSymbol;
+        NearMissTargetsAreExplicit = nearMissTargetsAreExplicit;
+        WinningRoundPlan = winningRoundPlan;
     }
 
     internal IReadOnlyDictionary<int, int> WinTargets { get; }
@@ -55,6 +60,8 @@ internal sealed class ForwardObjectives
     internal int MaxSymbol { get; }
     internal bool IsNoWin { get; }
     internal int TopPrizeSymbol { get; }
+    internal bool NearMissTargetsAreExplicit { get; }
+    internal ForwardWinningRoundPlan? WinningRoundPlan { get; }
 }
 
 internal sealed class ForwardObjectiveResult
@@ -84,7 +91,10 @@ internal sealed class ForwardObjectivePlanner
         _settings = settings;
     }
 
-    internal ForwardObjectiveResult Resolve(MathInput? input, int seed)
+    internal ForwardObjectiveResult Resolve(
+        MathInput? input,
+        int seed,
+        ForwardWinningRoundPlan? winningRoundPlan = null)
     {
         if (input == null)
             return Fail(ForwardObjectiveStatus.MissingInput, "MathInput is null");
@@ -117,6 +127,13 @@ internal sealed class ForwardObjectivePlanner
         }
 
         var winSymbols = winTargets.Keys.OrderBy(symbol => symbol).ToArray();
+        if (winningRoundPlan != null && winningRoundPlan.IsNoWin != (winSymbols.Length == 0))
+        {
+            return Fail(
+                ForwardObjectiveStatus.WinningPolicyMismatch,
+                $"winning policy total={winningRoundPlan.TotalWin} noWin={winningRoundPlan.IsNoWin}, " +
+                $"but resolved winning-symbol count={winSymbols.Length}");
+        }
         var fillSymbols = Enumerable.Range(1, maxSymbol)
             .Where(symbol => !winTargets.ContainsKey(symbol))
             .ToArray();
@@ -199,7 +216,9 @@ internal sealed class ForwardObjectivePlanner
             nonWinPrizeTiers,
             maxSymbol,
             winTargets.Count == 0,
-            TopPrizeSymbol(prizeValues));
+            TopPrizeSymbol(prizeValues),
+            input.NonWinTargets != null,
+            winningRoundPlan);
 
         return new ForwardObjectiveResult(ForwardObjectiveStatus.Valid, "ok", objectives);
     }

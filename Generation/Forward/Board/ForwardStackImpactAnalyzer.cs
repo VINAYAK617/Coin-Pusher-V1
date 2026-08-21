@@ -7,6 +7,7 @@ internal enum ForwardStackImpactStatus
     InvalidSpawnStack,
     InvalidCollectionTurn,
     InvalidWheel,
+    StackOverflow,
 }
 
 internal readonly struct ForwardWheelImpact
@@ -133,7 +134,18 @@ internal sealed class ForwardStackImpactAnalyzer
             if (wheel.FireTurn < spawnTurn) continue;
             if (wheel.FireTurn >= collectionTurn.Value) continue;
 
-            var next = Math.Min(_settings.MAX_COIN_STACK, stack + wheel.StackAdd);
+            var next = stack + wheel.StackAdd;
+            if (next > _settings.MAX_COIN_STACK)
+            {
+                return Fail(
+                    ForwardStackImpactStatus.StackOverflow,
+                    symbol,
+                    spawnStack,
+                    collectionTurn.Value,
+                    stack,
+                    $"symbol {symbol} stack would become {next}, above max {_settings.MAX_COIN_STACK}");
+            }
+
             if (next != stack)
                 applied++;
             stack = next;

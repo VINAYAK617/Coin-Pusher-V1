@@ -78,7 +78,8 @@ internal sealed class ForwardTicketGenerator
             {
                 Formatting = Formatting.None,
                 NullValueHandling = NullValueHandling.Ignore,
-                DefaultValueHandling = DefaultValueHandling.Ignore,
+                // Pos=0 is a valid board position and must never be omitted.
+                DefaultValueHandling = DefaultValueHandling.Include,
             });
         }
         catch (Exception ex)

@@ -41,10 +41,13 @@ namespace GameEngine
         (double P, int Max, int MinS, int MaxS, int Ord) PrizeUpgradeFeatureConfig { get; }
 
         IReadOnlyList<PrizeLadderRow> PrizeLadderRows { get; }
+        IReadOnlyList<WinningRoundRule> WinningRoundRules { get; }
 
         double PWheelStackValue1 { get; }
         double PWheelStackValue2 { get; }
         double PWheelRepeatOptional { get; }
+        double PWheelStackCollection { get; }
+        double PWheelPreferDenseTarget { get; }
 
         double WExpBalanced { get; }
         double WExpNearMiss { get; }
@@ -66,6 +69,7 @@ namespace GameEngine
         double PWinLateCompletion { get; }
         int WinLateTailSpins { get; }
         int WinLateMinTail { get; }
+        int MaxDeferredCollectionsPerTurn { get; }
         double WinLateTailFraction { get; }
 
         (double P, int Min, int Max, int MaxSymbols)[] NonWinTargetProfiles { get; }
@@ -77,6 +81,7 @@ namespace GameEngine
 
         double PFeatureRetriggerChain { get; }
         double PFeatureLatePlacement { get; }
+        double PFeatureSameTurn { get; }
 
         double WPusherLowPop { get; }
         double WPusherMidPop { get; }
