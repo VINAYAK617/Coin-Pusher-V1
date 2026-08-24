@@ -62,10 +62,12 @@ internal sealed class ForwardTicketPipelineResult
 
 internal sealed class ForwardTicketPipelineExecutor
 {
+    private readonly ICustomProfileSettings _settings;
     private readonly int _seed;
 
-    internal ForwardTicketPipelineExecutor(int seed)
+    internal ForwardTicketPipelineExecutor(ICustomProfileSettings settings, int seed)
     {
+        _settings = settings;
         _seed = seed;
     }
 
@@ -86,11 +88,12 @@ internal sealed class ForwardTicketPipelineExecutor
             objectives.WinTargets,
             objectives.NearMissTargets,
             objectives.MaxSymbol,
-            objectives.WinCompletionTurn);
-        var extraSpinLedger = new ForwardExtraSpinLedger(framePlan.TotalTurns);
+            _settings,
+            objectives.WinningRoundPlan?.WinningCompletionTurn);
+        var extraSpinLedger = new ForwardExtraSpinLedger(framePlan.TotalTurns, _settings);
         var prizeUpgradeLedger = BuildPrizeUpgradeLedger(objectives);
 
-        var startingBoard = new ForwardStartingBoardPlanner(SeedFor("start", 0)).Plan(
+        var startingBoard = new ForwardStartingBoardPlanner(_settings, SeedFor("start", 0)).Plan(
             objectives,
             framePlan,
             symbolLedger);
@@ -101,15 +104,15 @@ internal sealed class ForwardTicketPipelineExecutor
                 $"{startingBoard.Status}: {startingBoard.Detail}");
         }
 
-        var boardState = new ForwardBoardState(startingBoard.Board);
+        var boardState = new ForwardBoardState(startingBoard.Board, _settings);
         var actualCollected = new Dictionary<int, int>();
         var turns = new List<ForwardRecordedTurn>(framePlan.Frames.Count);
         var remainingCapacity = BuildFeatureCapacity(framePlan);
-        var recorder = new ForwardTurnRecorder();
+        var recorder = new ForwardTurnRecorder(_settings);
 
         foreach (var frame in framePlan.Frames.OrderBy(frame => frame.Turn))
         {
-            var cycle = new ForwardTurnCycleExecutor(SeedFor("turn", frame.Turn)).ExecuteAndAdvance(
+            var cycle = new ForwardTurnCycleExecutor(_settings, SeedFor("turn", frame.Turn)).ExecuteAndAdvance(
                 frame,
                 framePlan.TotalTurns,
                 boardState,
@@ -203,7 +206,8 @@ internal sealed class ForwardTicketPipelineExecutor
         return new ForwardPrizeUpgradeLedger(
             targetTiers,
             objectives.PrizeValues,
-            objectives.MaxSymbol);
+            objectives.MaxSymbol,
+            _settings);
     }
 
     private string? ValidateFramePlan(ForwardTurnFramePlan framePlan)
@@ -311,10 +315,10 @@ internal sealed class ForwardTicketPipelineExecutor
 
     private Cell?[,] CloneBoard(Cell?[,] board)
     {
-        var clone = new Cell?[Settings.ROWS, Settings.COLS];
-        for (var row = 0; row < Settings.ROWS; row++)
+        var clone = new Cell?[_settings.ROWS, _settings.COLS];
+        for (var row = 0; row < _settings.ROWS; row++)
         {
-            for (var col = 0; col < Settings.COLS; col++)
+            for (var col = 0; col < _settings.COLS; col++)
                 clone[row, col] = board[row, col]?.Clone();
         }
 

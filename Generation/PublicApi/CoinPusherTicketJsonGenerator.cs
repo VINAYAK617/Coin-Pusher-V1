@@ -1,5 +1,7 @@
 namespace CoinPusherEngine;
 
+using GameEngine;
+
 public enum CoinPusherTicketJsonGenerationStatus
 {
     Valid,
@@ -36,8 +38,13 @@ public sealed class CoinPusherTicketJsonGenerator
     private readonly CoinPusherTicketGenerationGuard _guard;
 
     public CoinPusherTicketJsonGenerator()
+        : this(Settings)
     {
-        _guard = new CoinPusherTicketGenerationGuard();
+    }
+
+    internal CoinPusherTicketJsonGenerator(ICustomProfileSettings settings)
+    {
+        _guard = new CoinPusherTicketGenerationGuard(settings);
     }
 
     public CoinPusherTicketJsonGenerationResult Generate(

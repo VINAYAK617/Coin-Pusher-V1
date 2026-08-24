@@ -69,6 +69,13 @@ internal sealed class ForwardTurnRecordResult
 
 internal sealed class ForwardTurnRecorder
 {
+    private readonly ICustomProfileSettings _settings;
+
+    internal ForwardTurnRecorder(ICustomProfileSettings settings)
+    {
+        _settings = settings;
+    }
+
     internal ForwardTurnRecordResult Record(
         ForwardTurnFrame? frame,
         ForwardTurnRealizationResult? realization)
@@ -84,11 +91,11 @@ internal sealed class ForwardTurnRecorder
                 $"cannot record invalid realization {realization.Status}: {realization.Detail}");
         }
 
-        if (frame.Shape.Pushers.Count != Settings.COLS)
+        if (frame.Shape.Pushers.Count != _settings.COLS)
         {
             return Fail(
                 ForwardTurnRecordStatus.InvalidPusherCount,
-                $"expected {Settings.COLS} pushers, got {frame.Shape.Pushers.Count}");
+                $"expected {_settings.COLS} pushers, got {frame.Shape.Pushers.Count}");
         }
 
         var spawnCheck = ValidateSpawns(realization.Spawns);
@@ -120,7 +127,7 @@ internal sealed class ForwardTurnRecorder
         var seen = new HashSet<(int r, int c)>();
         foreach (var spawn in spawns)
         {
-            if (spawn.Row < 0 || spawn.Row >= Settings.ROWS || spawn.Col < 0 || spawn.Col >= Settings.COLS)
+            if (spawn.Row < 0 || spawn.Row >= _settings.ROWS || spawn.Col < 0 || spawn.Col >= _settings.COLS)
             {
                 return Fail(
                     ForwardTurnRecordStatus.SpawnOutOfRange,

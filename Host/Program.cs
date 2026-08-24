@@ -1,4 +1,5 @@
 using CoinPusherEngine;
+using GameEngine;
 
 internal static class Program
 {
@@ -6,6 +7,7 @@ internal static class Program
     {
         try
         {
+            GameEngine.Engine.Settings = new DefaultProfileSettings();
             var (prizeList, seed) = ParseArgs(args);
             var result = new CoinPusherTicketJsonGenerator().Generate(prizeList, seed);
             if (!result.IsValid)

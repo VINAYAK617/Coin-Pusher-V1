@@ -51,13 +51,15 @@ internal sealed class ForwardTurnRealizationResult
 
 internal sealed class ForwardTurnRealizer
 {
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
 
-    internal ForwardTurnRealizer(int seed)
+    internal ForwardTurnRealizer(ICustomProfileSettings settings, int seed)
     {
+        _settings = settings;
         _rng = new Random(seed);
-        _fateAnalyzer = new ForwardCellFateAnalyzer();
+        _fateAnalyzer = new ForwardCellFateAnalyzer(settings);
     }
 
     internal ForwardTurnRealizationResult RealizeAndAdvance(
@@ -103,7 +105,7 @@ internal sealed class ForwardTurnRealizer
                 collected: preview.Collected);
         }
 
-        var featurePlacement = new ForwardFeaturePlacementAdapter(objectives.MaxSymbol, _rng.Next()).Plan(
+        var featurePlacement = new ForwardFeaturePlacementAdapter(_settings, objectives.MaxSymbol, _rng.Next()).Plan(
             frame.Turn,
             plannedTotalTurns,
             objectives,
@@ -124,16 +126,16 @@ internal sealed class ForwardTurnRealizer
                 collected: preview.Collected);
         }
 
-        var boundedWheelBonus = RequiresBoundedWheelBonus(objectives);
         var blockedCollectSymbols = featurePlacement.WheelImpacts
             .Select(wheel => wheel.Symbol)
-            .Where(symbol => boundedWheelBonus || !objectives.WinTargets.ContainsKey(symbol))
+            .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
             .Distinct()
             .ToHashSet();
         var normalPositions = preview.EmptyPositions
             .Except(featurePlacement.UsedPositions)
+            .Except(featurePlacement.AnchorSpawns.Select(spawn => (spawn.Row, spawn.Col)))
             .ToArray();
-        var normalIntentResult = new ForwardNormalIntentPlanner().Plan(
+        var normalIntentResult = new ForwardNormalIntentPlanner(_settings, _rng.Next()).Plan(
             frame.Turn,
             objectives,
             normalPositions,
@@ -169,10 +171,13 @@ internal sealed class ForwardTurnRealizer
                 objectives.NearMissTargets,
                 objectives.FillSymbols,
                 objectives.MaxSymbol,
+                _settings,
                 new Random(_rng.Next()),
                 blockedCollectSymbols,
-                FutureWheelReservations(objectives, futureTurns)),
-            _fateAnalyzer).Plan(
+                objectives.TopPrizeSymbol,
+                plannedTotalTurns),
+            _fateAnalyzer,
+            _settings).Plan(
                 normalRequests.Requests,
                 futureTurns,
                 frame.Turn,
@@ -181,17 +186,18 @@ internal sealed class ForwardTurnRealizer
         {
             return Fail(
                 ForwardTurnRealizationStatus.NormalSpawnInvalid,
-                $"{normalSpawns.Detail}; normal intents=[{IntentSummary(normalIntentResult.Intents)}]",
+                normalSpawns.Detail,
                 collected: preview.Collected,
                 normalIntentResult: normalIntentResult);
         }
 
         var spawns = featurePlacement.Spawns
+            .Concat(featurePlacement.AnchorSpawns)
             .Concat(normalSpawns.Spawns)
             .OrderBy(spawn => spawn.Row)
             .ThenBy(spawn => spawn.Col)
             .ToArray();
-        var tempBoard = new ForwardBoardState(boardState.Snapshot());
+        var tempBoard = new ForwardBoardState(boardState.Snapshot(), _settings);
         var tempAdvance = tempBoard.Advance(frame.Shape, spawns);
         if (!tempAdvance.IsValid)
         {
@@ -245,7 +251,6 @@ internal sealed class ForwardTurnRealizer
             .Where(item => item.Fate.IsCollected)
             .OrderBy(item => item.Fate.CollectedTurn)
             .ThenBy(_ => _rng.Next())
-            .Select(item => item.Position)
             .ToList();
         var residue = fates
             .Where(item => !item.Fate.IsCollected)
@@ -254,16 +259,24 @@ internal sealed class ForwardTurnRealizer
             .ToList();
 
         var requests = new List<ForwardSpawnCellRequest>(intents.Count);
-        foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresCollected)))
+        var collectedIntents = Shuffled(intents
+                .Where(intent => intent.RequiresCollected && intent.LatestCollectionTurn.HasValue))
+            .Concat(Shuffled(intents
+                .Where(intent => intent.RequiresCollected && !intent.LatestCollectionTurn.HasValue)));
+        foreach (var intent in collectedIntents)
         {
-            var compatible = collected
-                .Where(position => CompatibleWithIntent(fates, position, intent))
+            var eligible = collected
+                .Select((item, index) => (item, index))
+                .Where(candidate => !intent.LatestCollectionTurn.HasValue
+                    || candidate.item.Fate.CollectedTurn <= intent.LatestCollectionTurn.Value)
                 .ToArray();
-            if (compatible.Length == 0)
-                return NormalRequestBuildResult.Fail($"{intent.CollectIntent} requires a future-collected cell");
-            var selected = compatible[_rng.Next(compatible.Length)];
-            AddRequest(requests, selected, intent);
-            collected.Remove(selected);
+            if (eligible.Length == 0)
+                return NormalRequestBuildResult.Fail(
+                    $"{intent.CollectIntent} requires a future-collected cell by turn " +
+                    $"{intent.LatestCollectionTurn?.ToString() ?? "any"}");
+            var index = eligible[_rng.Next(eligible.Length)].index;
+            AddRequest(requests, collected[index].Position, intent);
+            collected.RemoveAt(index);
         }
 
         foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresResidue)))
@@ -277,79 +290,27 @@ internal sealed class ForwardTurnRealizer
 
         foreach (var intent in Shuffled(intents.Where(intent => !intent.RequiresCollected && !intent.RequiresResidue)))
         {
-            var targetList = collected.Count > 0 ? collected : residue;
-            if (targetList.Count == 0)
+            if (collected.Count == 0 && residue.Count == 0)
                 return NormalRequestBuildResult.Fail($"{intent.CollectIntent} has no remaining cell");
-            var index = _rng.Next(targetList.Count);
-            AddRequest(requests, targetList[index], intent);
-            targetList.RemoveAt(index);
+            if (collected.Count > 0)
+            {
+                var index = _rng.Next(collected.Count);
+                AddRequest(requests, collected[index].Position, intent);
+                collected.RemoveAt(index);
+            }
+            else
+            {
+                var index = _rng.Next(residue.Count);
+                AddRequest(requests, residue[index], intent);
+                residue.RemoveAt(index);
+            }
         }
 
-        return NormalRequestBuildResult.Ok(OrderRequestsByCollectionTurn(requests, fates));
+        return NormalRequestBuildResult.Ok(requests);
     }
-
-    private static bool CompatibleWithIntent(
-        IReadOnlyList<((int r, int c) Position, ForwardCellFate Fate)> fates,
-        (int r, int c) position,
-        ForwardNormalSpawnIntent intent)
-    {
-        var match = fates.First(item => item.Position == position);
-        return intent.MatchesCollectionTurn(match.Fate.CollectedTurn);
-    }
-
-    private static IReadOnlyList<ForwardSpawnCellRequest> OrderRequestsByCollectionTurn(
-        IReadOnlyList<ForwardSpawnCellRequest> requests,
-        IReadOnlyList<((int r, int c) Position, ForwardCellFate Fate)> fates) =>
-        requests
-            .OrderBy(request => CollectionTurnFor(fates, request.Row, request.Col) ?? int.MaxValue)
-            .ThenBy(request => IntentPriority(request.CollectIntent))
-            .ThenBy(request => request.Row)
-            .ThenBy(request => request.Col)
-            .ToArray();
-
-    private static int? CollectionTurnFor(
-        IReadOnlyList<((int r, int c) Position, ForwardCellFate Fate)> fates,
-        int row,
-        int col) =>
-        fates.First(item => item.Position == (row, col)).Fate.CollectedTurn;
-
-    private static int IntentPriority(ForwardSymbolIntent intent) =>
-        intent switch
-        {
-            ForwardSymbolIntent.MustProgressWin => 0,
-            ForwardSymbolIntent.PreferNearMiss => 1,
-            ForwardSymbolIntent.SafeFiller => 2,
-            _ => 3,
-        };
 
     private IReadOnlyList<ForwardNormalSpawnIntent> Shuffled(IEnumerable<ForwardNormalSpawnIntent> intents) =>
         intents.OrderBy(_ => _rng.Next()).ToArray();
-
-    private static string IntentSummary(IReadOnlyList<ForwardNormalSpawnIntent> intents) =>
-        string.Join(",", intents
-            .GroupBy(intent => $"{intent.CollectIntent}:{intent.MinCollectionTurn?.ToString() ?? "_"}-{intent.MaxCollectionTurn?.ToString() ?? "_"}")
-            .OrderBy(group => group.Key)
-            .Select(group => $"{group.Key}x{group.Count()}"));
-
-    private static IReadOnlyDictionary<int, int> FutureWheelReservations(
-        ForwardObjectives objectives,
-        IReadOnlyList<ForwardFutureTurn> futureTurns) =>
-        futureTurns
-            .SelectMany(turn => turn.FeatureIntents)
-            .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel)
-            .Where(intent => intent.WheelSymbol.HasValue)
-            .Select(intent => intent.WheelSymbol!.Value)
-            .Where(symbol => objectives.WinTargets.ContainsKey(symbol))
-            .GroupBy(symbol => symbol)
-            .ToDictionary(group => group.Key, group => group.Count());
-
-    private static bool RequiresBoundedWheelBonus(ForwardObjectives objectives) =>
-        !HasGuaranteedSafeFiller(objectives);
-
-    private static bool HasGuaranteedSafeFiller(ForwardObjectives objectives) =>
-        objectives.FillSymbols.Any(symbol =>
-            !objectives.WinTargets.ContainsKey(symbol)
-            && !objectives.NearMissTargets.ContainsKey(symbol));
 
     private static void AddRequest(
         List<ForwardSpawnCellRequest> requests,

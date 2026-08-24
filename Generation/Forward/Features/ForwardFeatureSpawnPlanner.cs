@@ -115,10 +115,12 @@ internal sealed class ForwardFeatureSpawnPlanner
     private const string ExtraGoId = "EXTRA_SPIN";
     private const string PrizeUpgradeId = "PRIZE_UPGRADE";
 
+    private readonly ICustomProfileSettings _settings;
     private readonly int _maxSymbol;
 
-    internal ForwardFeatureSpawnPlanner(int maxSymbol)
+    internal ForwardFeatureSpawnPlanner(ICustomProfileSettings settings, int maxSymbol)
     {
+        _settings = settings;
         _maxSymbol = maxSymbol;
     }
 
@@ -239,8 +241,8 @@ internal sealed class ForwardFeatureSpawnPlanner
     {
         if (request.Kind == ForwardFeatureKind.Wheel)
         {
-            var minStack = Settings.MIN_WHEEL_STACK_VALUE + 1;
-            var maxStack = Settings.MAX_WHEEL_STACK_VALUE + 1;
+            var minStack = _settings.MIN_WHEEL_STACK_VALUE + 1;
+            var maxStack = Math.Min(_settings.MAX_COIN_STACK, Math.Min(_settings.MAX_WHEEL_STACK_VALUE, 3) + 1);
             if (!request.WheelSymbol.HasValue
                 || !request.WheelStack.HasValue
                 || !ValidSymbol(request.WheelSymbol.Value)
@@ -317,18 +319,18 @@ internal sealed class ForwardFeatureSpawnPlanner
         return request.Kind switch
         {
             ForwardFeatureKind.Wheel => Grid.Feat(
-                Settings.F_WHEEL,
+                _settings.F_WHEEL,
                 request.ConvertToSymbol,
                 new FP { FeatId = WheelId, WheelSym = request.WheelSymbol!.Value, WheelStack = request.WheelStack!.Value }),
             ForwardFeatureKind.ExtraGo => Grid.Feat(
-                Settings.F_XSPIN,
+                _settings.F_XSPIN,
                 request.ConvertToSymbol,
                 new FP { FeatId = ExtraGoId }),
             ForwardFeatureKind.PrizeUpgrade => Grid.Feat(
-                Settings.F_PRUP,
+                _settings.F_PRUP,
                 request.ConvertToSymbol,
                 new FP { FeatId = PrizeUpgradeId, PrupSym = request.UpgradeSymbol!.Value, PrupTier = request.UpgradeTier!.Value }),
-            _ => Grid.Norm(Settings.F_COIN),
+            _ => Grid.Norm(_settings.F_COIN),
         };
     }
 
@@ -350,10 +352,10 @@ internal sealed class ForwardFeatureSpawnPlanner
     }
 
     private bool PositionInRange((int r, int c) position) =>
-        position.r >= 0 && position.r < Settings.ROWS && position.c >= 0 && position.c < Settings.COLS;
+        position.r >= 0 && position.r < _settings.ROWS && position.c >= 0 && position.c < _settings.COLS;
 
     private bool ValidSymbol(int symbol) =>
-        symbol >= 1 && symbol <= _maxSymbol && !Settings.IsFeat(symbol);
+        symbol >= 1 && symbol <= _maxSymbol && !_settings.IsFeat(symbol);
 
     private bool ValidConvert(int symbol) => ValidSymbol(symbol);
 

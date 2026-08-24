@@ -34,7 +34,7 @@ internal sealed class WheelFeat : Feat
         if (sym == 0) return null;
         if (!ctx.Input.Targets.TryGetValue(sym, out int tgt) || tgt <= 0) return null;
 
-        int n = PickStackValue(tgt, ctx.Rng, ctx.ExperienceProfile, Settings);
+        int n = PickStackValue(tgt, ctx.Rng, ctx.ExperienceProfile, ctx.Settings);
         int stack = WMath.StackFromValue(n), zone = Math.Max(1, WMath.Zone(tgt, stack));
 
         bool isMulti = ctx.Done.Any(f => f.Id == FeatureId && f.WSym == sym);
@@ -98,7 +98,7 @@ internal sealed class WheelFeat : Feat
         return 0;
     }
 
-    private static int PickStackValue(int target, Random rng, TicketExperienceProfile profile, GameEngine.ICustomProfileSettings settings)
+    private static int PickStackValue(int target, Random rng, TicketExperienceProfile profile, ICustomProfileSettings settings)
     {
         var candidates = WMath.ValidStackValues(target).ToArray();
         if (candidates.Length == 0) return WMath.BestN(target);
@@ -121,7 +121,7 @@ internal sealed class WheelFeat : Feat
         return weighted[^1].Value;
     }
 
-    private static double StackValueWeight(int value, TicketExperienceProfile profile, GameEngine.ICustomProfileSettings settings)
+    private static double StackValueWeight(int value, TicketExperienceProfile profile, ICustomProfileSettings settings)
     {
         var baseWeight = value switch
         {
@@ -287,15 +287,11 @@ internal static class FeatReg
         ["EXTRA_SPIN"]    = new XSpinFeat(),
         ["PRIZE_UPGRADE"] = new PrupFeat(),
     };
-    private static readonly Dictionary<int, Feat> BySym =
-        ById.Where(kv => kv.Value.HasToken)
-            .ToDictionary(kv => kv.Value.FeatSym, kv => kv.Value);
-
-    internal static IEnumerable<string> Ordered(GameEngine.ICustomProfileSettings settings) =>
-        settings.OrderedFeatureIds;
+    internal static IEnumerable<string> Ordered(ICustomProfileSettings settings) =>
+        settings.OrderedFeatureIds();
 
     internal static bool Has(string id)  => ById.ContainsKey(id);
-    internal static bool HasSym(int sym) => BySym.ContainsKey(sym);
+    internal static bool HasSym(int sym) => ById.Values.Any(feat => feat.HasToken && feat.FeatSym == sym);
     internal static Feat Get(string id)  => ById[id];
-    internal static Feat GetSym(int sym) => BySym[sym];
+    internal static Feat GetSym(int sym) => ById.Values.First(feat => feat.HasToken && feat.FeatSym == sym);
 }

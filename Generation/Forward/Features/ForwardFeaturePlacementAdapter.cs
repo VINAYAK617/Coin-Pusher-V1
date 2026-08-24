@@ -24,6 +24,7 @@ internal sealed class ForwardFeaturePlacementResult
         ForwardFeaturePlacementStatus status,
         string detail,
         IReadOnlyList<ForwardSpawn> spawns,
+        IReadOnlyList<ForwardSpawn> anchorSpawns,
         IReadOnlyList<ForwardWheelImpact> wheelImpacts,
         IReadOnlyList<(int r, int c)> usedPositions,
         IReadOnlyList<ForwardFeatureSpawnRequest> requests,
@@ -32,6 +33,7 @@ internal sealed class ForwardFeaturePlacementResult
         Status = status;
         Detail = detail;
         Spawns = spawns;
+        AnchorSpawns = anchorSpawns;
         WheelImpacts = wheelImpacts;
         UsedPositions = usedPositions;
         Requests = requests;
@@ -41,6 +43,7 @@ internal sealed class ForwardFeaturePlacementResult
     internal ForwardFeaturePlacementStatus Status { get; }
     internal string Detail { get; }
     internal IReadOnlyList<ForwardSpawn> Spawns { get; }
+    internal IReadOnlyList<ForwardSpawn> AnchorSpawns { get; }
     internal IReadOnlyList<ForwardWheelImpact> WheelImpacts { get; }
     internal IReadOnlyList<(int r, int c)> UsedPositions { get; }
     internal IReadOnlyList<ForwardFeatureSpawnRequest> Requests { get; }
@@ -50,14 +53,18 @@ internal sealed class ForwardFeaturePlacementResult
 
 internal sealed class ForwardFeaturePlacementAdapter
 {
+    private readonly ICustomProfileSettings _settings;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
     private readonly ForwardFeatureSpawnPlanner _featureSpawnPlanner;
+    private readonly ForwardWheelSequenceLedger _wheelSequenceLedger;
     private readonly Random _rng;
 
-    internal ForwardFeaturePlacementAdapter(int maxSymbol, int seed)
+    internal ForwardFeaturePlacementAdapter(ICustomProfileSettings settings, int maxSymbol, int seed)
     {
-        _fateAnalyzer = new ForwardCellFateAnalyzer();
-        _featureSpawnPlanner = new ForwardFeatureSpawnPlanner(maxSymbol);
+        _settings = settings;
+        _fateAnalyzer = new ForwardCellFateAnalyzer(settings);
+        _featureSpawnPlanner = new ForwardFeatureSpawnPlanner(settings, maxSymbol);
+        _wheelSequenceLedger = new ForwardWheelSequenceLedger(settings);
         _rng = new Random(seed);
     }
 
@@ -95,13 +102,15 @@ internal sealed class ForwardFeaturePlacementAdapter
         var flushCount = intents.Count(intent => intent.Kind == ForwardTimedFeatureKind.Flush);
         var boardIntents = intents
             .Where(intent => intent.IsBoardFeature)
-            .OrderBy(intent => intent.Kind)
+            .OrderBy(intent => intent.Kind == ForwardTimedFeatureKind.Wheel ? 1 : 0)
+            .ThenBy(intent => intent.Kind)
             .ToArray();
         if (boardIntents.Length == 0)
         {
             return new ForwardFeaturePlacementResult(
                 ForwardFeaturePlacementStatus.Valid,
                 "no board feature intents",
+                Array.Empty<ForwardSpawn>(),
                 Array.Empty<ForwardSpawn>(),
                 Array.Empty<ForwardWheelImpact>(),
                 Array.Empty<(int r, int c)>(),
@@ -123,36 +132,38 @@ internal sealed class ForwardFeaturePlacementAdapter
                 flushCount: flushCount);
         }
 
-        var trialSymbolLedger = symbolLedger.Clone();
+        var turnStartSymbolLedger = symbolLedger.Clone();
+        var trialSymbolLedger = turnStartSymbolLedger.Clone();
         var trialRequests = new List<ForwardFeatureSpawnRequest>();
-        var reservations = new List<ConvertReservation>();
-        var sameTurnWheelSymbols = new HashSet<int>();
-        var sameTurnCollectedConvertSymbols = new HashSet<int>();
+        var trialAnchors = new List<ForwardSpawn>();
+        var plannedWheelCollectionBonus = 0;
         foreach (var intent in boardIntents)
         {
+            if (intent.Kind == ForwardTimedFeatureKind.Wheel && intent.IsCapacityRequiredWheel)
+                plannedWheelCollectionBonus += intent.PlannedWheelCollectionBonus;
             var placed = TryPlaceIntent(
                 intent,
+                plannedTotalTurns,
                 available,
                 futureTurns,
                 objectives,
                 trialSymbolLedger,
+                turnStartSymbolLedger,
                 boardAfterPushRotate,
-                sameTurnWheelSymbols,
-                sameTurnCollectedConvertSymbols);
+                trialRequests,
+                trialAnchors,
+                plannedWheelCollectionBonus);
             if (!placed.IsValid)
                 return placed.Result!;
 
             trialSymbolLedger = placed.SymbolLedger!;
             trialRequests.Add(placed.Request!.Value);
-            if (placed.Request.Value.Kind == ForwardFeatureKind.Wheel
-                && placed.Request.Value.WheelSymbol.HasValue)
-            {
-                sameTurnWheelSymbols.Add(placed.Request.Value.WheelSymbol.Value);
-            }
-            reservations.Add(placed.Reservation!.Value);
-            if (placed.Reservation.Value.IsCollected)
-                sameTurnCollectedConvertSymbols.Add(placed.Reservation.Value.ConvertSymbol);
             available.Remove((placed.Request.Value.Row, placed.Request.Value.Col));
+            if (placed.Anchor.HasValue)
+            {
+                trialAnchors.Add(placed.Anchor.Value);
+                available.Remove((placed.Anchor.Value.Row, placed.Anchor.Value.Col));
+            }
         }
 
         var trialSpawn = _featureSpawnPlanner.Plan(
@@ -169,18 +180,6 @@ internal sealed class ForwardFeaturePlacementAdapter
             return Fail(
                 ForwardFeaturePlacementStatus.FeatureSpawnInvalid,
                 trialSpawn.Detail,
-                flushCount: flushCount);
-        }
-
-        var conversionBonuses = CommitSameTurnFeatureConversionWheelBonuses(
-            reservations,
-            trialRequests,
-            trialSymbolLedger);
-        if (!conversionBonuses.IsValid)
-        {
-            return Fail(
-                ForwardFeaturePlacementStatus.CommitFailed,
-                conversionBonuses.Detail,
                 flushCount: flushCount);
         }
 
@@ -207,6 +206,7 @@ internal sealed class ForwardFeaturePlacementAdapter
             ForwardFeaturePlacementStatus.Valid,
             $"placed {committedSpawn.Spawns.Count} board feature(s)",
             committedSpawn.Spawns,
+            trialAnchors,
             committedSpawn.WheelImpacts,
             trialRequests.Select(request => (request.Row, request.Col)).ToArray(),
             trialRequests,
@@ -215,14 +215,33 @@ internal sealed class ForwardFeaturePlacementAdapter
 
     private FeatureSlotAttempt TryPlaceIntent(
         ForwardFeatureIntent intent,
+        int plannedTotalTurns,
         IReadOnlyList<(int r, int c)> available,
         IReadOnlyList<ForwardFutureTurn> futureTurns,
         ForwardObjectives objectives,
         SymbolLedger currentTrialLedger,
+        SymbolLedger turnStartSymbolLedger,
         Cell?[,]? boardAfterPushRotate,
-        IReadOnlySet<int> sameTurnWheelSymbols,
-        IReadOnlySet<int> sameTurnCollectedConvertSymbols)
+        IReadOnlyList<ForwardFeatureSpawnRequest> sameTurnRequests,
+        IReadOnlyList<ForwardSpawn> sameTurnAnchors,
+        int plannedWheelCollectionBonus)
     {
+        if (intent.Kind == ForwardTimedFeatureKind.Wheel)
+        {
+            return TryPlaceWheelIntent(
+                intent,
+                plannedTotalTurns,
+                available,
+                futureTurns,
+                objectives,
+                currentTrialLedger,
+                turnStartSymbolLedger,
+                boardAfterPushRotate,
+                sameTurnRequests,
+                sameTurnAnchors,
+                plannedWheelCollectionBonus);
+        }
+
         foreach (var position in OrderedCandidatePositions(available, intent, futureTurns))
         {
             var candidateLedger = currentTrialLedger.Clone();
@@ -234,62 +253,139 @@ internal sealed class ForwardFeaturePlacementAdapter
                 CreateSelector(
                     objectives,
                     candidateLedger,
-                    sameTurnWheelSymbols,
-                    futureTurns));
+                    blockedCollectSymbols: null,
+                    plannedTotalTurns));
             if (!convert.IsValid)
                 continue;
 
             var request = BuildRequest(
                 intent,
                 position,
-                convert.ConvertSymbol,
-                boardAfterPushRotate,
-                futureTurns,
-                objectives,
-                candidateLedger,
-                sameTurnCollectedConvertSymbols);
+                convert.ConvertSymbol);
             if (!request.HasValue)
                 continue;
 
             return FeatureSlotAttempt.Ok(
                 request.Value,
-                new ConvertReservation(
-                    position.r,
-                    position.c,
-                    convert.ConvertSymbol,
-                    convert.IsCollected,
-                    convert.CollectionTurn,
-                    request.Value.Kind),
                 candidateLedger);
         }
 
         return FeatureSlotAttempt.Fail(Fail(
             ForwardFeaturePlacementStatus.NoSafeConvertSymbol,
-            $"no safe ConvertToId found for {intent.Kind} on turn {intent.Turn}; " +
-            $"preferred={PreferredConvertSymbol(intent)}, " +
-            $"remainingWins=[{RemainingWins(objectives, currentTrialLedger)}], " +
-            $"collected=[{Collected(currentTrialLedger)}]"));
+            $"no safe ConvertToId found for {intent.Kind} on turn {intent.Turn}"));
     }
+
+    private FeatureSlotAttempt TryPlaceWheelIntent(
+        ForwardFeatureIntent intent,
+        int plannedTotalTurns,
+        IReadOnlyList<(int r, int c)> available,
+        IReadOnlyList<ForwardFutureTurn> futureTurns,
+        ForwardObjectives objectives,
+        SymbolLedger currentTrialLedger,
+        SymbolLedger turnStartSymbolLedger,
+        Cell?[,]? boardAfterPushRotate,
+        IReadOnlyList<ForwardFeatureSpawnRequest> sameTurnRequests,
+        IReadOnlyList<ForwardSpawn> sameTurnAnchors,
+        int plannedWheelCollectionBonus)
+    {
+        var preferCollection = _rng.NextDouble() < _settings.PWheelStackCollection;
+        var preferDenseTarget = !intent.IsCapacityRequiredWheel
+            && _rng.NextDouble() < _settings.PWheelPreferDenseTarget;
+        foreach (var position in OrderedCandidatePositions(
+                     available,
+                     intent,
+                     futureTurns,
+                     preferWheelCollection: preferCollection))
+        {
+            foreach (var convertSymbol in OrderedWheelConvertSymbols(intent, objectives))
+            {
+                var candidateLedger = currentTrialLedger.Clone();
+                var request = BuildWheelRequest(
+                    intent,
+                    position,
+                    convertSymbol,
+                    boardAfterPushRotate,
+                    futureTurns,
+                    objectives,
+                    candidateLedger,
+                    turnStartSymbolLedger,
+                    sameTurnRequests,
+                    sameTurnAnchors,
+                    plannedTotalTurns,
+                    preferDenseTarget,
+                    plannedWheelCollectionBonus);
+                if (request.HasValue)
+                    return FeatureSlotAttempt.Ok(request.Value, candidateLedger);
+
+                var anchored = BuildAnchoredWheelRequest(
+                    intent,
+                    position,
+                    convertSymbol,
+                    available,
+                    boardAfterPushRotate,
+                    futureTurns,
+                    objectives,
+                    candidateLedger,
+                    turnStartSymbolLedger,
+                    sameTurnRequests,
+                    sameTurnAnchors,
+                    plannedTotalTurns,
+                    preferCollection,
+                    preferDenseTarget,
+                    plannedWheelCollectionBonus);
+                if (anchored.HasValue)
+                {
+                    return FeatureSlotAttempt.Ok(
+                        anchored.Value.Request,
+                        candidateLedger,
+                        anchored.Value.Anchor);
+                }
+            }
+        }
+
+        return FeatureSlotAttempt.Fail(Fail(
+            ForwardFeaturePlacementStatus.NoSafeConvertSymbol,
+            $"no complete WHEEL position/ConvertToId/target assignment is safe on turn {intent.Turn}"));
+    }
+
+    private IReadOnlyList<int> OrderedWheelConvertSymbols(
+        ForwardFeatureIntent intent,
+        ForwardObjectives objectives) =>
+        new[] { PreferredConvertSymbol(intent) }
+            .Concat(objectives.NearMissTargets.Keys)
+            .Concat(objectives.FillSymbols)
+            .Concat(objectives.WinSymbols)
+            .Where(symbol => ValidSymbol(symbol, objectives))
+            .Distinct()
+            .OrderBy(symbol => symbol == PreferredConvertSymbol(intent) ? 0 : 1)
+            .ThenBy(symbol => objectives.NearMissTargets.ContainsKey(symbol) ? 0 :
+                objectives.WinTargets.ContainsKey(symbol) ? 2 : 1)
+            .ThenBy(symbol => symbol)
+            .ToArray();
 
     private IEnumerable<(int r, int c)> OrderedCandidatePositions(
         IReadOnlyList<(int r, int c)> available,
         ForwardFeatureIntent intent,
-        IReadOnlyList<ForwardFutureTurn> futureTurns)
+        IReadOnlyList<ForwardFutureTurn> futureTurns,
+        bool? preferWheelCollection = null)
     {
         return available
             .Select(position => (Position: position, Fate: _fateAnalyzer.Analyze(position.r, position.c, futureTurns)))
             .Where(item => item.Fate.IsValid)
-            .OrderBy(item => PositionScore(intent, item.Fate))
+            .OrderBy(item => PositionScore(intent, item.Fate, preferWheelCollection))
             .ThenBy(_ => _rng.Next())
             .Select(item => item.Position);
     }
 
-    private static int PositionScore(ForwardFeatureIntent intent, ForwardCellFate fate)
+    private static int PositionScore(
+        ForwardFeatureIntent intent,
+        ForwardCellFate fate,
+        bool? preferWheelCollection)
     {
         if (intent.Kind == ForwardTimedFeatureKind.PrizeUpgrade)
             return fate.IsCollected ? 1 : 0;
         if (intent.Kind == ForwardTimedFeatureKind.Wheel)
-            return fate.IsCollected ? 1 : 0;
+            return fate.IsCollected == preferWheelCollection.GetValueOrDefault() ? 0 : 1;
         return fate.IsCollected ? 0 : 1;
     }
 
@@ -324,14 +420,14 @@ internal sealed class ForwardFeaturePlacementAdapter
         {
             var selected = selector.TryCollectSpecific(preferred, collectionTurn: fate.CollectedTurn);
             if (selected.IsValid)
-                return ConvertSelection.Ok(selected.Symbol, isCollected: true, fate.CollectedTurn);
+                return ConvertSelection.Ok(selected.Symbol, isCollected: true);
         }
 
         foreach (var fallbackIntent in ConvertFallbackOrder())
         {
-            var selected = selector.ChooseAndCollect(fallbackIntent, collectionTurn: fate.CollectedTurn);
+            var selected = selector.ChooseAndCollectExact(fallbackIntent, fate.CollectedTurn);
             if (selected.IsValid)
-                return ConvertSelection.Ok(selected.Symbol, isCollected: true, fate.CollectedTurn);
+                return ConvertSelection.Ok(selected.Symbol, isCollected: true);
         }
 
         return ConvertSelection.Fail(
@@ -342,8 +438,8 @@ internal sealed class ForwardFeaturePlacementAdapter
     private IEnumerable<ForwardSymbolIntent> ConvertFallbackOrder()
     {
         yield return ForwardSymbolIntent.PreferNearMiss;
-        yield return ForwardSymbolIntent.SafeFiller;
         yield return ForwardSymbolIntent.MustProgressWin;
+        yield return ForwardSymbolIntent.SafeFiller;
     }
 
     private int PreferredConvertSymbol(ForwardFeatureIntent intent) =>
@@ -354,38 +450,12 @@ internal sealed class ForwardFeaturePlacementAdapter
             _ => 0,
         };
 
-    private static string RemainingWins(
-        ForwardObjectives objectives,
-        SymbolLedger ledger) =>
-        string.Join(",", objectives.WinTargets
-            .OrderBy(kv => kv.Key)
-            .Select(kv => $"{kv.Key}:{Math.Max(0, kv.Value - ledger.CollectedCount(kv.Key))}"));
-
-    private static string Collected(SymbolLedger ledger) =>
-        string.Join(",", ledger.Collected
-            .OrderBy(kv => kv.Key)
-            .Select(kv => $"{kv.Key}:{kv.Value}"));
-
     private ForwardFeatureSpawnRequest? BuildRequest(
         ForwardFeatureIntent intent,
         (int r, int c) position,
-        int convertSymbol,
-        Cell?[,]? boardAfterPushRotate,
-        IReadOnlyList<ForwardFutureTurn> futureTurns,
-        ForwardObjectives objectives,
-        SymbolLedger ledger,
-        IReadOnlySet<int> sameTurnCollectedConvertSymbols) =>
+        int convertSymbol) =>
         intent.Kind switch
         {
-            ForwardTimedFeatureKind.Wheel => BuildWheelRequest(
-                intent,
-                position,
-                convertSymbol,
-                boardAfterPushRotate,
-                futureTurns,
-                objectives,
-                ledger,
-                sameTurnCollectedConvertSymbols),
             ForwardTimedFeatureKind.ExtraGo => ForwardFeatureSpawnRequest.ExtraGo(
                 position.r,
                 position.c,
@@ -407,42 +477,118 @@ internal sealed class ForwardFeaturePlacementAdapter
         IReadOnlyList<ForwardFutureTurn> futureTurns,
         ForwardObjectives objectives,
         SymbolLedger ledger,
-        IReadOnlySet<int> sameTurnCollectedConvertSymbols)
+        SymbolLedger turnStartSymbolLedger,
+        IReadOnlyList<ForwardFeatureSpawnRequest> sameTurnRequests,
+        IReadOnlyList<ForwardSpawn> sameTurnAnchors,
+        int plannedTotalTurns,
+        bool preferDenseTarget,
+        int plannedWheelCollectionBonus)
     {
         var wheelStack = intent.ResultingWheelStack!.Value;
-        foreach (var wheelSymbol in OrderedWheelSymbols(intent, objectives, sameTurnCollectedConvertSymbols))
+        foreach (var wheelSymbol in OrderedWheelSymbols(
+                     intent,
+                     objectives,
+                     convertSymbol,
+                     boardAfterPushRotate,
+                     sameTurnRequests,
+                     sameTurnAnchors,
+                     preferDenseTarget))
         {
-            var trialLedger = ledger.Clone();
-            var requiredBonus = RequiresBoundedWheelBonus(objectives)
-                ? intent.WheelStackValue
-                : null;
-            var impact = CommitCurrentBoardWheelImpact(
-                wheelSymbol,
-                wheelStack,
-                boardAfterPushRotate,
-                futureTurns,
-                trialLedger,
-                requiredBonus);
-            if (!impact.IsValid)
-                continue;
-
-            var selfConversion = CommitWheelSelfConversionBonus(
-                position,
-                convertSymbol,
-                wheelSymbol,
-                wheelStack,
-                futureTurns,
-                trialLedger);
-            if (!selfConversion.IsValid)
-                continue;
-
-            ledger.ReplaceWith(trialLedger);
-            return ForwardFeatureSpawnRequest.Wheel(
+            var request = ForwardFeatureSpawnRequest.Wheel(
                 position.r,
                 position.c,
                 convertSymbol,
                 wheelSymbol,
                 wheelStack);
+
+            var sequence = _wheelSequenceLedger.Rebuild(
+                boardAfterPushRotate,
+                sameTurnRequests.Concat(new[] { request }).ToArray(),
+                futureTurns,
+                turnStartSymbolLedger,
+                objectives.TopPrizeSymbol,
+                plannedTotalTurns,
+                sameTurnAnchors);
+            if (!sequence.IsValid)
+                continue;
+            if (intent.IsCapacityRequiredWheel
+                && sequence.CollectedWheelBonus != plannedWheelCollectionBonus)
+                continue;
+
+            ledger.ReplaceWith(sequence.Ledger!);
+            return request;
+        }
+
+        return null;
+    }
+
+    private (ForwardFeatureSpawnRequest Request, ForwardSpawn Anchor)? BuildAnchoredWheelRequest(
+        ForwardFeatureIntent intent,
+        (int r, int c) featurePosition,
+        int convertSymbol,
+        IReadOnlyList<(int r, int c)> available,
+        Cell?[,]? boardAfterPushRotate,
+        IReadOnlyList<ForwardFutureTurn> futureTurns,
+        ForwardObjectives objectives,
+        SymbolLedger ledger,
+        SymbolLedger turnStartSymbolLedger,
+        IReadOnlyList<ForwardFeatureSpawnRequest> sameTurnRequests,
+        IReadOnlyList<ForwardSpawn> sameTurnAnchors,
+        int plannedTotalTurns,
+        bool preferCollection,
+        bool preferDenseTarget,
+        int plannedWheelCollectionBonus)
+    {
+        if (available.Count < 2)
+            return null;
+
+        var wheelStack = intent.ResultingWheelStack!.Value;
+        foreach (var wheelSymbol in OrderedWheelSymbols(
+                     intent,
+                     objectives,
+                     convertSymbol,
+                     boardAfterPushRotate,
+                     sameTurnRequests,
+                     sameTurnAnchors,
+                     preferDenseTarget))
+        {
+            foreach (var anchorPosition in available
+                         .Where(position => position != featurePosition)
+                         .Select(position => (
+                             Position: position,
+                             Fate: _fateAnalyzer.Analyze(position.r, position.c, futureTurns)))
+                         .Where(item => item.Fate.IsValid)
+                         .OrderBy(item => item.Fate.IsCollected == preferCollection ? 0 : 1)
+                         .ThenBy(_ => _rng.Next())
+                         .Select(item => item.Position))
+            {
+                var request = ForwardFeatureSpawnRequest.Wheel(
+                    featurePosition.r,
+                    featurePosition.c,
+                    convertSymbol,
+                    wheelSymbol,
+                    wheelStack);
+                var anchor = new ForwardSpawn(
+                    anchorPosition.r,
+                    anchorPosition.c,
+                    Grid.Norm(wheelSymbol));
+                var sequence = _wheelSequenceLedger.Rebuild(
+                    boardAfterPushRotate,
+                    sameTurnRequests.Concat(new[] { request }).ToArray(),
+                    futureTurns,
+                    turnStartSymbolLedger,
+                    objectives.TopPrizeSymbol,
+                    plannedTotalTurns,
+                    sameTurnAnchors.Concat(new[] { anchor }).ToArray());
+                if (!sequence.IsValid)
+                    continue;
+                if (intent.IsCapacityRequiredWheel
+                    && sequence.CollectedWheelBonus != plannedWheelCollectionBonus)
+                    continue;
+
+                ledger.ReplaceWith(sequence.Ledger!);
+                return (request, anchor);
+            }
         }
 
         return null;
@@ -451,225 +597,71 @@ internal sealed class ForwardFeaturePlacementAdapter
     private IReadOnlyList<int> OrderedWheelSymbols(
         ForwardFeatureIntent intent,
         ForwardObjectives objectives,
-        IReadOnlySet<int> blockedSameTurnSymbols)
+        int convertSymbol,
+        Cell?[,]? boardAfterPushRotate,
+        IReadOnlyList<ForwardFeatureSpawnRequest> sameTurnRequests,
+        IReadOnlyList<ForwardSpawn> sameTurnAnchors,
+        bool preferDenseTarget)
     {
-        if (RequiresBoundedWheelBonus(objectives))
-        {
-            return objectives.WinSymbols
-                .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !Settings.IsFeat(symbol))
-                .Where(symbol => !blockedSameTurnSymbols.Contains(symbol))
-                .Distinct()
-                .OrderBy(symbol => symbol == intent.WheelSymbol ? 0 : 1)
-                .ThenBy(symbol => symbol)
-                .ToArray();
-        }
-
-        return objectives.FillSymbols
+        return new[] { convertSymbol }
+            .Concat(objectives.FillSymbols
             .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
             .Where(symbol => !objectives.NearMissTargets.ContainsKey(symbol))
-            .Concat(objectives.NearMissTargets.Keys)
+            .Concat(objectives.NearMissTargets.Keys))
             .Concat(objectives.WinSymbols)
-            .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !Settings.IsFeat(symbol))
-            .Where(symbol => !blockedSameTurnSymbols.Contains(symbol))
+            .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol))
             .Distinct()
-            .OrderBy(symbol => symbol == intent.WheelSymbol ? 0 : 1)
+            .OrderByDescending(symbol => preferDenseTarget
+                ? VisibleWheelTargetCount(symbol, boardAfterPushRotate, sameTurnRequests, sameTurnAnchors)
+                : 0)
+            .ThenBy(symbol => symbol == intent.WheelSymbol ? 0 : symbol == convertSymbol ? 1 : 2)
             .ThenBy(symbol => objectives.WinTargets.ContainsKey(symbol) ? 2 : objectives.NearMissTargets.ContainsKey(symbol) ? 1 : 0)
             .ThenBy(symbol => symbol)
             .ToArray();
     }
 
-    private WheelImpactCommitResult CommitCurrentBoardWheelImpact(
+    private static int VisibleWheelTargetCount(
         int symbol,
-        int wheelStack,
         Cell?[,]? boardAfterPushRotate,
-        IReadOnlyList<ForwardFutureTurn> futureTurns,
-        SymbolLedger ledger,
-        int? requiredBonus = null)
+        IReadOnlyList<ForwardFeatureSpawnRequest> sameTurnRequests,
+        IReadOnlyList<ForwardSpawn> sameTurnAnchors)
     {
-        if (boardAfterPushRotate == null)
-            return WheelImpactCommitResult.Ok();
-
-        var stackAdd = Math.Max(0, wheelStack - 1);
-        if (stackAdd == 0)
-            return WheelImpactCommitResult.Ok();
-
-        var committedBonus = 0;
-        for (var row = 0; row < Settings.ROWS; row++)
+        var count = 0;
+        if (boardAfterPushRotate != null)
         {
-            for (var col = 0; col < Settings.COLS; col++)
+            foreach (var cell in boardAfterPushRotate)
             {
-                var cell = boardAfterPushRotate[row, col];
-                if (cell == null || cell.IsFeat || cell.Sym != symbol)
-                    continue;
-
-                var fate = _fateAnalyzer.Analyze(row, col, futureTurns);
-                if (!fate.IsValid)
-                    return WheelImpactCommitResult.Fail(fate.Detail);
-                if (!fate.IsCollected)
-                    continue;
-
-                var currentStack = Math.Max(1, cell.Stack);
-                var stacked = Math.Min(Settings.MAX_COIN_STACK, currentStack + stackAdd);
-                var bonus = stacked - currentStack;
-                if (bonus <= 0)
-                    continue;
-                if (requiredBonus.HasValue && committedBonus + bonus > requiredBonus.Value)
-                    return WheelImpactCommitResult.Fail("bounded WHEEL would add too much stack bonus");
-
-                var collect = ledger.Collect(symbol, bonus, fate.CollectedTurn);
-                if (!collect.IsValid)
-                    return WheelImpactCommitResult.Fail(collect.Detail);
-                committedBonus += bonus;
+                if (cell != null && !cell.IsFeat && cell.Sym == symbol)
+                    count++;
             }
         }
 
-        return WheelImpactCommitResult.Ok();
+        count += sameTurnAnchors.Count(spawn => spawn.Cell.Sym == symbol);
+        count += sameTurnRequests.Count(request =>
+            request.Kind != ForwardFeatureKind.Wheel
+            && request.ConvertToSymbol == symbol);
+        return count;
     }
-
-    private WheelImpactCommitResult CommitWheelSelfConversionBonus(
-        (int r, int c) position,
-        int convertSymbol,
-        int wheelSymbol,
-        int wheelStack,
-        IReadOnlyList<ForwardFutureTurn> futureTurns,
-        SymbolLedger ledger)
-    {
-        if (convertSymbol != wheelSymbol)
-            return WheelImpactCommitResult.Ok();
-
-        var stackBonus = Math.Max(0, wheelStack - 1);
-        if (stackBonus == 0)
-            return WheelImpactCommitResult.Ok();
-
-        var fate = _fateAnalyzer.Analyze(position.r, position.c, futureTurns);
-        if (!fate.IsValid)
-            return WheelImpactCommitResult.Fail(fate.Detail);
-        if (!fate.IsCollected)
-            return WheelImpactCommitResult.Ok();
-
-        var collect = ledger.Collect(convertSymbol, stackBonus, fate.CollectedTurn);
-        return collect.IsValid
-            ? WheelImpactCommitResult.Ok()
-            : WheelImpactCommitResult.Fail(collect.Detail);
-    }
-
-    private static bool RequiresBoundedWheelBonus(ForwardObjectives objectives) =>
-        !HasGuaranteedSafeFiller(objectives);
-
-    private static bool HasGuaranteedSafeFiller(ForwardObjectives objectives) =>
-        objectives.FillSymbols.Any(symbol =>
-            !objectives.WinTargets.ContainsKey(symbol)
-            && !objectives.NearMissTargets.ContainsKey(symbol));
-
-    private WheelImpactCommitResult CommitSameTurnFeatureConversionWheelBonuses(
-        IReadOnlyList<ConvertReservation> reservations,
-        IReadOnlyList<ForwardFeatureSpawnRequest> requests,
-        SymbolLedger ledger)
-    {
-        foreach (var reservation in reservations.Where(reservation => reservation.IsCollected))
-        {
-            var bonus = SameTurnFeatureConversionWheelBonus(reservation, requests);
-            if (bonus <= 0)
-                continue;
-
-            var collect = ledger.Collect(
-                reservation.ConvertSymbol,
-                bonus,
-                reservation.CollectionTurn);
-            if (!collect.IsValid)
-            {
-                return WheelImpactCommitResult.Fail(
-                    $"same-turn WHEEL bonus for feature ConvertToId={reservation.ConvertSymbol} " +
-                    $"at ({reservation.Row},{reservation.Col}) failed: {collect.Detail}");
-            }
-        }
-
-        return WheelImpactCommitResult.Ok();
-    }
-
-    private static int SameTurnFeatureConversionWheelBonus(
-        ConvertReservation reservation,
-        IReadOnlyList<ForwardFeatureSpawnRequest> requests)
-    {
-        var baseStack = BaseConvertedStack(reservation, requests);
-        var stack = baseStack;
-        foreach (var wheel in requests
-                     .Where(request => request.Kind == ForwardFeatureKind.Wheel)
-                     .Where(request => request.WheelSymbol == reservation.ConvertSymbol)
-                     .Where(request => WheelCanApplyAfterConversion(reservation, request))
-                     .OrderBy(PositionOrder))
-        {
-            stack = Math.Min(
-                Settings.MAX_COIN_STACK,
-                stack + Math.Max(0, wheel.WheelStack!.Value - 1));
-        }
-
-        return Math.Max(0, stack - baseStack);
-    }
-
-    private static int BaseConvertedStack(
-        ConvertReservation reservation,
-        IReadOnlyList<ForwardFeatureSpawnRequest> requests)
-    {
-        if (reservation.FeatureKind != ForwardFeatureKind.Wheel)
-            return 1;
-
-        var ownWheel = requests.FirstOrDefault(request =>
-            request.Kind == ForwardFeatureKind.Wheel
-            && request.Row == reservation.Row
-            && request.Col == reservation.Col
-            && request.WheelSymbol == reservation.ConvertSymbol);
-
-        return ownWheel.WheelStack.HasValue
-            ? Math.Min(Settings.MAX_COIN_STACK, Math.Max(1, ownWheel.WheelStack.Value))
-            : 1;
-    }
-
-    private static bool WheelCanApplyAfterConversion(
-        ConvertReservation reservation,
-        ForwardFeatureSpawnRequest wheel)
-    {
-        if (reservation.FeatureKind != ForwardFeatureKind.Wheel)
-            return true;
-
-        return PositionOrder(wheel) > PositionOrder(reservation);
-    }
-
-    private static int PositionOrder(ForwardFeatureSpawnRequest request) =>
-        request.Row * Settings.COLS + request.Col;
-
-    private static int PositionOrder(ConvertReservation reservation) =>
-        reservation.Row * Settings.COLS + reservation.Col;
 
     private ForwardSymbolSelector CreateSelector(
         ForwardObjectives objectives,
         SymbolLedger ledger,
         IReadOnlySet<int>? blockedCollectSymbols,
-        IReadOnlyList<ForwardFutureTurn> futureTurns) =>
+        int plannedTotalTurns) =>
         new(
             ledger,
             objectives.WinTargets,
             objectives.NearMissTargets,
             objectives.FillSymbols,
             objectives.MaxSymbol,
+            _settings,
             new Random(_rng.Next()),
             blockedCollectSymbols,
-            FutureWheelReservations(objectives, futureTurns));
-
-    private static IReadOnlyDictionary<int, int> FutureWheelReservations(
-        ForwardObjectives objectives,
-        IReadOnlyList<ForwardFutureTurn> futureTurns) =>
-        futureTurns
-            .SelectMany(turn => turn.FeatureIntents)
-            .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel)
-            .Where(intent => intent.WheelSymbol.HasValue)
-            .Select(intent => intent.WheelSymbol!.Value)
-            .Where(symbol => objectives.WinTargets.ContainsKey(symbol))
-            .GroupBy(symbol => symbol)
-            .ToDictionary(group => group.Key, group => group.Count());
+            objectives.TopPrizeSymbol,
+            plannedTotalTurns);
 
     private bool ValidSymbol(int symbol, ForwardObjectives objectives) =>
-        symbol >= 1 && symbol <= objectives.MaxSymbol && !Settings.IsFeat(symbol);
+        symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol);
 
     private static ForwardFeaturePlacementResult Fail(
         ForwardFeaturePlacementStatus status,
@@ -679,36 +671,11 @@ internal sealed class ForwardFeaturePlacementAdapter
             status,
             detail,
             Array.Empty<ForwardSpawn>(),
+            Array.Empty<ForwardSpawn>(),
             Array.Empty<ForwardWheelImpact>(),
             Array.Empty<(int r, int c)>(),
             Array.Empty<ForwardFeatureSpawnRequest>(),
             flushCount);
-
-    private readonly struct ConvertReservation
-    {
-        internal ConvertReservation(
-            int row,
-            int col,
-            int convertSymbol,
-            bool isCollected,
-            int? collectionTurn,
-            ForwardFeatureKind featureKind)
-        {
-            Row = row;
-            Col = col;
-            ConvertSymbol = convertSymbol;
-            IsCollected = isCollected;
-            CollectionTurn = collectionTurn;
-            FeatureKind = featureKind;
-        }
-
-        internal int Row { get; }
-        internal int Col { get; }
-        internal int ConvertSymbol { get; }
-        internal bool IsCollected { get; }
-        internal int? CollectionTurn { get; }
-        internal ForwardFeatureKind FeatureKind { get; }
-    }
 
     private readonly struct ConvertSelection
     {
@@ -716,73 +683,52 @@ internal sealed class ForwardFeaturePlacementAdapter
             ForwardFeaturePlacementStatus status,
             int convertSymbol,
             bool isCollected,
-            int? collectionTurn,
             string detail)
         {
             Status = status;
             ConvertSymbol = convertSymbol;
             IsCollected = isCollected;
-            CollectionTurn = collectionTurn;
             Detail = detail;
         }
 
         internal ForwardFeaturePlacementStatus Status { get; }
         internal int ConvertSymbol { get; }
         internal bool IsCollected { get; }
-        internal int? CollectionTurn { get; }
         internal string Detail { get; }
         internal bool IsValid => Status == ForwardFeaturePlacementStatus.Valid;
 
-        internal static ConvertSelection Ok(int convertSymbol, bool isCollected, int? collectionTurn = null) =>
-            new(ForwardFeaturePlacementStatus.Valid, convertSymbol, isCollected, collectionTurn, "ok");
+        internal static ConvertSelection Ok(int convertSymbol, bool isCollected) =>
+            new(ForwardFeaturePlacementStatus.Valid, convertSymbol, isCollected, "ok");
 
         internal static ConvertSelection Fail(ForwardFeaturePlacementStatus status, string detail) =>
-            new(status, 0, false, null, detail);
-    }
-
-    private readonly struct WheelImpactCommitResult
-    {
-        private WheelImpactCommitResult(bool isValid, string detail)
-        {
-            IsValid = isValid;
-            Detail = detail;
-        }
-
-        internal bool IsValid { get; }
-        internal string Detail { get; }
-
-        internal static WheelImpactCommitResult Ok() =>
-            new(true, "ok");
-
-        internal static WheelImpactCommitResult Fail(string detail) =>
-            new(false, detail);
+            new(status, 0, false, detail);
     }
 
     private sealed class FeatureSlotAttempt
     {
         private FeatureSlotAttempt(
             ForwardFeatureSpawnRequest? request,
-            ConvertReservation? reservation,
             SymbolLedger? symbolLedger,
+            ForwardSpawn? anchor,
             ForwardFeaturePlacementResult? result)
         {
             Request = request;
-            Reservation = reservation;
             SymbolLedger = symbolLedger;
+            Anchor = anchor;
             Result = result;
         }
 
         internal ForwardFeatureSpawnRequest? Request { get; }
-        internal ConvertReservation? Reservation { get; }
         internal SymbolLedger? SymbolLedger { get; }
+        internal ForwardSpawn? Anchor { get; }
         internal ForwardFeaturePlacementResult? Result { get; }
         internal bool IsValid => Result == null;
 
         internal static FeatureSlotAttempt Ok(
             ForwardFeatureSpawnRequest request,
-            ConvertReservation reservation,
-            SymbolLedger symbolLedger) =>
-            new(request, reservation, symbolLedger, null);
+            SymbolLedger symbolLedger,
+            ForwardSpawn? anchor = null) =>
+            new(request, symbolLedger, anchor, null);
 
         internal static FeatureSlotAttempt Fail(ForwardFeaturePlacementResult result) =>
             new(null, null, null, result);

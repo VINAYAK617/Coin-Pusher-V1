@@ -1,5 +1,7 @@
 namespace CoinPusherEngine;
 
+using GameEngine;
+
 public enum CoinPusherTicketGenerationStatus
 {
     Valid,
@@ -48,11 +50,18 @@ public sealed class CoinPusherTicketGenerator
     private static readonly Random SeedRng = new();
     private static readonly object SeedLock = new();
 
+    private readonly ICustomProfileSettings _settings;
     private readonly CoinPusherTicketGenerationRequestValidator _requestValidator;
 
     public CoinPusherTicketGenerator()
+        : this(Settings)
     {
-        _requestValidator = new CoinPusherTicketGenerationRequestValidator();
+    }
+
+    internal CoinPusherTicketGenerator(ICustomProfileSettings settings)
+    {
+        _settings = settings;
+        _requestValidator = new CoinPusherTicketGenerationRequestValidator(_settings);
     }
 
     public CoinPusherTicketGenerationResult Generate(
@@ -76,7 +85,7 @@ public sealed class CoinPusherTicketGenerator
 
         var actualSeed = seed ?? NextSeed();
         var requestedPrizeAmounts = prizeAmounts!.ToArray();
-        var maxAttempts = Settings.MaxPlanAttempts;
+        var maxAttempts = Math.Max(1, _settings.MaxPlanAttempts);
         ForwardTicketGenerationResult? lastGeneration = null;
         string? lastValidationDetail = null;
         var lastSeed = actualSeed;
@@ -85,7 +94,7 @@ public sealed class CoinPusherTicketGenerator
         {
             var attemptSeed = SeedForAttempt(actualSeed, attempt);
             lastSeed = attemptSeed;
-            var generated = new ForwardTicketGenerator(attemptSeed).Generate(requestedPrizeAmounts);
+            var generated = new ForwardTicketGenerator(_settings, attemptSeed).Generate(requestedPrizeAmounts);
             lastGeneration = generated;
             if (!generated.IsValid)
                 continue;

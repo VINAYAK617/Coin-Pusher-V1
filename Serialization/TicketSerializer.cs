@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Collections.Generic;
+using GameEngine;
 using Newtonsoft.Json;
 namespace CoinPusherEngine;
 
@@ -16,9 +17,9 @@ namespace CoinPusherEngine;
 ///   PRIZE_UPGRADE -> { FeatureId, ConvertToId, UpgradeSymbolId, UpgradePrizeValue }
 ///
 /// ReTrigger chaining: with configurable probability, a same-turn cosmetic
-/// PRIZE_UPGRADE token may be folded into another feature token's ReTrigger array.
-/// EXTRA_SPIN always stays physical because TotalSpins is load-bearing. WHEEL also
-/// stays physical because its board position affects which symbols receive stack.
+/// PRIZE_UPGRADE token may be folded into another no-board-effect feature token's
+/// ReTrigger array. EXTRA_SPIN always stays physical because TotalSpins is
+/// load-bearing. WHEEL always stays physical because board position affects stacking.
 /// ReTrigger depth is intentionally capped at one nested feature.
 ///
 /// Pos field: every spawn carries "Pos": row*5+col (flat index), per the established schema.
@@ -90,13 +91,14 @@ public static class TicketSerializer
         ToTicketObject(plan, Settings);
 
     /// <summary>Build the plain object graph (no JSON string yet) for a verified GamePlan.</summary>
-    public static TicketDto ToTicketObject(GamePlan plan, GameEngine.ICustomProfileSettings settings)
+    public static TicketDto ToTicketObject(GamePlan plan, ICustomProfileSettings settings)
     {
+        TicketSerializationValidator.Validate(plan, settings);
         var board = plan.Spins[0].Board;
         var startingBoard = Enumerable.Range(0, settings.ROWS).Select(r =>
             Enumerable.Range(0, settings.COLS).Select(c => new BoardCellDto { Id = board[r, c]?.Sym ?? 0 }).ToArray()
         ).ToArray();
-        var collectedTotals = Sim.Run(plan);
+        var collectedTotals = Sim.Run(plan, settings);
 
         return new TicketDto
         {
@@ -117,7 +119,7 @@ public static class TicketSerializer
     private static NonWinSymbolDto[] BuildNonWinSymbols(
         GamePlan plan,
         IReadOnlyDictionary<int, int> collectedTotals,
-        GameEngine.ICustomProfileSettings settings)
+        ICustomProfileSettings settings)
     {
         var ids = plan.NonWinTargets.Keys
             .Concat(collectedTotals
@@ -150,16 +152,18 @@ public static class TicketSerializer
         ToJson(plan, Settings);
 
     /// <summary>Serialize a verified GamePlan straight to an indented JSON string.</summary>
-    public static string ToJson(GamePlan plan, GameEngine.ICustomProfileSettings settings) =>
+    public static string ToJson(GamePlan plan, ICustomProfileSettings settings) =>
         JsonConvert.SerializeObject(ToTicketObject(plan, settings), new JsonSerializerSettings
         {
             Formatting = Formatting.None,
-            NullValueHandling = NullValueHandling.Ignore
+            NullValueHandling = NullValueHandling.Ignore,
+            // Pos=0 is a valid board position and must never be omitted.
+            DefaultValueHandling = DefaultValueHandling.Include
         });
 
     // ── Turn / spawn assembly ───────────────────────────────────────────────────
 
-    private static TurnDto[] BuildTurns(GamePlan plan, GameEngine.ICustomProfileSettings settings)
+    private static TurnDto[] BuildTurns(GamePlan plan, ICustomProfileSettings settings)
     {
         var allFeatureTokens = plan.Spins
             .SelectMany(sp => sp.Spawns
@@ -223,38 +227,40 @@ public static class TicketSerializer
     private static FeatureChainPlan BuildFeatureChainPlan(
         GamePlan plan,
         IReadOnlyList<(int Spin, (int, int) Pos, Cell Cell)> featureTokens,
-        GameEngine.ICustomProfileSettings settings)
+        ICustomProfileSettings settings)
     {
         if (featureTokens.Count == 0) return FeatureChainPlan.Empty;
+
+        if (featureTokens.Count < 2) return FeatureChainPlan.Empty;
 
         var chainable = featureTokens
             .Where(token => token.Spin < plan.TotalSpins)
             .Where(token => IsReTriggerChainStart(token.Cell, settings))
-            .ToList();
-        if (chainable.Count == 0) return FeatureChainPlan.Empty;
-
-        if (featureTokens.Count < 2) return FeatureChainPlan.Empty;
-
-        var ordered = chainable
             .OrderBy(token => token.Spin)
             .ThenBy(token => token.Pos.Item1 * settings.COLS + token.Pos.Item2)
             .ThenBy(token => token.Cell.Sym)
             .ToList();
-
-        var start = ordered[DeterministicIndex(plan, ordered.Count, salt: 97, settings)];
-        var payloadCandidates = featureTokens
-            .OrderBy(token => token.Spin)
-            .ThenBy(token => token.Pos.Item1 * settings.COLS + token.Pos.Item2)
-            .ThenBy(token => token.Cell.Sym)
-            .Where(token => token.Spin != start.Spin || token.Pos != start.Pos)
-            .Where(token => IsTimingSafeReTriggerPayload(start, token, settings))
+        var candidates = chainable
+            .Select(start => new FeatureChainCandidate(
+                start,
+                featureTokens
+                    .OrderBy(token => token.Spin)
+                    .ThenBy(token => token.Pos.Item1 * settings.COLS + token.Pos.Item2)
+                    .ThenBy(token => token.Cell.Sym)
+                    .Where(token => token.Spin != start.Spin || token.Pos != start.Pos)
+                    .Where(token => IsTimingSafeReTriggerPayload(start, token, settings))
+                    .ToArray()))
+            .Where(candidate => candidate.Payloads.Count > 0)
             .ToList();
-        if (payloadCandidates.Count == 0) return FeatureChainPlan.Empty;
+        if (candidates.Count == 0) return FeatureChainPlan.Empty;
 
-        var roll = DeterministicUnitInterval(plan, start.Cell.Sym, start.Spin, start.Pos, payloadCandidates.Count, settings);
+        var selected = candidates[DeterministicIndex(plan, candidates.Count, salt: 97, settings)];
+        var start = selected.Start;
+
+        var roll = DeterministicUnitInterval(plan, start.Cell.Sym, start.Spin, start.Pos, selected.Payloads.Count, settings);
         if (roll >= settings.PFeatureRetriggerChain) return FeatureChainPlan.Empty;
 
-        var payload = payloadCandidates[DeterministicIndex(plan, payloadCandidates.Count, salt: 193, settings)];
+        var payload = selected.Payloads[DeterministicIndex(plan, selected.Payloads.Count, salt: 193, settings)];
         var startConvertToId = RequireConvertSymbol(start.Cell, settings, "ReTrigger chain start");
         var nested = FeatureObj(
             payload.Cell,
@@ -266,16 +272,16 @@ public static class TicketSerializer
         return new FeatureChainPlan(start, new[] { payload }, nested);
     }
 
-    private static bool IsNoBoardEffectFeature(Cell cell, GameEngine.ICustomProfileSettings settings) =>
+    private static bool IsNoBoardEffectFeature(Cell cell, ICustomProfileSettings settings) =>
         cell.Sym == settings.F_XSPIN || cell.Sym == settings.F_PRUP;
 
-    private static bool IsReTriggerChainStart(Cell cell, GameEngine.ICustomProfileSettings settings) =>
+    private static bool IsReTriggerChainStart(Cell cell, ICustomProfileSettings settings) =>
         IsNoBoardEffectFeature(cell, settings);
 
     private static bool IsTimingSafeReTriggerPayload(
         (int Spin, (int, int) Pos, Cell Cell) start,
         (int Spin, (int, int) Pos, Cell Cell) payload,
-        GameEngine.ICustomProfileSettings settings)
+        ICustomProfileSettings settings)
     {
         if (payload.Cell.Sym == settings.F_XSPIN)
             return false;
@@ -285,6 +291,10 @@ public static class TicketSerializer
 
         return payload.Cell.Sym == settings.F_PRUP;
     }
+
+    private sealed record FeatureChainCandidate(
+        (int Spin, (int, int) Pos, Cell Cell) Start,
+        IReadOnlyList<(int Spin, (int, int) Pos, Cell Cell)> Payloads);
 
     private sealed record FeatureChainPlan(
         (int Spin, (int, int) Pos, Cell Cell)? Start,
@@ -301,7 +311,7 @@ public static class TicketSerializer
         int spin,
         (int r, int c) pos,
         int payloadCount,
-        GameEngine.ICustomProfileSettings settings)
+        ICustomProfileSettings settings)
     {
         unchecked
         {
@@ -314,7 +324,7 @@ public static class TicketSerializer
         }
     }
 
-    private static int DeterministicIndex(GamePlan plan, int count, int salt, GameEngine.ICustomProfileSettings settings)
+    private static int DeterministicIndex(GamePlan plan, int count, int salt, ICustomProfileSettings settings)
     {
         if (count <= 1) return 0;
         unchecked
@@ -323,7 +333,7 @@ public static class TicketSerializer
         }
     }
 
-    private static uint FeatureChainHash(GamePlan plan, int salt, GameEngine.ICustomProfileSettings settings)
+    private static uint FeatureChainHash(GamePlan plan, int salt, ICustomProfileSettings settings)
     {
         unchecked
         {
@@ -357,7 +367,7 @@ public static class TicketSerializer
         }
     }
 
-    private static SpawnDto SpawnObj(Cell c, int pos, GamePlan plan, GameEngine.ICustomProfileSettings settings)
+    private static SpawnDto SpawnObj(Cell c, int pos, GamePlan plan, ICustomProfileSettings settings)
     {
         if (!c.IsFeat)
             return c.Stack > 1
@@ -406,7 +416,7 @@ public static class TicketSerializer
     private static FeatureDto FeatureObj(
         Cell c,
         GamePlan plan,
-        GameEngine.ICustomProfileSettings settings,
+        ICustomProfileSettings settings,
         FeatureDto[]? reTrigger = null,
         int depth = 0,
         int? convertToOverride = null)
@@ -425,32 +435,31 @@ public static class TicketSerializer
 
         if (c.Sym == settings.F_WHEEL)
         {
-            dto.WheelSymbolId = c.Fp?.WheelSym ?? 0;
+            dto.WheelSymbolId = c.Fp!.WheelSym;
             // Public JSON uses bonus semantics: N means a collected cell counts
             // as 1 + N. Internally Fp.WheelStack stores the total stack value.
-            dto.WheelStackValue = Math.Clamp(
-                Math.Max(0, (c.Fp?.WheelStack ?? 1) - 1),
-                settings.MIN_WHEEL_STACK_VALUE,
-                settings.MAX_WHEEL_STACK_VALUE);
+            dto.WheelStackValue = c.Fp.WheelStack - 1;
         }
         else if (c.Sym == settings.F_PRUP)
         {
-            dto.UpgradeSymbolId = c.Fp?.PrupSym ?? 0;
-            dto.UpgradePrizeValue = PrizeValueFor(plan, c.Fp?.PrupSym ?? 0, c.Fp?.PrupTier ?? 0);
+            dto.UpgradeSymbolId = c.Fp!.PrupSym;
+            dto.UpgradePrizeValue = PrizeValueFor(plan, c.Fp.PrupSym, c.Fp.PrupTier);
         }
 
         return dto;
     }
 
-    private static SpawnDto ConvertedSpawnObj(Cell c, int pos, GameEngine.ICustomProfileSettings settings)
+    private static SpawnDto ConvertedSpawnObj(Cell c, int pos, ICustomProfileSettings settings)
     {
         int cvt = RequireConvertSymbol(c, settings, "suppressed ReTrigger payload");
         return new SpawnDto { Pos = pos, Id = cvt };
     }
 
-    private static int RequireConvertSymbol(Cell c, GameEngine.ICustomProfileSettings settings, string context)
+    private static int RequireConvertSymbol(Cell c, ICustomProfileSettings settings, string context)
     {
-        if (IsNormalSymbolId(c.CvtSym, settings))
+        if (c.CvtSym >= 1
+            && c.CvtSym <= settings.PrizeLadderRows.Count
+            && !settings.IsFeat(c.CvtSym))
             return c.CvtSym;
 
         throw new InvalidOperationException(
@@ -458,19 +467,13 @@ public static class TicketSerializer
             "feature conversion must target a normal symbol.");
     }
 
-    private static bool IsNormalSymbolId(int symbol, GameEngine.ICustomProfileSettings settings) =>
-        symbol >= 1
-        && symbol <= settings.PrizeLadderRows.Count
-        && !settings.IsFeat(symbol);
-
     private static decimal PrizeValueFor(GamePlan plan, int sym, int tier)
     {
         if (plan.PrizeValues.TryGetValue(sym, out var tiers)
             && tiers.TryGetValue(tier, out decimal value))
             return value;
 
-        // Hand-authored MathInput may only provide PrizeTiers. Keep serialization usable
-        // while LadderCombinator-backed tickets emit actual prize values.
-        return tier;
+        throw new InvalidOperationException(
+            $"No configured prize value exists for symbol {sym}, tier {tier}.");
     }
 }

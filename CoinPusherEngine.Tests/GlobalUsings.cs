@@ -1,1 +1,1 @@
-global using static GameEngine.Engine;
+global using GameEngine;

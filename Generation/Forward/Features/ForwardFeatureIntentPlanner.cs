@@ -9,6 +9,7 @@ internal enum ForwardFeatureIntentStatus
     FeatureOnFinalTurn,
     NoWheelTargetSymbol,
     InvalidWheelStackConfig,
+    WheelCapacityUnsatisfied,
     OptionalPrizeUpgradeNoTarget,
     PrizeUpgradeNoEligibleSymbol,
     PrizeUpgradeInvalid,
@@ -23,6 +24,8 @@ internal sealed class ForwardFeatureIntent
         int turn,
         int? wheelSymbol,
         int? wheelStackValue,
+        bool isCapacityRequiredWheel,
+        int plannedWheelCollectionBonus,
         int? upgradeSymbol,
         int? upgradeTier,
         decimal? upgradePrizeValue)
@@ -31,6 +34,8 @@ internal sealed class ForwardFeatureIntent
         Turn = turn;
         WheelSymbol = wheelSymbol;
         WheelStackValue = wheelStackValue;
+        IsCapacityRequiredWheel = isCapacityRequiredWheel;
+        PlannedWheelCollectionBonus = plannedWheelCollectionBonus;
         UpgradeSymbol = upgradeSymbol;
         UpgradeTier = upgradeTier;
         UpgradePrizeValue = upgradePrizeValue;
@@ -40,6 +45,8 @@ internal sealed class ForwardFeatureIntent
     internal int Turn { get; }
     internal int? WheelSymbol { get; }
     internal int? WheelStackValue { get; }
+    internal bool IsCapacityRequiredWheel { get; }
+    internal int PlannedWheelCollectionBonus { get; }
     internal int? ResultingWheelStack => WheelStackValue.HasValue ? WheelStackValue.Value + 1 : null;
     internal int? UpgradeSymbol { get; }
     internal int? UpgradeTier { get; }
@@ -49,21 +56,35 @@ internal sealed class ForwardFeatureIntent
         || Kind == ForwardTimedFeatureKind.ExtraGo
         || Kind == ForwardTimedFeatureKind.PrizeUpgrade;
 
-    internal static ForwardFeatureIntent Wheel(int turn, int symbol, int stackValue) =>
-        new(ForwardTimedFeatureKind.Wheel, turn, symbol, stackValue, null, null, null);
+    internal static ForwardFeatureIntent Wheel(
+        int turn,
+        int symbol,
+        int stackValue,
+        bool isCapacityRequired = false,
+        int plannedCollectionBonus = 0) =>
+        new(
+            ForwardTimedFeatureKind.Wheel,
+            turn,
+            symbol,
+            stackValue,
+            isCapacityRequired,
+            plannedCollectionBonus,
+            null,
+            null,
+            null);
 
     internal static ForwardFeatureIntent Flush(int turn) =>
-        new(ForwardTimedFeatureKind.Flush, turn, null, null, null, null, null);
+        new(ForwardTimedFeatureKind.Flush, turn, null, null, false, 0, null, null, null);
 
     internal static ForwardFeatureIntent ExtraGo(int turn) =>
-        new(ForwardTimedFeatureKind.ExtraGo, turn, null, null, null, null, null);
+        new(ForwardTimedFeatureKind.ExtraGo, turn, null, null, false, 0, null, null, null);
 
     internal static ForwardFeatureIntent PrizeUpgrade(
         int turn,
         int symbol,
         int tier,
         decimal prizeValue) =>
-        new(ForwardTimedFeatureKind.PrizeUpgrade, turn, null, null, symbol, tier, prizeValue);
+        new(ForwardTimedFeatureKind.PrizeUpgrade, turn, null, null, false, 0, symbol, tier, prizeValue);
 }
 
 internal sealed class ForwardFeatureIntentPlan
@@ -119,16 +140,21 @@ internal sealed class ForwardFeatureIntentResult
 
 internal sealed class ForwardFeatureIntentPlanner
 {
+    private const int MaxPublicWheelStackValue = 3;
+
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
 
-    internal ForwardFeatureIntentPlanner(int seed)
+    internal ForwardFeatureIntentPlanner(ICustomProfileSettings settings, int seed)
     {
+        _settings = settings;
         _rng = new Random(seed);
     }
 
     internal ForwardFeatureIntentResult Plan(
         ForwardObjectives? objectives,
-        ForwardFeatureTiming? timing)
+        ForwardFeatureTiming? timing,
+        ForwardFeatureBudget? budget = null)
     {
         if (objectives == null)
             return Fail(ForwardFeatureIntentStatus.MissingObjectives, "forward objectives are missing");
@@ -140,7 +166,7 @@ internal sealed class ForwardFeatureIntentPlanner
 
         var optional = AddOptionalPrizeUpgradeTargets(
             objectives,
-            timing.Count(ForwardTimedFeatureKind.PrizeUpgrade),
+            timing,
             effectivePrizeTiers,
             effectiveNonWinPrizeTiers);
         if (!optional.IsValid) return optional;
@@ -151,8 +177,13 @@ internal sealed class ForwardFeatureIntentPlanner
         var upgradeLedger = new ForwardPrizeUpgradeLedger(
             targetTiers,
             objectives.PrizeValues,
-            objectives.MaxSymbol);
+            objectives.MaxSymbol,
+            _settings);
         var intents = new List<ForwardFeatureIntent>();
+        var plannedWheelSymbols = new List<int>();
+        var plannedWheelBonus = 0;
+        var totalWheelCount = timing.Count(ForwardTimedFeatureKind.Wheel);
+        var minimumWheelBonus = Math.Max(0, budget?.MinimumWheelBonus ?? 0);
 
         foreach (var turnGroup in timing.Events
                      .OrderBy(feature => feature.Turn)
@@ -169,7 +200,12 @@ internal sealed class ForwardFeatureIntentPlanner
             {
                 var intent = timedFeature.Kind switch
                 {
-                    ForwardTimedFeatureKind.Wheel => BuildWheelIntent(timedFeature.Turn, objectives),
+                    ForwardTimedFeatureKind.Wheel => BuildWheelIntent(
+                        timedFeature.Turn,
+                        objectives,
+                        plannedWheelSymbols,
+                        totalWheelCount - plannedWheelSymbols.Count,
+                        Math.Max(0, minimumWheelBonus - plannedWheelBonus)),
                     ForwardTimedFeatureKind.Flush => IntentBuildResult.Ok(ForwardFeatureIntent.Flush(timedFeature.Turn)),
                     ForwardTimedFeatureKind.ExtraGo => IntentBuildResult.Ok(ForwardFeatureIntent.ExtraGo(timedFeature.Turn)),
                     ForwardTimedFeatureKind.PrizeUpgrade => BuildPrizeUpgradeIntent(
@@ -182,8 +218,25 @@ internal sealed class ForwardFeatureIntentPlanner
                 };
 
                 if (!intent.IsValid) return intent.Result!;
-                intents.Add(intent.Intent!);
+                var builtIntent = intent.Intent!;
+                intents.Add(builtIntent);
+                if (builtIntent.Kind == ForwardTimedFeatureKind.Wheel
+                    && builtIntent.WheelSymbol.HasValue)
+                {
+                    plannedWheelSymbols.Add(builtIntent.WheelSymbol.Value);
+                    plannedWheelBonus += WheelCapacityBonus(
+                        builtIntent.WheelSymbol.Value,
+                        builtIntent.WheelStackValue!.Value,
+                        objectives);
+                }
             }
+        }
+
+        if (plannedWheelBonus < minimumWheelBonus)
+        {
+            return Fail(
+                ForwardFeatureIntentStatus.WheelCapacityUnsatisfied,
+                $"planned WHEEL bonus={plannedWheelBonus}, required minimum={minimumWheelBonus}");
         }
 
         var finalFailures = upgradeLedger.ValidateFinal();
@@ -208,10 +261,11 @@ internal sealed class ForwardFeatureIntentPlanner
 
     private ForwardFeatureIntentResult AddOptionalPrizeUpgradeTargets(
         ForwardObjectives objectives,
-        int timedPrizeUpgradeCount,
+        ForwardFeatureTiming timing,
         Dictionary<int, int> effectivePrizeTiers,
         Dictionary<int, int> effectiveNonWinPrizeTiers)
     {
+        var timedPrizeUpgradeCount = timing.Count(ForwardTimedFeatureKind.PrizeUpgrade);
         var declaredCount = effectivePrizeTiers.Values.Sum() + effectiveNonWinPrizeTiers.Values.Sum();
         var optionalCount = timedPrizeUpgradeCount - declaredCount;
         if (optionalCount < 0)
@@ -221,105 +275,253 @@ internal sealed class ForwardFeatureIntentPlanner
                 $"timing has {timedPrizeUpgradeCount} PRIZE_UPGRADE feature(s), but declarations require {declaredCount}");
         }
 
-        for (var i = 0; i < optionalCount; i++)
+        var allocation = PickOptionalPrizeUpgradeSymbols(
+            objectives,
+            optionalCount,
+            effectiveNonWinPrizeTiers,
+            timing.TurnsFor(ForwardTimedFeatureKind.PrizeUpgrade)
+                .GroupBy(turn => turn)
+                .Any(group => group.Count() > 1));
+        if (allocation.Count != optionalCount)
         {
-            var symbol = PickOptionalPrizeUpgradeSymbol(objectives, effectiveNonWinPrizeTiers);
-            if (symbol <= 0)
-            {
-                return Fail(
-                    ForwardFeatureIntentStatus.OptionalPrizeUpgradeNoTarget,
-                    "optional PRIZE_UPGRADE needs an existing near-miss symbol with a configured next prize tier");
-            }
-
-            effectiveNonWinPrizeTiers[symbol] = effectiveNonWinPrizeTiers.GetValueOrDefault(symbol) + 1;
+            return Fail(
+                ForwardFeatureIntentStatus.OptionalPrizeUpgradeNoTarget,
+                "optional PRIZE_UPGRADE needs existing near-miss symbol(s) with configured next prize tiers");
         }
+
+        foreach (var symbol in allocation)
+            effectiveNonWinPrizeTiers[symbol] = effectiveNonWinPrizeTiers.GetValueOrDefault(symbol) + 1;
 
         return Ok();
     }
 
-    private int PickOptionalPrizeUpgradeSymbol(
+    private IReadOnlyList<int> PickOptionalPrizeUpgradeSymbols(
+        ForwardObjectives objectives,
+        int optionalCount,
+        IReadOnlyDictionary<int, int> startingNonWinPrizeTiers,
+        bool requireSpread)
+    {
+        var allocation = new List<int>();
+        if (optionalCount <= 0) return allocation;
+
+        var workingTiers = startingNonWinPrizeTiers.ToDictionary(kv => kv.Key, kv => kv.Value);
+        var stackStyle = !requireSpread
+            && ShouldStackOptionalPrizeUpgrades(objectives, optionalCount, workingTiers);
+
+        if (stackStyle)
+            AddStackedOptionalPrizeUpgrades(objectives, optionalCount, workingTiers, allocation);
+
+        while (allocation.Count < optionalCount)
+        {
+            var symbol = PickSpreadOptionalPrizeUpgradeSymbol(objectives, workingTiers);
+            if (symbol <= 0) break;
+
+            allocation.Add(symbol);
+            workingTiers[symbol] = workingTiers.GetValueOrDefault(symbol) + 1;
+        }
+
+        return allocation;
+    }
+
+    private bool ShouldStackOptionalPrizeUpgrades(
+        ForwardObjectives objectives,
+        int optionalCount,
+        IReadOnlyDictionary<int, int> workingTiers)
+    {
+        if (optionalCount < 2) return false;
+
+        var candidates = OptionalPrizeUpgradeCandidates(objectives, workingTiers);
+        if (candidates.Count == 0) return false;
+        if (candidates.Count == 1) return true;
+
+        return _rng.NextDouble() < Math.Max(0.0, Math.Min(1.0, _settings.WExpStack));
+    }
+
+    private void AddStackedOptionalPrizeUpgrades(
+        ForwardObjectives objectives,
+        int optionalCount,
+        Dictionary<int, int> workingTiers,
+        List<int> allocation)
+    {
+        var symbol = PickStackedOptionalPrizeUpgradeSymbol(objectives, workingTiers);
+        while (symbol > 0 && allocation.Count < optionalCount && CanAdvanceOptionalPrizeUpgrade(objectives, symbol, workingTiers))
+        {
+            allocation.Add(symbol);
+            workingTiers[symbol] = workingTiers.GetValueOrDefault(symbol) + 1;
+        }
+    }
+
+    private int PickStackedOptionalPrizeUpgradeSymbol(
         ForwardObjectives objectives,
         IReadOnlyDictionary<int, int> effectiveNonWinPrizeTiers)
     {
-        var candidates = objectives.NearMissTargets.Keys
-            .Where(symbol => objectives.PrizeValues.TryGetValue(symbol, out var tiers)
-                && tiers.ContainsKey(effectiveNonWinPrizeTiers.GetValueOrDefault(symbol) + 1))
-            .OrderByDescending(symbol => objectives.NearMissTargets[symbol])
-            .ThenBy(symbol => symbol)
+        var candidates = OptionalPrizeUpgradeCandidates(objectives, effectiveNonWinPrizeTiers);
+        if (candidates.Count == 0) return 0;
+
+        var bestRemaining = candidates.Max(candidate => candidate.RemainingSteps);
+        return PickWeightedOptionalPrizeUpgradeSymbol(
+            candidates.Where(candidate => candidate.RemainingSteps == bestRemaining).ToArray());
+    }
+
+    private int PickSpreadOptionalPrizeUpgradeSymbol(
+        ForwardObjectives objectives,
+        IReadOnlyDictionary<int, int> effectiveNonWinPrizeTiers)
+    {
+        var candidates = OptionalPrizeUpgradeCandidates(objectives, effectiveNonWinPrizeTiers);
+        if (candidates.Count == 0) return 0;
+
+        var lowestTier = candidates.Min(candidate => candidate.CurrentTier);
+        return PickWeightedOptionalPrizeUpgradeSymbol(
+            candidates.Where(candidate => candidate.CurrentTier == lowestTier).ToArray());
+    }
+
+    private IReadOnlyList<(int Symbol, int CurrentTier, int RemainingSteps, int NearMissTarget)> OptionalPrizeUpgradeCandidates(
+        ForwardObjectives objectives,
+        IReadOnlyDictionary<int, int> effectiveNonWinPrizeTiers) =>
+        objectives.NearMissTargets.Keys
+            .Select(symbol => OptionalPrizeUpgradeCandidate(objectives, effectiveNonWinPrizeTiers, symbol))
+            .Where(candidate => candidate.RemainingSteps > 0)
+            .OrderByDescending(candidate => candidate.NearMissTarget)
+            .ThenBy(candidate => candidate.Symbol)
             .ToArray();
 
-        return candidates.Length == 0 ? 0 : candidates[_rng.Next(candidates.Length)];
+    private static (int Symbol, int CurrentTier, int RemainingSteps, int NearMissTarget) OptionalPrizeUpgradeCandidate(
+        ForwardObjectives objectives,
+        IReadOnlyDictionary<int, int> effectiveNonWinPrizeTiers,
+        int symbol)
+    {
+        var currentTier = effectiveNonWinPrizeTiers.GetValueOrDefault(symbol);
+        if (!objectives.PrizeValues.TryGetValue(symbol, out var tiers))
+            return (symbol, currentTier, 0, objectives.NearMissTargets.GetValueOrDefault(symbol));
+
+        var highestTier = tiers.Keys
+            .Where(tier => tier > currentTier)
+            .DefaultIfEmpty(currentTier)
+            .Max();
+        return (
+            symbol,
+            currentTier,
+            Math.Max(0, highestTier - currentTier),
+            objectives.NearMissTargets.GetValueOrDefault(symbol));
+    }
+
+    private static bool CanAdvanceOptionalPrizeUpgrade(
+        ForwardObjectives objectives,
+        int symbol,
+        IReadOnlyDictionary<int, int> effectiveNonWinPrizeTiers) =>
+        OptionalPrizeUpgradeCandidate(objectives, effectiveNonWinPrizeTiers, symbol).RemainingSteps > 0;
+
+    private int PickWeightedOptionalPrizeUpgradeSymbol(
+        IReadOnlyList<(int Symbol, int CurrentTier, int RemainingSteps, int NearMissTarget)> candidates)
+    {
+        if (candidates.Count == 0) return 0;
+
+        var weighted = candidates
+            .Select(candidate => (candidate.Symbol, Weight: Math.Max(1.0, candidate.NearMissTarget)))
+            .ToArray();
+        var total = weighted.Sum(candidate => candidate.Weight);
+        var roll = _rng.NextDouble() * total;
+        var acc = 0.0;
+        foreach (var candidate in weighted)
+        {
+            acc += candidate.Weight;
+            if (roll <= acc) return candidate.Symbol;
+        }
+
+        return weighted[^1].Symbol;
     }
 
     private IntentBuildResult BuildWheelIntent(
         int turn,
-        ForwardObjectives objectives)
+        ForwardObjectives objectives,
+        IReadOnlyList<int> plannedWheelSymbols,
+        int remainingWheelCount,
+        int remainingRequiredBonus)
     {
-        var symbol = PickWheelSymbol(objectives);
-        if (symbol <= 0)
+        if (WheelSymbolCandidates(objectives).Count == 0)
             return IntentBuildResult.Fail(Fail(ForwardFeatureIntentStatus.NoWheelTargetSymbol, "no normal symbol is available for WHEEL"));
 
-        var stackValue = PickWheelStackValue(objectives);
-        if (stackValue <= 0)
-            return IntentBuildResult.Fail(Fail(ForwardFeatureIntentStatus.InvalidWheelStackConfig, "no legal WHEEL stack value is configured"));
+        var options = WheelOptions(objectives);
+        if (options.Count == 0)
+            return IntentBuildResult.Fail(Fail(ForwardFeatureIntentStatus.InvalidWheelStackConfig, "no weighted legal WHEEL stack value is configured"));
 
-        return IntentBuildResult.Ok(ForwardFeatureIntent.Wheel(turn, symbol, stackValue));
-    }
-
-    private int PickWheelSymbol(ForwardObjectives objectives)
-    {
-        var pureFiller = objectives.FillSymbols
-            .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
-            .Where(symbol => !objectives.NearMissTargets.ContainsKey(symbol))
-            .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !Settings.IsFeat(symbol))
-            .Distinct()
-            .OrderBy(symbol => symbol)
+        var futureWheelCount = Math.Max(0, remainingWheelCount - 1);
+        var maxFutureBonus = futureWheelCount * options.Max(option => option.Bonus);
+        var feasible = options
+            .Where(option => option.Bonus + maxFutureBonus >= remainingRequiredBonus)
             .ToArray();
-        if (pureFiller.Length > 0)
-            return PickWeightedWheelSymbol(pureFiller, objectives);
-
-        var nonWinning = objectives.NearMissTargets.Keys
-            .Concat(objectives.FillSymbols)
-            .Where(symbol => !objectives.WinTargets.ContainsKey(symbol))
-            .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !Settings.IsFeat(symbol))
-            .Distinct()
-            .OrderBy(symbol => symbol)
-            .ToArray();
-        if (objectives.WinCompletionTurn.HasValue)
-            return nonWinning.Length == 0 ? 0 : PickWeightedWheelSymbol(nonWinning, objectives);
-
-        var candidates = nonWinning.Length > 0
-            ? nonWinning
-            : objectives.WinSymbols
-                .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !Settings.IsFeat(symbol))
-                .Distinct()
-                .OrderBy(symbol => symbol)
-                .ToArray();
-        if (candidates.Length == 0) return 0;
-
-        return PickWeightedWheelSymbol(candidates, objectives);
-    }
-
-    private int PickWeightedWheelSymbol(
-        IReadOnlyList<int> candidates,
-        ForwardObjectives objectives)
-    {
-        var weighted = candidates
-            .Select(symbol => (Symbol: symbol, Weight: WheelSymbolWeight(symbol, objectives)))
-            .Where(item => item.Weight > 0)
-            .ToArray();
-        if (weighted.Length == 0) return candidates[_rng.Next(candidates.Count)];
-
-        var total = weighted.Sum(item => item.Weight);
-        var roll = _rng.NextDouble() * total;
-        var acc = 0.0;
-        foreach (var item in weighted)
+        if (feasible.Length == 0)
         {
-            acc += item.Weight;
-            if (roll <= acc) return item.Symbol;
+            return IntentBuildResult.Fail(Fail(
+                ForwardFeatureIntentStatus.WheelCapacityUnsatisfied,
+                $"remaining WHEEL bonus={remainingRequiredBonus} cannot be satisfied by {remainingWheelCount} WHEEL event(s)"));
         }
 
-        return weighted[^1].Symbol;
+        var repeatSymbols = plannedWheelSymbols.ToHashSet();
+        var repeated = feasible
+            .Where(option => repeatSymbols.Contains(option.Symbol))
+            .ToArray();
+        if (repeated.Length > 0 && _rng.NextDouble() < _settings.PWheelRepeatOptional)
+        {
+            feasible = repeated;
+        }
+
+        var selected = PickWeightedWheelOption(feasible);
+        return IntentBuildResult.Ok(ForwardFeatureIntent.Wheel(
+            turn,
+            selected.Symbol,
+            selected.StackValue,
+            isCapacityRequired: remainingRequiredBonus > 0 && selected.Bonus > 0,
+            plannedCollectionBonus: selected.Bonus));
+    }
+
+    private IReadOnlyList<int> WheelSymbolCandidates(ForwardObjectives objectives)
+    {
+        return objectives.FillSymbols
+            .Concat(objectives.NearMissTargets.Keys)
+            .Concat(objectives.WinSymbols)
+            .Where(symbol => symbol >= 1 && symbol <= objectives.MaxSymbol && !_settings.IsFeat(symbol))
+            .Distinct()
+            .OrderBy(symbol => symbol)
+            .ToArray();
+    }
+
+    private IReadOnlyList<WheelOption> WheelOptions(ForwardObjectives objectives)
+    {
+        var maxValue = Math.Min(
+            Math.Min(_settings.MAX_WHEEL_STACK_VALUE, _settings.MAX_COIN_STACK - 1),
+            MaxPublicWheelStackValue);
+        var minValue = Math.Max(1, _settings.MIN_WHEEL_STACK_VALUE);
+        if (minValue > maxValue) return Array.Empty<WheelOption>();
+
+        return WheelSymbolCandidates(objectives)
+            .SelectMany(symbol => Enumerable.Range(minValue, maxValue - minValue + 1)
+                .Select(stackValue => new WheelOption(
+                    symbol,
+                    stackValue,
+                    WheelCapacityBonus(symbol, stackValue, objectives),
+                    WheelSymbolWeight(symbol, objectives) * WheelStackWeight(stackValue))))
+            .ToArray();
+    }
+
+    private WheelOption PickWeightedWheelOption(IReadOnlyList<WheelOption> options)
+    {
+        if (options.Count == 0)
+            throw new InvalidOperationException("WHEEL option selection requires at least one option");
+
+        var total = options.Sum(item => item.Weight);
+        if (total <= 0)
+            return options[_rng.Next(options.Count)];
+
+        var roll = _rng.NextDouble() * total;
+        var acc = 0.0;
+        foreach (var item in options)
+        {
+            acc += item.Weight;
+            if (roll <= acc) return item;
+        }
+
+        return options[^1];
     }
 
     private double WheelSymbolWeight(int symbol, ForwardObjectives objectives)
@@ -336,37 +538,44 @@ internal sealed class ForwardFeatureIntentPlanner
         return weight;
     }
 
-    private int PickWheelStackValue(ForwardObjectives objectives)
-    {
-        var maxValue = Math.Min(Settings.MAX_WHEEL_STACK_VALUE, Settings.MAX_COIN_STACK - 1);
-        var minValue = Math.Max(1, Settings.MIN_WHEEL_STACK_VALUE);
-        if (minValue > maxValue) return 0;
-
-        var values = Enumerable.Range(minValue, maxValue - minValue + 1)
-            .Select(value => (Value: value, Weight: WheelStackWeight(value)))
-            .Where(item => item.Weight > 0)
-            .ToArray();
-        if (values.Length == 0) return 0;
-
-        var total = values.Sum(item => item.Weight);
-        var roll = _rng.NextDouble() * total;
-        var acc = 0.0;
-        foreach (var item in values)
-        {
-            acc += item.Weight;
-            if (roll <= acc) return item.Value;
-        }
-
-        return values[^1].Value;
-    }
-
     private double WheelStackWeight(int value) =>
         value switch
         {
-            1 => Settings.PWheelStackValue1,
-            2 => Settings.PWheelStackValue2,
-            _ => Math.Max(0.0, 1.0 - Settings.PWheelStackValue1 - Settings.PWheelStackValue2),
+            1 => _settings.PWheelStackValue1,
+            2 => _settings.PWheelStackValue2,
+            _ => Math.Max(0.0, 1.0 - _settings.PWheelStackValue1 - _settings.PWheelStackValue2),
         };
+
+    private int WheelCapacityBonus(
+        int symbol,
+        int stackValue,
+        ForwardObjectives objectives)
+    {
+        if (!objectives.WinTargets.TryGetValue(symbol, out var target))
+            return 0;
+
+        var stack = Math.Min(_settings.MAX_COIN_STACK, stackValue + 1);
+        if (stack <= 1) return 0;
+
+        var zone = Math.Max(0, Math.Min(target / stack, _settings.COLS - 1) - 1);
+        return zone * (stack - 1);
+    }
+
+    private readonly struct WheelOption
+    {
+        internal WheelOption(int symbol, int stackValue, int bonus, double weight)
+        {
+            Symbol = symbol;
+            StackValue = stackValue;
+            Bonus = bonus;
+            Weight = weight;
+        }
+
+        internal int Symbol { get; }
+        internal int StackValue { get; }
+        internal int Bonus { get; }
+        internal double Weight { get; }
+    }
 
     private IntentBuildResult BuildPrizeUpgradeIntent(
         int turn,

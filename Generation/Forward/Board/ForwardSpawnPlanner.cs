@@ -57,13 +57,16 @@ internal sealed class ForwardSpawnPlanner
 {
     private readonly ForwardSymbolSelector _selector;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
+    private readonly ICustomProfileSettings _settings;
 
     internal ForwardSpawnPlanner(
         ForwardSymbolSelector selector,
-        ForwardCellFateAnalyzer fateAnalyzer)
+        ForwardCellFateAnalyzer fateAnalyzer,
+        ICustomProfileSettings settings)
     {
         _selector = selector;
         _fateAnalyzer = fateAnalyzer;
+        _settings = settings;
     }
 
     internal ForwardSpawnPlanResult Plan(
@@ -76,7 +79,8 @@ internal sealed class ForwardSpawnPlanner
             return Fail(ForwardSpawnPlanStatus.MissingCellRequests, "cell request list is null");
 
         var seen = new HashSet<(int r, int c)>();
-        var spawns = new List<ForwardSpawn>(cells.Count);
+        var orderedCells = new List<(ForwardSpawnCellRequest Cell, ForwardCellFate Fate, int Order)>(cells.Count);
+        var order = 0;
         foreach (var cell in cells)
         {
             var validation = ValidateCell(cell, seen);
@@ -88,24 +92,49 @@ internal sealed class ForwardSpawnPlanner
             {
                 return Fail(
                     ForwardSpawnPlanStatus.CellFateInvalid,
-                    $"cell ({cell.Row},{cell.Col}) fate invalid: {fate.Detail}",
-                    spawns);
+                    $"cell ({cell.Row},{cell.Col}) fate invalid: {fate.Detail}");
             }
 
+            orderedCells.Add((cell, fate, order++));
+        }
+
+        var chronological = orderedCells
+            .OrderBy(item => item.Fate.IsCollected ? item.Fate.CollectedTurn!.Value : int.MaxValue)
+            .ThenBy(item => item.Order)
+            .ToArray();
+        var collecting = chronological
+            .Where(item => item.Fate.IsCollected)
+            .Select(item => new ForwardCollectingSpawnRequest(item.Cell, item.Fate, item.Order))
+            .ToArray();
+        var initialLedger = _selector.SnapshotLedger();
+        var assignment = new ForwardNormalSpawnAssignmentPlanner(_selector).Plan(
+            collecting,
+            (item, symbol) => EffectiveCollectionValue(
+                symbol,
+                item.Cell.LedgerCollectionValue,
+                spawnTurn,
+                item.Fate.CollectedTurn,
+                wheelImpacts));
+        if (!assignment.IsValid)
+        {
+            return Fail(
+                ForwardSpawnPlanStatus.NoSafeSymbolForCollectingCell,
+                assignment.Detail);
+        }
+
+        var spawns = new List<ForwardSpawn>(cells.Count);
+        foreach (var (cell, fate, originalOrder) in chronological)
+        {
             var selection = fate.IsCollected
-                ? _selector.ChooseAndCollect(
-                    cell.CollectIntent,
-                    symbol => EffectiveCollectionValue(
-                        symbol,
-                        cell.LedgerCollectionValue,
-                        spawnTurn,
-                        fate.CollectedTurn,
-                        wheelImpacts),
-                    fate.CollectedTurn)
+                ? new ForwardSymbolSelection(
+                    ForwardSymbolSelectionStatus.Valid,
+                    assignment.SymbolsByOrder[originalOrder],
+                    "assigned atomically")
                 : _selector.ChooseResidue();
 
             if (!selection.IsValid)
             {
+                _selector.RestoreLedger(initialLedger);
                 return Fail(
                     fate.IsCollected
                         ? ForwardSpawnPlanStatus.NoSafeSymbolForCollectingCell
@@ -142,7 +171,11 @@ internal sealed class ForwardSpawnPlanner
             if (wheel.FireTurn < spawnTurn) continue;
             if (wheel.FireTurn >= collectionTurn.Value) continue;
 
-            value = Math.Min(Settings.MAX_COIN_STACK, value + wheel.StackAdd);
+            var next = value + wheel.StackAdd;
+            if (next > _settings.MAX_COIN_STACK)
+                return 0;
+
+            value = next;
         }
 
         return value;
@@ -152,7 +185,7 @@ internal sealed class ForwardSpawnPlanner
         ForwardSpawnCellRequest cell,
         HashSet<(int r, int c)> seen)
     {
-        if (cell.Row < 0 || cell.Row >= Settings.ROWS || cell.Col < 0 || cell.Col >= Settings.COLS)
+        if (cell.Row < 0 || cell.Row >= _settings.ROWS || cell.Col < 0 || cell.Col >= _settings.COLS)
         {
             return Fail(
                 ForwardSpawnPlanStatus.InvalidSpawnPosition,

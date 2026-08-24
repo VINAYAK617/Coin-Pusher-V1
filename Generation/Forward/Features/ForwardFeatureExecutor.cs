@@ -20,6 +20,13 @@ internal sealed class ForwardFeatureFireResult
 
 internal sealed class ForwardFeatureExecutor
 {
+    private readonly ICustomProfileSettings _settings;
+
+    internal ForwardFeatureExecutor(ICustomProfileSettings settings)
+    {
+        _settings = settings;
+    }
+
     internal ForwardFeatureFireResult FireAll(Cell?[,] board)
     {
         var result = new ForwardFeatureFireResult();
@@ -34,9 +41,9 @@ internal sealed class ForwardFeatureExecutor
         do
         {
             any = false;
-            for (var row = 0; row < Settings.ROWS; row++)
+            for (var row = 0; row < _settings.ROWS; row++)
             {
-                for (var col = 0; col < Settings.COLS; col++)
+                for (var col = 0; col < _settings.COLS; col++)
                 {
                     var featureCell = board[row, col];
                     if (featureCell?.IsFeat != true) continue;
@@ -55,9 +62,9 @@ internal sealed class ForwardFeatureExecutor
                         ConvertToSymbol = convertTo,
                         WheelSymbol = IsWheel(featureCell) ? featureCell.Fp?.WheelSym : null,
                         WheelStack = IsWheel(featureCell) ? featureCell.Fp?.WheelStack : null,
-                        UpgradeSymbol = featureCell.Sym == Settings.F_PRUP ? featureCell.Fp?.PrupSym : null,
-                        UpgradeTier = featureCell.Sym == Settings.F_PRUP ? featureCell.Fp?.PrupTier : null,
-                        ExtraGoAward = featureCell.Sym == Settings.F_XSPIN ? 1 : 0,
+                        UpgradeSymbol = featureCell.Sym == _settings.F_PRUP ? featureCell.Fp?.PrupSym : null,
+                        UpgradeTier = featureCell.Sym == _settings.F_PRUP ? featureCell.Fp?.PrupTier : null,
+                        ExtraGoAward = featureCell.Sym == _settings.F_XSPIN ? 1 : 0,
                     });
                     any = true;
                 }
@@ -70,24 +77,24 @@ internal sealed class ForwardFeatureExecutor
     {
         var symbol = featureCell.Fp?.WheelSym ?? 0;
         var stack = featureCell.Fp?.WheelStack ?? 1;
-        if (symbol <= 0 || Settings.IsFeat(symbol) || stack <= 1) return;
+        if (symbol <= 0 || _settings.IsFeat(symbol) || stack <= 1) return;
 
-        for (var row = 0; row < Settings.ROWS; row++)
+        for (var row = 0; row < _settings.ROWS; row++)
         {
-            for (var col = 0; col < Settings.COLS; col++)
+            for (var col = 0; col < _settings.COLS; col++)
             {
                 var cell = board[row, col];
                 if (cell == null || cell.IsFeat || cell.Sym != symbol) continue;
-                cell.Stack = Math.Min(Settings.MAX_COIN_STACK, cell.Stack + stack - 1);
+                cell.Stack = Math.Min(_settings.MAX_COIN_STACK, cell.Stack + stack - 1);
             }
         }
     }
 
     private bool HasFeatureForPass(Cell?[,] board, bool wheelPass)
     {
-        for (var row = 0; row < Settings.ROWS; row++)
+        for (var row = 0; row < _settings.ROWS; row++)
         {
-            for (var col = 0; col < Settings.COLS; col++)
+            for (var col = 0; col < _settings.COLS; col++)
             {
                 var cell = board[row, col];
                 if (cell?.IsFeat == true && IsWheel(cell) == wheelPass)
@@ -99,11 +106,11 @@ internal sealed class ForwardFeatureExecutor
     }
 
     private bool IsWheel(Cell cell) =>
-        cell.Sym == Settings.F_WHEEL || cell.FeatId == "WHEEL";
+        cell.Sym == _settings.F_WHEEL || cell.FeatId == "WHEEL";
 
     private int ConvertTarget(Cell cell)
     {
-        if (IsNormalSymbolId(cell.CvtSym))
+        if (cell.CvtSym > 0 && !_settings.IsFeat(cell.CvtSym))
             return cell.CvtSym;
 
         throw new InvalidOperationException(
@@ -111,18 +118,13 @@ internal sealed class ForwardFeatureExecutor
             "feature conversion must target a normal symbol.");
     }
 
-    private static bool IsNormalSymbolId(int symbol) =>
-        symbol >= 1
-        && symbol <= Settings.PrizeLadderRows.Count
-        && !Settings.IsFeat(symbol);
-
     private Cell ConvertCell(Cell featureCell, int convertTo)
     {
         var converted = Grid.Norm(convertTo);
         if (IsWheel(featureCell) && featureCell.Fp?.WheelSym == convertTo)
         {
             converted.Stack = Math.Min(
-                Settings.MAX_COIN_STACK,
+                _settings.MAX_COIN_STACK,
                 Math.Max(1, featureCell.Fp?.WheelStack ?? 1));
         }
 

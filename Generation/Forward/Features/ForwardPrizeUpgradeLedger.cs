@@ -43,29 +43,34 @@ internal sealed class ForwardPrizeUpgradeLedger
     private readonly Dictionary<int, int> _targetTiers;
     private readonly IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>> _prizeValues;
     private readonly int _maxSymbol;
+    private readonly ICustomProfileSettings _settings;
     private readonly Dictionary<int, int> _currentTiers = new();
 
     internal ForwardPrizeUpgradeLedger(
         IReadOnlyDictionary<int, int> targetTiers,
         IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>> prizeValues,
-        int maxSymbol)
+        int maxSymbol,
+        ICustomProfileSettings settings)
     {
         _targetTiers = targetTiers
             .Where(kv => kv.Value > 0)
             .ToDictionary(kv => kv.Key, kv => kv.Value);
         _prizeValues = prizeValues;
         _maxSymbol = maxSymbol;
+        _settings = settings;
     }
 
     private ForwardPrizeUpgradeLedger(
         Dictionary<int, int> targetTiers,
         IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>> prizeValues,
         int maxSymbol,
+        ICustomProfileSettings settings,
         Dictionary<int, int> currentTiers)
     {
         _targetTiers = targetTiers.ToDictionary(kv => kv.Key, kv => kv.Value);
         _prizeValues = prizeValues;
         _maxSymbol = maxSymbol;
+        _settings = settings;
         _currentTiers = currentTiers.ToDictionary(kv => kv.Key, kv => kv.Value);
     }
 
@@ -76,6 +81,7 @@ internal sealed class ForwardPrizeUpgradeLedger
             _targetTiers,
             _prizeValues,
             _maxSymbol,
+            _settings,
             _currentTiers);
 
     internal void ReplaceWith(ForwardPrizeUpgradeLedger other)
@@ -87,7 +93,7 @@ internal sealed class ForwardPrizeUpgradeLedger
 
     internal ForwardPrizeUpgradeCheck ApplyUpgrade(int symbol, int requestedTier)
     {
-        if (symbol < 1 || symbol > _maxSymbol || Settings.IsFeat(symbol))
+        if (symbol < 1 || symbol > _maxSymbol || _settings.IsFeat(symbol))
         {
             return Fail(
                 ForwardPrizeUpgradeStatus.UnknownSymbol,

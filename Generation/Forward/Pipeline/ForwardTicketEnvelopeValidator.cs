@@ -49,17 +49,18 @@ internal sealed class ForwardTicketEnvelopeResult
 
 internal sealed class ForwardTicketEnvelopeValidator
 {
+    private readonly ICustomProfileSettings _settings;
     private readonly ForwardCellFateAnalyzer _fateAnalyzer;
 
-    internal ForwardTicketEnvelopeValidator()
+    internal ForwardTicketEnvelopeValidator(ICustomProfileSettings settings)
     {
-        _fateAnalyzer = new ForwardCellFateAnalyzer();
+        _settings = settings;
+        _fateAnalyzer = new ForwardCellFateAnalyzer(settings);
     }
 
     internal ForwardTicketEnvelopeResult Validate(
         ForwardObjectives? objectives,
-        ForwardTurnFramePlan? framePlan,
-        ForwardFeatureIntentPlan? featureIntents = null)
+        ForwardTurnFramePlan? framePlan)
     {
         if (objectives == null)
             return Fail(ForwardTicketEnvelopeStatus.MissingObjectives, "forward objectives are missing");
@@ -70,11 +71,11 @@ internal sealed class ForwardTicketEnvelopeValidator
         if (shapeCheck != null) return shapeCheck;
 
         var extraGoCount = framePlan.Frames.Sum(frame => frame.FeatureIntents.Count(intent => intent.Kind == ForwardTimedFeatureKind.ExtraGo));
-        if (framePlan.TotalTurns != Settings.BASE_SPINS + extraGoCount)
+        if (framePlan.TotalTurns != _settings.BASE_SPINS + extraGoCount)
         {
             return Fail(
                 ForwardTicketEnvelopeStatus.InvalidTotalTurns,
-                $"TotalTurns={framePlan.TotalTurns}, BASE_SPINS={Settings.BASE_SPINS}, EXTRA_GO count={extraGoCount}",
+                $"TotalTurns={framePlan.TotalTurns}, BASE_SPINS={_settings.BASE_SPINS}, EXTRA_GO count={extraGoCount}",
                 extraGoCount: extraGoCount);
         }
 
@@ -89,7 +90,8 @@ internal sealed class ForwardTicketEnvelopeValidator
         var noSafeFillerAllowance = NoSafeFillerCapacityAllowance(objectives);
         var available = capacity.StartingBoardSlots
             + capacity.SpawnSlots
-            + noSafeFillerAllowance;
+            + noSafeFillerAllowance
+            + WheelWinBonus(objectives, framePlan);
         if (required > available)
         {
             return new ForwardTicketEnvelopeResult(
@@ -115,7 +117,32 @@ internal sealed class ForwardTicketEnvelopeValidator
     private int NoSafeFillerCapacityAllowance(ForwardObjectives objectives) =>
         HasGuaranteedSafeFiller(objectives) || objectives.NearMissTargets.Count > 0
             ? 0
-            : Settings.COLS;
+            : _settings.COLS;
+
+    private int WheelWinBonus(
+        ForwardObjectives objectives,
+        ForwardTurnFramePlan framePlan)
+    {
+        var bonus = 0;
+        foreach (var intent in framePlan.Frames
+                     .SelectMany(frame => frame.FeatureIntents)
+                     .Where(intent => intent.Kind == ForwardTimedFeatureKind.Wheel)
+                     .Where(intent => intent.WheelSymbol.HasValue && intent.ResultingWheelStack.HasValue))
+        {
+            var symbol = intent.WheelSymbol!.Value;
+            if (!objectives.WinTargets.TryGetValue(symbol, out var target))
+                continue;
+
+            var stack = Math.Min(_settings.MAX_COIN_STACK, intent.ResultingWheelStack!.Value);
+            if (stack <= 1)
+                continue;
+
+            var zone = Math.Max(0, Math.Min(target / stack, _settings.COLS - 1) - 1);
+            bonus += zone * (stack - 1);
+        }
+
+        return bonus;
+    }
 
     private static bool HasGuaranteedSafeFiller(ForwardObjectives objectives) =>
         objectives.FillSymbols.Any(symbol =>
@@ -126,11 +153,11 @@ internal sealed class ForwardTicketEnvelopeValidator
     {
         if (framePlan.TotalTurns <= 0)
             return Fail(ForwardTicketEnvelopeStatus.InvalidTotalTurns, $"TotalTurns={framePlan.TotalTurns} must be positive");
-        if (framePlan.TotalTurns < Settings.BASE_SPINS || framePlan.TotalTurns > Settings.MAX_SPINS)
+        if (framePlan.TotalTurns < _settings.BASE_SPINS || framePlan.TotalTurns > _settings.MAX_SPINS)
         {
             return Fail(
                 ForwardTicketEnvelopeStatus.InvalidTotalTurns,
-                $"TotalTurns={framePlan.TotalTurns} outside {Settings.BASE_SPINS}..{Settings.MAX_SPINS}");
+                $"TotalTurns={framePlan.TotalTurns} outside {_settings.BASE_SPINS}..{_settings.MAX_SPINS}");
         }
         if (framePlan.Frames.Count != framePlan.TotalTurns)
         {
@@ -152,7 +179,7 @@ internal sealed class ForwardTicketEnvelopeValidator
             if (!seen.Add(frame.Turn))
                 return Fail(ForwardTicketEnvelopeStatus.InvalidTurnSequence, $"frame turn {frame.Turn} appears more than once");
 
-            var shape = ForwardTurnShape.Validate(frame.Shape?.Pushers);
+            var shape = ForwardTurnShape.Validate(frame.Shape?.Pushers, _settings);
             if (!shape.IsValid)
             {
                 return Fail(
@@ -181,7 +208,7 @@ internal sealed class ForwardTicketEnvelopeValidator
         ForwardTurnFramePlan framePlan,
         int extraGoCount)
     {
-        var earnedTurns = Settings.BASE_SPINS;
+        var earnedTurns = _settings.BASE_SPINS;
         foreach (var frame in framePlan.Frames.OrderBy(frame => frame.Turn))
         {
             if (frame.Turn > earnedTurns)
@@ -266,23 +293,23 @@ internal sealed class ForwardTicketEnvelopeValidator
 
     private IReadOnlyList<(int r, int c)> EmptyPositionsAfterPushRotate(ForwardTurnShape shape)
     {
-        var board = new Cell?[Settings.ROWS, Settings.COLS];
-        for (var row = 0; row < Settings.ROWS; row++)
+        var board = new Cell?[_settings.ROWS, _settings.COLS];
+        for (var row = 0; row < _settings.ROWS; row++)
         {
-            for (var col = 0; col < Settings.COLS; col++)
+            for (var col = 0; col < _settings.COLS; col++)
                 board[row, col] = Grid.Norm(1);
         }
 
-        return new ForwardBoardState(board)
+        return new ForwardBoardState(board, _settings)
             .PreviewAfterPushRotate(shape)
             .EmptyPositions;
     }
 
     private IEnumerable<(int r, int c)> AllPositions()
     {
-        for (var row = 0; row < Settings.ROWS; row++)
+        for (var row = 0; row < _settings.ROWS; row++)
         {
-            for (var col = 0; col < Settings.COLS; col++)
+            for (var col = 0; col < _settings.COLS; col++)
                 yield return (row, col);
         }
     }

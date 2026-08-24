@@ -26,34 +26,22 @@ internal readonly struct ForwardNormalSpawnIntent
         ForwardSymbolIntent collectIntent,
         int ledgerCollectionValue = 1,
         int spawnStack = 1,
-        int? minCollectionTurn = null,
-        int? maxCollectionTurn = null)
+        int? latestCollectionTurn = null)
     {
         CollectIntent = collectIntent;
         LedgerCollectionValue = ledgerCollectionValue;
         SpawnStack = spawnStack;
-        MinCollectionTurn = minCollectionTurn;
-        MaxCollectionTurn = maxCollectionTurn;
+        LatestCollectionTurn = latestCollectionTurn;
     }
 
     internal ForwardSymbolIntent CollectIntent { get; }
     internal int LedgerCollectionValue { get; }
     internal int SpawnStack { get; }
-    internal int? MinCollectionTurn { get; }
-    internal int? MaxCollectionTurn { get; }
+    internal int? LatestCollectionTurn { get; }
     internal bool RequiresCollected =>
         CollectIntent == ForwardSymbolIntent.MustProgressWin
         || CollectIntent == ForwardSymbolIntent.PreferNearMiss;
     internal bool RequiresResidue => CollectIntent == ForwardSymbolIntent.ResidueOnly;
-
-    internal bool MatchesCollectionTurn(int? collectionTurn)
-    {
-        if (!RequiresCollected) return true;
-        if (!collectionTurn.HasValue) return false;
-        if (MinCollectionTurn.HasValue && collectionTurn.Value < MinCollectionTurn.Value) return false;
-        if (MaxCollectionTurn.HasValue && collectionTurn.Value > MaxCollectionTurn.Value) return false;
-        return true;
-    }
 
     internal static ForwardNormalSpawnIntent SafeFiller() =>
         new(ForwardSymbolIntent.SafeFiller);
@@ -88,10 +76,12 @@ internal sealed class ForwardTurnAssemblyResult
 
 internal sealed class ForwardTurnAssembler
 {
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
 
-    internal ForwardTurnAssembler(int seed)
+    internal ForwardTurnAssembler(ICustomProfileSettings settings, int seed)
     {
+        _settings = settings;
         _rng = new Random(seed);
     }
 
@@ -136,7 +126,7 @@ internal sealed class ForwardTurnAssembler
         var trialExtraLedger = extraSpinLedger.Clone();
         var trialPrizeLedger = prizeUpgradeLedger.Clone();
 
-        var featurePlacement = new ForwardFeaturePlacementAdapter(objectives.MaxSymbol, _rng.Next()).Plan(
+        var featurePlacement = new ForwardFeaturePlacementAdapter(_settings, objectives.MaxSymbol, _rng.Next()).Plan(
             turn,
             plannedTotalTurns,
             objectives,
@@ -159,6 +149,7 @@ internal sealed class ForwardTurnAssembler
 
         var remainingPositions = preview.EmptyPositions
             .Except(featurePlacement.UsedPositions)
+            .Except(featurePlacement.AnchorSpawns.Select(spawn => (spawn.Row, spawn.Col)))
             .ToArray();
         var normalRequests = BuildNormalRequests(normalIntents, remainingPositions, futureTurns);
         if (!normalRequests.IsValid)
@@ -176,8 +167,12 @@ internal sealed class ForwardTurnAssembler
                 objectives.NearMissTargets,
                 objectives.FillSymbols,
                 objectives.MaxSymbol,
-                new Random(_rng.Next())),
-            new ForwardCellFateAnalyzer()).Plan(
+                _settings,
+                new Random(_rng.Next()),
+                topPrizeSymbol: objectives.TopPrizeSymbol,
+                finalTurn: plannedTotalTurns),
+            new ForwardCellFateAnalyzer(_settings),
+            _settings).Plan(
                 normalRequests.Requests,
                 futureTurns,
                 turn,
@@ -191,12 +186,13 @@ internal sealed class ForwardTurnAssembler
         }
 
         var spawns = featurePlacement.Spawns
+            .Concat(featurePlacement.AnchorSpawns)
             .Concat(normalSpawns.Spawns)
             .OrderBy(spawn => spawn.Row)
             .ThenBy(spawn => spawn.Col)
             .ToArray();
 
-        var tempBoard = new ForwardBoardState(boardState.Snapshot());
+        var tempBoard = new ForwardBoardState(boardState.Snapshot(), _settings);
         var tempAdvance = tempBoard.Advance(shape, spawns);
         if (!tempAdvance.IsValid)
         {
@@ -241,7 +237,7 @@ internal sealed class ForwardTurnAssembler
         }
 
         var fates = positions
-            .Select(position => (Position: position, Fate: new ForwardCellFateAnalyzer().Analyze(position.r, position.c, futureTurns)))
+            .Select(position => (Position: position, Fate: new ForwardCellFateAnalyzer(_settings).Analyze(position.r, position.c, futureTurns)))
             .ToArray();
         var invalid = fates.FirstOrDefault(item => !item.Fate.IsValid);
         if (invalid.Fate.Status != ForwardCellFateStatus.Valid)
@@ -255,7 +251,6 @@ internal sealed class ForwardTurnAssembler
             .Where(item => item.Fate.IsCollected)
             .OrderBy(item => item.Fate.CollectedTurn)
             .ThenBy(_ => _rng.Next())
-            .Select(item => item.Position)
             .ToList();
         var residue = fates
             .Where(item => !item.Fate.IsCollected)
@@ -264,16 +259,22 @@ internal sealed class ForwardTurnAssembler
             .ToList();
 
         var requests = new List<ForwardSpawnCellRequest>(intents.Count);
-        foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresCollected)))
+        var collectedIntents = Shuffled(intents
+                .Where(intent => intent.RequiresCollected && intent.LatestCollectionTurn.HasValue))
+            .Concat(Shuffled(intents
+                .Where(intent => intent.RequiresCollected && !intent.LatestCollectionTurn.HasValue)));
+        foreach (var intent in collectedIntents)
         {
-            var compatible = collected
-                .Where(position => CompatibleWithIntent(fates, position, intent))
+            var eligible = collected
+                .Select((item, index) => (item, index))
+                .Where(candidate => !intent.LatestCollectionTurn.HasValue
+                    || candidate.item.Fate.CollectedTurn <= intent.LatestCollectionTurn.Value)
                 .ToArray();
-            if (compatible.Length == 0)
-                return CannotPlace(intent, "requires a future-collected cell");
-            var selected = compatible[_rng.Next(compatible.Length)];
-            AddRequest(requests, selected, intent);
-            collected.Remove(selected);
+            if (eligible.Length == 0)
+                return CannotPlace(intent, $"requires a future-collected cell by turn {intent.LatestCollectionTurn?.ToString() ?? "any"}");
+            var index = eligible[_rng.Next(eligible.Length)].index;
+            AddRequest(requests, collected[index].Position, intent);
+            collected.RemoveAt(index);
         }
 
         foreach (var intent in Shuffled(intents.Where(intent => intent.RequiresResidue)))
@@ -287,53 +288,27 @@ internal sealed class ForwardTurnAssembler
 
         foreach (var intent in Shuffled(intents.Where(intent => !intent.RequiresCollected && !intent.RequiresResidue)))
         {
-            var targetList = collected.Count > 0 ? collected : residue;
-            if (targetList.Count == 0)
+            if (collected.Count == 0 && residue.Count == 0)
                 return CannotPlace(intent, "has no remaining cell");
-            var index = _rng.Next(targetList.Count);
-            AddRequest(requests, targetList[index], intent);
-            targetList.RemoveAt(index);
+            if (collected.Count > 0)
+            {
+                var index = _rng.Next(collected.Count);
+                AddRequest(requests, collected[index].Position, intent);
+                collected.RemoveAt(index);
+            }
+            else
+            {
+                var index = _rng.Next(residue.Count);
+                AddRequest(requests, residue[index], intent);
+                residue.RemoveAt(index);
+            }
         }
 
-        return NormalRequestBuildResult.Ok(OrderRequestsByCollectionTurn(requests, fates));
+        return NormalRequestBuildResult.Ok(requests);
     }
 
     private IReadOnlyList<ForwardNormalSpawnIntent> Shuffled(IEnumerable<ForwardNormalSpawnIntent> intents) =>
         intents.OrderBy(_ => _rng.Next()).ToArray();
-
-    private static bool CompatibleWithIntent(
-        IReadOnlyList<((int r, int c) Position, ForwardCellFate Fate)> fates,
-        (int r, int c) position,
-        ForwardNormalSpawnIntent intent)
-    {
-        var match = fates.First(item => item.Position == position);
-        return intent.MatchesCollectionTurn(match.Fate.CollectedTurn);
-    }
-
-    private static IReadOnlyList<ForwardSpawnCellRequest> OrderRequestsByCollectionTurn(
-        IReadOnlyList<ForwardSpawnCellRequest> requests,
-        IReadOnlyList<((int r, int c) Position, ForwardCellFate Fate)> fates) =>
-        requests
-            .OrderBy(request => CollectionTurnFor(fates, request.Row, request.Col) ?? int.MaxValue)
-            .ThenBy(request => IntentPriority(request.CollectIntent))
-            .ThenBy(request => request.Row)
-            .ThenBy(request => request.Col)
-            .ToArray();
-
-    private static int? CollectionTurnFor(
-        IReadOnlyList<((int r, int c) Position, ForwardCellFate Fate)> fates,
-        int row,
-        int col) =>
-        fates.First(item => item.Position == (row, col)).Fate.CollectedTurn;
-
-    private static int IntentPriority(ForwardSymbolIntent intent) =>
-        intent switch
-        {
-            ForwardSymbolIntent.MustProgressWin => 0,
-            ForwardSymbolIntent.PreferNearMiss => 1,
-            ForwardSymbolIntent.SafeFiller => 2,
-            _ => 3,
-        };
 
     private static void AddRequest(
         List<ForwardSpawnCellRequest> requests,

@@ -7,11 +7,13 @@ internal enum SymbolCollectionStatus
     InvalidStack,
     WouldExceedWinTarget,
     WouldExceedNonWinCap,
-    WouldCompleteWinOnWrongTurn,
-    WouldCollectWinAfterCompletionTurn,
+    TopPrizeCompletesBeforeFinalTurn,
+    MissingWinCollectionTurn,
+    WinCollectionAfterCompletionTurn,
+    AllWinsCompleteBeforeRequiredTurn,
+    WinningCompletionTurnMismatch,
     WinTargetNotReached,
     NearMissMinimumNotReached,
-    WinCompletionTurnMismatch,
 }
 
 internal readonly struct SymbolCollectionCheck
@@ -46,40 +48,46 @@ internal sealed class SymbolLedger
     private readonly Dictionary<int, int> _winTargets;
     private readonly Dictionary<int, int> _nearMissMinimums;
     private readonly Dictionary<int, int> _collected = new();
+    private readonly Dictionary<int, Dictionary<int, int>> _winCollectionsByTurn = new();
     private readonly int _maxSymbol;
-    private readonly int? _expectedWinCompletionTurn;
-    private int? _actualWinCompletionTurn;
+    private readonly ICustomProfileSettings _settings;
+    private readonly int? _winningCompletionTurn;
 
     internal SymbolLedger(
         IReadOnlyDictionary<int, int> winTargets,
         IReadOnlyDictionary<int, int> nearMissMinimums,
         int maxSymbol,
-        int? expectedWinCompletionTurn = null)
+        ICustomProfileSettings settings,
+        int? winningCompletionTurn = null)
     {
         _winTargets = winTargets.ToDictionary(kv => kv.Key, kv => kv.Value);
         _nearMissMinimums = nearMissMinimums.ToDictionary(kv => kv.Key, kv => kv.Value);
         _maxSymbol = maxSymbol;
-        _expectedWinCompletionTurn = expectedWinCompletionTurn;
+        _settings = settings;
+        _winningCompletionTurn = winningCompletionTurn;
     }
 
     private SymbolLedger(
         Dictionary<int, int> winTargets,
         Dictionary<int, int> nearMissMinimums,
         Dictionary<int, int> collected,
+        Dictionary<int, Dictionary<int, int>> winCollectionsByTurn,
         int maxSymbol,
-        int? expectedWinCompletionTurn,
-        int? actualWinCompletionTurn)
+        ICustomProfileSettings settings,
+        int? winningCompletionTurn)
     {
         _winTargets = winTargets.ToDictionary(kv => kv.Key, kv => kv.Value);
         _nearMissMinimums = nearMissMinimums.ToDictionary(kv => kv.Key, kv => kv.Value);
         _collected = collected.ToDictionary(kv => kv.Key, kv => kv.Value);
+        _winCollectionsByTurn = winCollectionsByTurn.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Value.ToDictionary(turn => turn.Key, turn => turn.Value));
         _maxSymbol = maxSymbol;
-        _expectedWinCompletionTurn = expectedWinCompletionTurn;
-        _actualWinCompletionTurn = actualWinCompletionTurn;
+        _settings = settings;
+        _winningCompletionTurn = winningCompletionTurn;
     }
 
     internal IReadOnlyDictionary<int, int> Collected => _collected;
-    internal int? WinCompletionTurn => _actualWinCompletionTurn;
 
     internal int CollectedCount(int symbol) => _collected.GetValueOrDefault(symbol);
 
@@ -88,16 +96,20 @@ internal sealed class SymbolLedger
             _winTargets,
             _nearMissMinimums,
             _collected,
+            _winCollectionsByTurn,
             _maxSymbol,
-            _expectedWinCompletionTurn,
-            _actualWinCompletionTurn);
+            _settings,
+            _winningCompletionTurn);
 
     internal void ReplaceWith(SymbolLedger other)
     {
         _collected.Clear();
         foreach (var (symbol, count) in other._collected)
             _collected[symbol] = count;
-        _actualWinCompletionTurn = other._actualWinCompletionTurn;
+
+        _winCollectionsByTurn.Clear();
+        foreach (var (symbol, turns) in other._winCollectionsByTurn)
+            _winCollectionsByTurn[symbol] = turns.ToDictionary(kv => kv.Key, kv => kv.Value);
     }
 
     internal int RemainingWinCount(int symbol)
@@ -109,9 +121,11 @@ internal sealed class SymbolLedger
     internal SymbolCollectionCheck CheckCollect(
         int symbol,
         int stack = 1,
-        int? collectionTurn = null)
+        int? collectionTurn = null,
+        int topPrizeSymbol = 0,
+        int finalTurn = 0)
     {
-        if (symbol < 1 || symbol > _maxSymbol || Settings.IsFeat(symbol))
+        if (symbol < 1 || symbol > _maxSymbol || _settings.IsFeat(symbol))
         {
             return Fail(
                 SymbolCollectionStatus.UnknownSymbol,
@@ -147,31 +161,29 @@ internal sealed class SymbolLedger
                     $"symbol {symbol} would collect {projected}, above win target {target}");
             }
 
-            var remainingAfter = RemainingWinUnitsAfter(symbol, projected);
-            if (_expectedWinCompletionTurn.HasValue)
-            {
-                if (collectionTurn.HasValue && collectionTurn.Value > _expectedWinCompletionTurn.Value)
-                {
-                    return new SymbolCollectionCheck(
-                        SymbolCollectionStatus.WouldCollectWinAfterCompletionTurn,
-                        symbol,
-                        current,
-                        projected,
-                        _expectedWinCompletionTurn.Value,
-                        $"symbol {symbol} would collect on turn {collectionTurn.Value}, after expected win completion turn {_expectedWinCompletionTurn.Value}");
-                }
+            var timing = CheckWinningCompletionTiming(
+                symbol,
+                stack,
+                collectionTurn,
+                current,
+                projected,
+                target);
+            if (timing.HasValue)
+                return timing.Value;
 
-                if (remainingAfter == 0
-                    && collectionTurn != _expectedWinCompletionTurn)
-                {
-                    return new SymbolCollectionCheck(
-                        SymbolCollectionStatus.WouldCompleteWinOnWrongTurn,
-                        symbol,
-                        current,
-                        projected,
-                        _expectedWinCompletionTurn.Value,
-                        $"symbol {symbol} would complete the win on turn {collectionTurn?.ToString() ?? "unknown"}, expected {_expectedWinCompletionTurn.Value}");
-                }
+            if (symbol == topPrizeSymbol
+                && collectionTurn.HasValue
+                && finalTurn > 0
+                && collectionTurn.Value < finalTurn
+                && projected >= target)
+            {
+                return new SymbolCollectionCheck(
+                    SymbolCollectionStatus.TopPrizeCompletesBeforeFinalTurn,
+                    symbol,
+                    current,
+                    projected,
+                    target,
+                    $"top prize symbol {symbol} would complete on turn {collectionTurn.Value}, before final turn {finalTurn}");
             }
 
             return new SymbolCollectionCheck(
@@ -183,7 +195,10 @@ internal sealed class SymbolLedger
                 "ok");
         }
 
-        var cap = Settings.SymbolFillCap(symbol);
+        var cap = NonWinningCollectionLimit(
+            symbol,
+            _nearMissMinimums.TryGetValue(symbol, out var nearMissTarget) ? nearMissTarget : (int?)null,
+            _settings);
         if (projected >= cap)
         {
             return new SymbolCollectionCheck(
@@ -207,19 +222,20 @@ internal sealed class SymbolLedger
     internal SymbolCollectionCheck Collect(
         int symbol,
         int stack = 1,
-        int? collectionTurn = null)
+        int? collectionTurn = null,
+        int topPrizeSymbol = 0,
+        int finalTurn = 0)
     {
-        var check = CheckCollect(symbol, stack, collectionTurn);
+        var check = CheckCollect(symbol, stack, collectionTurn, topPrizeSymbol, finalTurn);
         if (!check.IsValid) return check;
 
         _collected[symbol] = check.Projected;
-        if (_winTargets.ContainsKey(symbol)
-            && RemainingWinUnitsAfter(symbol, check.Projected) == 0
-            && !_actualWinCompletionTurn.HasValue)
+        if (_winTargets.ContainsKey(symbol) && collectionTurn.HasValue)
         {
-            _actualWinCompletionTurn = collectionTurn;
+            if (!_winCollectionsByTurn.TryGetValue(symbol, out var turns))
+                _winCollectionsByTurn[symbol] = turns = new Dictionary<int, int>();
+            turns[collectionTurn.Value] = turns.GetValueOrDefault(collectionTurn.Value) + stack;
         }
-
         return check;
     }
 
@@ -257,34 +273,126 @@ internal sealed class SymbolLedger
             }
         }
 
-        if (_winTargets.Count > 0
-            && _expectedWinCompletionTurn.HasValue
-            && _actualWinCompletionTurn != _expectedWinCompletionTurn)
+
+        if (_winningCompletionTurn.HasValue)
         {
-            failures.Add(new SymbolCollectionCheck(
-                SymbolCollectionStatus.WinCompletionTurnMismatch,
-                0,
-                _actualWinCompletionTurn ?? 0,
-                _actualWinCompletionTurn ?? 0,
-                _expectedWinCompletionTurn.Value,
-                $"win completed on turn {_actualWinCompletionTurn?.ToString() ?? "unknown"}, expected {_expectedWinCompletionTurn.Value}"));
+            var completionTurn = ActualWinningCompletionTurn();
+            if (completionTurn != _winningCompletionTurn)
+            {
+                failures.Add(new SymbolCollectionCheck(
+                    SymbolCollectionStatus.WinningCompletionTurnMismatch,
+                    0,
+                    completionTurn ?? 0,
+                    completionTurn ?? 0,
+                    _winningCompletionTurn.Value,
+                    $"all winning symbols complete on turn {completionTurn?.ToString() ?? "never"}, " +
+                    $"required turn {_winningCompletionTurn.Value}"));
+            }
         }
 
         return failures;
     }
 
-    private int RemainingWinUnitsAfter(int symbol, int projected)
+    private SymbolCollectionCheck? CheckWinningCompletionTiming(
+        int symbol,
+        int stack,
+        int? collectionTurn,
+        int current,
+        int projected,
+        int target)
     {
-        var remaining = 0;
-        foreach (var (winSymbol, target) in _winTargets)
+        if (!_winningCompletionTurn.HasValue)
+            return null;
+        if (!collectionTurn.HasValue)
         {
-            var count = winSymbol == symbol
-                ? projected
-                : CollectedCount(winSymbol);
-            remaining += Math.Max(0, target - count);
+            return new SymbolCollectionCheck(
+                SymbolCollectionStatus.MissingWinCollectionTurn,
+                symbol,
+                current,
+                projected,
+                target,
+                $"winning symbol {symbol} collection has no collection turn; required completion turn is {_winningCompletionTurn.Value}");
+        }
+        if (collectionTurn.Value > _winningCompletionTurn.Value)
+        {
+            return new SymbolCollectionCheck(
+                SymbolCollectionStatus.WinCollectionAfterCompletionTurn,
+                symbol,
+                current,
+                projected,
+                target,
+                $"winning symbol {symbol} would collect on turn {collectionTurn.Value}, after required completion turn {_winningCompletionTurn.Value}");
+        }
+        if (collectionTurn.Value < _winningCompletionTurn.Value
+            && AllWinsWouldCompleteBeforeRequiredTurn(symbol, stack, collectionTurn.Value))
+        {
+            return new SymbolCollectionCheck(
+                SymbolCollectionStatus.AllWinsCompleteBeforeRequiredTurn,
+                symbol,
+                current,
+                projected,
+                target,
+                $"winning symbol {symbol} collection on turn {collectionTurn.Value} would make every winning target complete before required turn {_winningCompletionTurn.Value}");
         }
 
-        return remaining;
+        return null;
+    }
+
+    private bool AllWinsWouldCompleteBeforeRequiredTurn(
+        int candidateSymbol,
+        int candidateStack,
+        int candidateTurn)
+    {
+        var beforeTurn = _winningCompletionTurn!.Value - 1;
+        foreach (var (symbol, target) in _winTargets)
+        {
+            var scheduled = ScheduledThrough(symbol, beforeTurn);
+            if (symbol == candidateSymbol && candidateTurn <= beforeTurn)
+                scheduled += candidateStack;
+            if (scheduled < target)
+                return false;
+        }
+        return true;
+    }
+
+    private int? ActualWinningCompletionTurn()
+    {
+        if (_winTargets.Count == 0)
+            return null;
+
+        var turns = _winCollectionsByTurn.Values
+            .SelectMany(byTurn => byTurn.Keys)
+            .Distinct()
+            .OrderBy(turn => turn);
+        foreach (var turn in turns)
+        {
+            if (_winTargets.All(target => ScheduledThrough(target.Key, turn) >= target.Value))
+                return turn;
+        }
+        return null;
+    }
+
+    private int ScheduledThrough(int symbol, int turn)
+    {
+        if (!_winCollectionsByTurn.TryGetValue(symbol, out var byTurn))
+            return 0;
+        return byTurn.Where(kv => kv.Key <= turn).Sum(kv => kv.Value);
+    }
+
+    internal static int NonWinningCollectionLimit(
+        int symbol,
+        int? nearMissMinimum,
+        ICustomProfileSettings settings)
+    {
+        var prizeCap = settings.SymbolFillCap(symbol);
+        var displayCap = prizeCap > settings.FILL_CAP
+            ? Math.Min(prizeCap, settings.FILL_CAP + settings.COLS)
+            : Math.Min(prizeCap, settings.FILL_CAP);
+
+        if (nearMissMinimum.HasValue)
+            return Math.Min(prizeCap, Math.Max(displayCap, nearMissMinimum.Value + 1));
+
+        return displayCap;
     }
 
     private SymbolCollectionCheck Fail(

@@ -4,10 +4,8 @@ internal enum PpsMathInputStatus
 {
     Valid,
     MissingPrizeLadder,
-    MissingSpinRule,
     MissingCombination,
     InvalidCombination,
-    InvalidSpinRule,
 }
 
 internal sealed class PpsMathInputResult
@@ -34,34 +32,46 @@ internal sealed class PpsMathInputResult
         new(status, detail, null);
 }
 
+/// <summary>
+/// Resolves the exact ALW PPS prize row. Spin count and winning completion turn
+/// are handled by the shared forward winning-round planner, configured from the
+/// same PPS spin-rule table.
+/// </summary>
 internal sealed class PpsMathInputResolver
 {
+    private readonly ICustomProfileSettings _settings;
+
+    internal PpsMathInputResolver(ICustomProfileSettings settings)
+    {
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+    }
+
     internal PpsMathInputResult Resolve(
         IReadOnlyList<decimal> prizeAmounts,
         int seed)
     {
-        if (Settings.PrizeLadderRows == null || Settings.PrizeLadderRows.Count == 0)
-            return PpsMathInputResult.Fail(PpsMathInputStatus.MissingPrizeLadder, "settings.PrizeLadderRows is empty");
+        if (_settings.PrizeLadderRows == null || _settings.PrizeLadderRows.Count == 0)
+        {
+            return PpsMathInputResult.Fail(
+                PpsMathInputStatus.MissingPrizeLadder,
+                "settings.PrizeLadderRows is empty");
+        }
 
         var totalPrize = prizeAmounts.Sum();
-        var rng = new Random(seed);
-        var spin = ResolveSpinRule(totalPrize, rng);
-        if (!spin.IsValid) return spin.Result!;
-
         if (totalPrize == 0m)
         {
             return PpsMathInputResult.Ok(
                 "resolved PPS no-win input",
                 new BundleResult
                 {
-                    Input = BuildNoWinInput(spin.ExtraGoCount, spin.WinCompletionTurn),
+                    Input = BuildNoWinInput(),
                     Entries = new List<BundleEntry>(),
                     Covered = prizeAmounts.ToList(),
                     Skipped = new List<decimal>(),
                 });
         }
 
-        var candidates = Settings.PpsCombinations
+        var candidates = _settings.PpsCombinations
             .Where(combination => combination.TotalPrize == totalPrize)
             .OrderBy(combination => combination.Id)
             .ToArray();
@@ -72,128 +82,44 @@ internal sealed class PpsMathInputResolver
                 $"no PPS combination is configured for total prize {totalPrize}");
         }
 
-        var combination = candidates[rng.Next(candidates.Length)];
-        var validation = ValidateCombination(combination);
-        if (!validation.IsValid) return validation.Result!;
+        var combination = candidates[new Random(seed).Next(candidates.Length)];
+        var validationError = ValidateCombination(combination);
+        if (validationError != null)
+            return PpsMathInputResult.Fail(PpsMathInputStatus.InvalidCombination, validationError);
 
         var entries = BuildEntries(combination);
-        var input = BuildInput(combination, entries, spin.ExtraGoCount, spin.WinCompletionTurn);
         return PpsMathInputResult.Ok(
             $"resolved PPS combination #{combination.Id} for total prize {totalPrize}",
             new BundleResult
             {
-                Input = input,
+                Input = BuildInput(combination, entries),
                 Entries = entries,
                 Covered = prizeAmounts.ToList(),
                 Skipped = new List<decimal>(),
             });
     }
 
-    private SpinSelectionResult ResolveSpinRule(decimal totalPrize, Random rng)
-    {
-        var rule = Settings.PpsSpinRules
-            .FirstOrDefault(candidate => candidate.Matches(totalPrize));
-        if (rule == null)
-        {
-            return SpinSelectionResult.Fail(PpsMathInputResult.Fail(
-                PpsMathInputStatus.MissingSpinRule,
-                $"no PPS spin rule matches total prize {totalPrize}"));
-        }
-
-        var maxExtraGo = Math.Min(
-            rule.MaxExtraGo,
-            Math.Min(Settings.ExtraSpinFeatureConfig.Max, Settings.MAX_SPINS - Settings.BASE_SPINS));
-        var minExtraGo = Math.Max(0, rule.MinExtraGo);
-        if (minExtraGo > maxExtraGo)
-        {
-            return SpinSelectionResult.Fail(PpsMathInputResult.Fail(
-                PpsMathInputStatus.InvalidSpinRule,
-                $"PPS extra-go range {rule.MinExtraGo}..{rule.MaxExtraGo} is outside configured envelope"));
-        }
-
-        if (totalPrize == 0m)
-        {
-            var extra = PickInclusive(rng, minExtraGo, maxExtraGo);
-            return SpinSelectionResult.Ok(extra, null);
-        }
-
-        if (!rule.MinWinningTurn.HasValue || !rule.MaxWinningTurn.HasValue)
-        {
-            return SpinSelectionResult.Fail(PpsMathInputResult.Fail(
-                PpsMathInputStatus.InvalidSpinRule,
-                $"PPS winning turn range is missing for total prize {totalPrize}"));
-        }
-
-        var legalExtras = Enumerable.Range(minExtraGo, maxExtraGo - minExtraGo + 1)
-            .Where(extra => CompatibleWinningTurns(rule, extra).Length > 0)
-            .ToArray();
-        if (legalExtras.Length == 0)
-        {
-            return SpinSelectionResult.Fail(PpsMathInputResult.Fail(
-                PpsMathInputStatus.InvalidSpinRule,
-                $"PPS winning turns {rule.MinWinningTurn}..{rule.MaxWinningTurn} cannot fit extra-go range {minExtraGo}..{maxExtraGo}"));
-        }
-
-        var chosenExtra = legalExtras[rng.Next(legalExtras.Length)];
-        var winningTurns = CompatibleWinningTurns(rule, chosenExtra);
-        return SpinSelectionResult.Ok(
-            chosenExtra,
-            winningTurns[rng.Next(winningTurns.Length)]);
-    }
-
-    private static int[] CompatibleWinningTurns(PpsSpinRule rule, int extraGoCount)
-    {
-        if (!rule.MinWinningTurn.HasValue || !rule.MaxWinningTurn.HasValue)
-            return Array.Empty<int>();
-
-        var totalTurns = Settings.BASE_SPINS + extraGoCount;
-        var minTurn = Math.Max(1, rule.MinWinningTurn.Value);
-        var maxTurn = Math.Min(totalTurns, rule.MaxWinningTurn.Value);
-        if (minTurn > maxTurn) return Array.Empty<int>();
-        return Enumerable.Range(minTurn, maxTurn - minTurn + 1).ToArray();
-    }
-
-    private PpsValidationResult ValidateCombination(PpsPrizeCombination combination)
+    private string? ValidateCombination(PpsPrizeCombination combination)
     {
         if (combination.Components == null || combination.Components.Count == 0)
-        {
-            return PpsValidationResult.Fail(PpsMathInputResult.Fail(
-                PpsMathInputStatus.InvalidCombination,
-                $"PPS combination #{combination.Id} has no components"));
-        }
+            return $"PPS combination #{combination.Id} has no components";
 
         var duplicate = combination.Components
             .GroupBy(component => component.SymbolId)
             .FirstOrDefault(group => group.Count() > 1);
         if (duplicate != null)
-        {
-            return PpsValidationResult.Fail(PpsMathInputResult.Fail(
-                PpsMathInputStatus.InvalidCombination,
-                $"PPS combination #{combination.Id} repeats symbol {duplicate.Key}"));
-        }
+            return $"PPS combination #{combination.Id} repeats symbol {duplicate.Key}";
 
-        var total = 0m;
-        foreach (var component in combination.Components)
-        {
-            var amount = ComponentAmount(component);
-            if (!amount.HasValue)
-            {
-                return PpsValidationResult.Fail(PpsMathInputResult.Fail(
-                    PpsMathInputStatus.InvalidCombination,
-                    $"PPS combination #{combination.Id} references symbol {component.SymbolId} tier {component.Tier}, outside the prize ladder"));
-            }
+        var resolved = combination.Components
+            .Select(ComponentAmount)
+            .ToArray();
+        if (resolved.Any(amount => !amount.HasValue))
+            return $"PPS combination #{combination.Id} contains a symbol/tier outside the configured prize ladder";
 
-            total += amount.Value;
-        }
-
-        if (total != combination.TotalPrize)
-        {
-            return PpsValidationResult.Fail(PpsMathInputResult.Fail(
-                PpsMathInputStatus.InvalidCombination,
-                $"PPS combination #{combination.Id} components total {total}, expected {combination.TotalPrize}"));
-        }
-
-        return PpsValidationResult.Ok();
+        var total = resolved.Sum(amount => amount!.Value);
+        return total == combination.TotalPrize
+            ? null
+            : $"PPS combination #{combination.Id} components total {total}, expected {combination.TotalPrize}";
     }
 
     private List<BundleEntry> BuildEntries(PpsPrizeCombination combination) =>
@@ -201,7 +127,7 @@ internal sealed class PpsMathInputResolver
             .OrderBy(component => component.SymbolId)
             .Select(component =>
             {
-                var row = Settings.PrizeLadderRows[component.SymbolId - 1];
+                var row = _settings.PrizeLadderRows[component.SymbolId - 1];
                 return new BundleEntry
                 {
                     Sym = component.SymbolId,
@@ -214,63 +140,46 @@ internal sealed class PpsMathInputResolver
 
     private MathInput BuildInput(
         PpsPrizeCombination combination,
-        IReadOnlyList<BundleEntry> entries,
-        int extraGoCount,
-        int? winCompletionTurn)
+        IReadOnlyList<BundleEntry> entries)
     {
-        var targets = entries.ToDictionary(entry => entry.Sym, entry => entry.Target);
         var prizeTiers = entries
             .Where(entry => entry.Tier > 0)
             .ToDictionary(entry => entry.Sym, entry => entry.Tier);
-        var required = new Dictionary<string, int>();
-        var prizeUpgradeTokens = entries.Sum(entry => Math.Max(0, entry.Tier));
-        if (prizeUpgradeTokens > 0)
-            required["PRIZE_UPGRADE"] = prizeUpgradeTokens;
-        if (extraGoCount > 0)
-            required["EXTRA_SPIN"] = extraGoCount;
+        var prizeUpgradeCount = entries.Sum(entry => Math.Max(0, entry.Tier));
+        var required = prizeUpgradeCount > 0
+            ? new Dictionary<string, int> { ["PRIZE_UPGRADE"] = prizeUpgradeCount }
+            : new Dictionary<string, int>();
 
         return new MathInput
         {
-            Targets = targets,
-            BaseSpins = Settings.BASE_SPINS,
+            Targets = entries.ToDictionary(entry => entry.Sym, entry => entry.Target),
+            BaseSpins = _settings.BASE_SPINS,
             Required = required,
             PrizeTiers = prizeTiers.Count > 0 ? prizeTiers : null,
             PrizeValues = BuildPrizeValues(),
-            MaxSym = Math.Max(Settings.PrizeLadderRows.Count, targets.Count + 2),
-            WinCompletionTurn = winCompletionTurn,
-            LockExtraGoCount = true,
+            MaxSym = _settings.PrizeLadderRows.Count,
             PpsCombinationId = combination.Id,
             PpsTotalPrize = combination.TotalPrize,
         };
     }
 
-    private MathInput BuildNoWinInput(int extraGoCount, int? winCompletionTurn)
-    {
-        var required = new Dictionary<string, int>();
-        if (extraGoCount > 0)
-            required["EXTRA_SPIN"] = extraGoCount;
-
-        return new MathInput
+    private MathInput BuildNoWinInput() =>
+        new()
         {
             Targets = new Dictionary<int, int>(),
-            BaseSpins = Settings.BASE_SPINS,
-            Required = required,
-            PrizeTiers = null,
+            BaseSpins = _settings.BASE_SPINS,
             PrizeValues = BuildPrizeValues(),
-            MaxSym = Math.Max(Settings.PrizeLadderRows.Count, 2),
-            WinCompletionTurn = winCompletionTurn,
-            LockExtraGoCount = true,
+            MaxSym = _settings.PrizeLadderRows.Count,
             PpsCombinationId = null,
             PpsTotalPrize = 0m,
         };
-    }
 
-    private static Dictionary<int, IReadOnlyDictionary<int, decimal>> BuildPrizeValues()
+    private Dictionary<int, IReadOnlyDictionary<int, decimal>> BuildPrizeValues()
     {
         var values = new Dictionary<int, IReadOnlyDictionary<int, decimal>>();
-        for (var symbol = 1; symbol <= Settings.PrizeLadderRows.Count; symbol++)
+        for (var symbol = 1; symbol <= _settings.PrizeLadderRows.Count; symbol++)
         {
-            values[symbol] = Settings.PrizeLadderRows[symbol - 1].Tiers
+            values[symbol] = _settings.PrizeLadderRows[symbol - 1].Tiers
                 .Select((amount, tier) => (amount, tier))
                 .ToDictionary(item => item.tier, item => item.amount);
         }
@@ -278,57 +187,14 @@ internal sealed class PpsMathInputResolver
         return values;
     }
 
-    private static decimal? ComponentAmount(PpsPrizeComponent component)
+    private decimal? ComponentAmount(PpsPrizeComponent component)
     {
-        if (component.SymbolId < 1 || component.SymbolId > Settings.PrizeLadderRows.Count)
+        if (component.SymbolId < 1 || component.SymbolId > _settings.PrizeLadderRows.Count)
             return null;
 
-        var tiers = Settings.PrizeLadderRows[component.SymbolId - 1].Tiers;
-        if (component.Tier < 0 || component.Tier >= tiers.Count)
-            return null;
-
-        return tiers[component.Tier];
-    }
-
-    private static int PickInclusive(Random rng, int min, int max) =>
-        min == max ? min : rng.Next(min, max + 1);
-
-    private sealed class SpinSelectionResult
-    {
-        private SpinSelectionResult(
-            int extraGoCount,
-            int? winCompletionTurn,
-            PpsMathInputResult? result)
-        {
-            ExtraGoCount = extraGoCount;
-            WinCompletionTurn = winCompletionTurn;
-            Result = result;
-        }
-
-        internal int ExtraGoCount { get; }
-        internal int? WinCompletionTurn { get; }
-        internal PpsMathInputResult? Result { get; }
-        internal bool IsValid => Result == null;
-
-        internal static SpinSelectionResult Ok(int extraGoCount, int? winCompletionTurn) =>
-            new(extraGoCount, winCompletionTurn, null);
-
-        internal static SpinSelectionResult Fail(PpsMathInputResult result) =>
-            new(0, null, result);
-    }
-
-    private sealed class PpsValidationResult
-    {
-        private PpsValidationResult(PpsMathInputResult? result)
-        {
-            Result = result;
-        }
-
-        internal PpsMathInputResult? Result { get; }
-        internal bool IsValid => Result == null;
-
-        internal static PpsValidationResult Ok() => new(null);
-
-        internal static PpsValidationResult Fail(PpsMathInputResult result) => new(result);
+        var tiers = _settings.PrizeLadderRows[component.SymbolId - 1].Tiers;
+        return component.Tier >= 0 && component.Tier < tiers.Count
+            ? tiers[component.Tier]
+            : null;
     }
 }

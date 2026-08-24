@@ -30,6 +30,13 @@ internal sealed class ForwardMathInputResult
 
 internal sealed class ForwardMathInputResolver
 {
+    private readonly ICustomProfileSettings _settings;
+
+    internal ForwardMathInputResolver(ICustomProfileSettings settings)
+    {
+        _settings = settings;
+    }
+
     internal ForwardMathInputResult Resolve(
         IReadOnlyList<decimal>? prizeAmounts,
         int seed)
@@ -42,7 +49,7 @@ internal sealed class ForwardMathInputResolver
                 null);
         }
 
-        if (Settings.PrizeLadderRows == null || Settings.PrizeLadderRows.Count == 0)
+        if (_settings.PrizeLadderRows == null || _settings.PrizeLadderRows.Count == 0)
         {
             return new ForwardMathInputResult(
                 ForwardMathInputStatus.MissingPrizeLadder,
@@ -59,9 +66,9 @@ internal sealed class ForwardMathInputResolver
                 null);
         }
 
-        if (Settings.PpsCombinations != null && Settings.PpsCombinations.Count > 0)
+        if (_settings.PpsCombinations != null && _settings.PpsCombinations.Count > 0)
         {
-            var pps = new PpsMathInputResolver().Resolve(prizeAmounts, seed);
+            var pps = new PpsMathInputResolver(_settings).Resolve(prizeAmounts, seed);
             return pps.IsValid
                 ? new ForwardMathInputResult(
                     ForwardMathInputStatus.Valid,
@@ -75,7 +82,7 @@ internal sealed class ForwardMathInputResolver
 
         try
         {
-            var bundle = new LadderCombinator(Settings.PrizeLadderRows, seed)
+            var bundle = new LadderCombinator(_settings.PrizeLadderRows, seed, _settings)
                 .Bundle(prizeAmounts);
             return new ForwardMathInputResult(
                 ForwardMathInputStatus.Valid,

@@ -36,11 +36,13 @@ internal sealed class ForwardFeatureFireIntegrationResult
 
 internal sealed class ForwardFeatureFireIntegrator
 {
+    private readonly ICustomProfileSettings _settings;
     private readonly ForwardFeatureExecutor _executor;
 
-    internal ForwardFeatureFireIntegrator()
+    internal ForwardFeatureFireIntegrator(ICustomProfileSettings settings)
     {
-        _executor = new ForwardFeatureExecutor();
+        _settings = settings;
+        _executor = new ForwardFeatureExecutor(settings);
     }
 
     internal ForwardFeatureFireIntegrationResult FireCurrentBoard(ForwardBoardState? boardState)
@@ -67,8 +69,8 @@ internal sealed class ForwardFeatureFireIntegrator
             "ok",
             events,
             events.Sum(e => e.ExtraGoAward),
-            events.Count(e => e.FeatureSymbol == Settings.F_WHEEL),
-            events.Count(e => e.FeatureSymbol == Settings.F_PRUP));
+            events.Count(e => e.FeatureSymbol == _settings.F_WHEEL),
+            events.Count(e => e.FeatureSymbol == _settings.F_PRUP));
     }
 
     private static ForwardFeatureFireIntegrationResult Fail(

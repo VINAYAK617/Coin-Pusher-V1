@@ -41,10 +41,12 @@ internal sealed class ForwardTurnShapePlanResult
 
 internal sealed class ForwardTurnShapePlanner
 {
+    private readonly ICustomProfileSettings _settings;
     private readonly Random _rng;
 
-    internal ForwardTurnShapePlanner(Random rng)
+    internal ForwardTurnShapePlanner(ICustomProfileSettings settings, Random rng)
     {
+        _settings = settings;
         _rng = rng;
     }
 
@@ -81,7 +83,7 @@ internal sealed class ForwardTurnShapePlanner
         }
 
         var candidates = new List<Candidate>();
-        BuildCandidates(0, new ForwardPusher[Settings.COLS], flush, blocked, candidates);
+        BuildCandidates(0, new ForwardPusher[_settings.COLS], flush, blocked, candidates);
 
         var legal = candidates
             .Where(candidate => candidate.PoppedCellCount >= minPoppedCells)
@@ -95,30 +97,14 @@ internal sealed class ForwardTurnShapePlanner
                 $"no legal turn shape for pop budget {minPoppedCells}..{maxPoppedCells}");
         }
 
-        var allLegal = legal.ToArray();
         var preferredPopCount = preferredPoppedCells.HasValue
             ? ClosestLegalPopCount(legal, preferredPoppedCells.Value)
             : PickPreferredPopCount(legal, pressureMode);
-        if (preferredPoppedCells.HasValue)
-        {
-            legal = legal
-                .Where(candidate => candidate.PoppedCellCount == preferredPopCount)
-                .ToList();
-        }
-
-        if (pushBagUseCounts != null
-            && legal.Count > 0
-            && legal.All(candidate => pushBagUseCounts.GetValueOrDefault(candidate.PushBagKey) >= 2))
-        {
-            var fresh = allLegal
-                .Where(candidate => pushBagUseCounts.GetValueOrDefault(candidate.PushBagKey) < 2)
-                .ToArray();
-            if (fresh.Length > 0)
-                legal = fresh.ToList();
-        }
-
+        var capacityMatched = legal
+            .Where(candidate => candidate.PoppedCellCount == preferredPopCount)
+            .ToArray();
         var eligible = PreferLeastUsedPushBags(
-            PreferFreshPushBags(legal, avoidedPushBags),
+            PreferFreshPushBags(capacityMatched, avoidedPushBags),
             pushBagUseCounts);
         var scored = eligible
             .Select(candidate => new ScoredCandidate(candidate, Score(candidate, pressureMode, preferredPopCount)))
@@ -148,37 +134,37 @@ internal sealed class ForwardTurnShapePlanner
         IReadOnlySet<int> blockedColumns,
         List<Candidate> candidates)
     {
-        if (col >= Settings.COLS)
+        if (col >= _settings.COLS)
         {
-            var (shape, check) = ForwardTurnShape.TryCreate(current);
+            var (shape, check) = ForwardTurnShape.TryCreate(current, _settings);
             if (check.IsValid)
-                candidates.Add(new Candidate(shape!));
+                candidates.Add(new Candidate(shape!, _settings));
             return;
         }
 
         if (blockedColumns.Contains(col))
         {
-            current[col] = new ForwardPusher(Settings.MIN_PUSH);
+            current[col] = new ForwardPusher(_settings.MIN_PUSH);
             BuildCandidates(col + 1, current, flushColumns, blockedColumns, candidates);
             return;
         }
 
         if (flushColumns.Contains(col))
         {
-            current[col] = new ForwardPusher(Settings.ROWS, Settings.F_FLUSH_ID);
+            current[col] = new ForwardPusher(_settings.ROWS, _settings.F_FLUSH_ID);
             BuildCandidates(col + 1, current, flushColumns, blockedColumns, candidates);
             return;
         }
 
-        for (var push = Settings.MIN_PUSH; push <= Settings.MAX_PUSH; push++)
+        for (var push = _settings.MIN_PUSH; push <= _settings.MAX_PUSH; push++)
         {
             current[col] = new ForwardPusher(push);
             BuildCandidates(col + 1, current, flushColumns, blockedColumns, candidates);
         }
     }
 
-    internal static long PushBagKey(ForwardTurnShape shape) =>
-        BuildPushBagKey(shape);
+    internal static long PushBagKey(ForwardTurnShape shape, ICustomProfileSettings settings) =>
+        BuildPushBagKey(shape, settings);
 
     private IReadOnlyList<Candidate> PreferFreshPushBags(
         IReadOnlyList<Candidate> legal,
@@ -234,9 +220,14 @@ internal sealed class ForwardTurnShapePlanner
         var max = counts[counts.Length - 1];
         var span = max - min;
         var lower = pressureMode
-            ? min + Math.Max(0, (int)Math.Round(span * 0.25))
-            : min;
-        var upper = max;
+            ? min + Math.Max(0, (int)Math.Round(span * 0.60))
+            : MinimumUnpressuredPopCount(min, max);
+        var upper = pressureMode
+            ? max
+            : min + Math.Max(0, (int)Math.Round(span * 0.80));
+
+        lower = Math.Clamp(lower, min, max);
+        upper = Math.Clamp(upper, lower, max);
 
         var window = counts
             .Where(count => count >= lower && count <= upper)
@@ -253,11 +244,14 @@ internal sealed class ForwardTurnShapePlanner
         return chosen[_rng.Next(chosen.Length)];
     }
 
+    internal static int MinimumUnpressuredPopCount(int min, int max) =>
+        min + Math.Max(0, (int)Math.Round((max - min) * 0.35));
+
     private int[] PickPopBucket(int[] low, int[] mid, int[] high)
     {
-        var lowWeight = low.Length == 0 ? 0.0 : Settings.WPusherLowPop;
-        var midWeight = mid.Length == 0 ? 0.0 : Settings.WPusherMidPop;
-        var highWeight = high.Length == 0 ? 0.0 : Settings.WPusherHighPop;
+        var lowWeight = low.Length == 0 ? 0.0 : _settings.WPusherLowPop;
+        var midWeight = mid.Length == 0 ? 0.0 : _settings.WPusherMidPop;
+        var highWeight = high.Length == 0 ? 0.0 : _settings.WPusherHighPop;
         var total = lowWeight + midWeight + highWeight;
         if (total <= 0.0)
             return low.Length > 0 ? low : mid.Length > 0 ? mid : high;
@@ -291,8 +285,8 @@ internal sealed class ForwardTurnShapePlanner
     {
         foreach (var col in columns)
         {
-            if (col < 0 || col >= Settings.COLS)
-                return Fail(failureStatus, $"column {col} outside 0..{Settings.COLS - 1}");
+            if (col < 0 || col >= _settings.COLS)
+                return Fail(failureStatus, $"column {col} outside 0..{_settings.COLS - 1}");
         }
 
         return Ok();
@@ -311,17 +305,17 @@ internal sealed class ForwardTurnShapePlanner
         return ascending || descending;
     }
 
-    private static long BuildPushBagKey(ForwardTurnShape shape)
+    private static long BuildPushBagKey(ForwardTurnShape shape, ICustomProfileSettings settings)
     {
         var key = 0L;
-        for (var push = Settings.MIN_PUSH; push <= Settings.MAX_PUSH; push++)
+        for (var push = settings.MIN_PUSH; push <= settings.MAX_PUSH; push++)
         {
             var count = shape.Pushers.Count(pusher =>
-                !pusher.IsFlush() && pusher.PushValue == push);
+                !pusher.IsFlush(settings) && pusher.PushValue == push);
             key = (key * 8L) + count;
         }
 
-        var flushCount = shape.Pushers.Count(pusher => pusher.IsFlush());
+        var flushCount = shape.Pushers.Count(pusher => pusher.IsFlush(settings));
         return (key * 8L) + flushCount;
     }
 
@@ -333,12 +327,12 @@ internal sealed class ForwardTurnShapePlanner
 
     private sealed class Candidate
     {
-        internal Candidate(ForwardTurnShape shape)
+        internal Candidate(ForwardTurnShape shape, ICustomProfileSettings settings)
         {
             Shape = shape;
             PoppedCellCount = shape.PoppedCellCount;
             var normalPushes = shape.Pushers
-                .Where(pusher => !pusher.IsFlush())
+                .Where(pusher => !pusher.IsFlush(settings))
                 .Select(pusher => pusher.PushValue)
                 .ToArray();
             DistinctPushValues = normalPushes.Distinct().Count();
@@ -348,8 +342,8 @@ internal sealed class ForwardTurnShapePlanner
             ContainsTwo = normalPushes.Contains(2);
             ContainsThree = normalPushes.Contains(3);
             ContainsFour = normalPushes.Contains(4);
-            FlushCount = shape.Pushers.Count(pusher => pusher.IsFlush());
-            PushBagKey = BuildPushBagKey(shape);
+            FlushCount = shape.Pushers.Count(pusher => pusher.IsFlush(settings));
+            PushBagKey = BuildPushBagKey(shape, settings);
         }
 
         internal ForwardTurnShape Shape { get; }

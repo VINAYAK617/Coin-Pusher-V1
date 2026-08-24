@@ -1,5 +1,7 @@
 namespace CoinPusherEngine;
 
+using GameEngine;
+
 public enum CoinPusherTicketGenerationGuardStatus
 {
     Valid,
@@ -36,13 +38,20 @@ public sealed class CoinPusherTicketGenerationGuardResult
 
 public sealed class CoinPusherTicketGenerationGuard
 {
+    private readonly ICustomProfileSettings _settings;
     private readonly CoinPusherTicketGenerator _generator;
     private readonly CoinPusherTicketGenerationAuditor _auditor;
 
     public CoinPusherTicketGenerationGuard()
+        : this(Settings)
     {
-        _generator = new CoinPusherTicketGenerator();
-        _auditor = new CoinPusherTicketGenerationAuditor();
+    }
+
+    internal CoinPusherTicketGenerationGuard(ICustomProfileSettings settings)
+    {
+        _settings = settings;
+        _generator = new CoinPusherTicketGenerator(_settings);
+        _auditor = new CoinPusherTicketGenerationAuditor(_settings);
     }
 
     public CoinPusherTicketGenerationGuardResult Generate(

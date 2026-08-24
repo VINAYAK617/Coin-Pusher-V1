@@ -21,8 +21,6 @@ public sealed class MathInput
     public IReadOnlyDictionary<int, IReadOnlyDictionary<int, decimal>>? PrizeValues { get; init; }
     public IReadOnlyDictionary<int, int>?         NonWinTargets { get; init; }
     public IReadOnlyDictionary<int, int>?         NonWinPrizeTiers { get; init; }
-    public int?                                   WinCompletionTurn { get; init; }
-    public bool                                   LockExtraGoCount { get; init; }
     public int?                                   PpsCombinationId { get; init; }
     public decimal?                               PpsTotalPrize { get; init; }
 
@@ -92,6 +90,7 @@ internal sealed class PlaceCtx
     internal int                       MinSpin { get; init; }
     internal HashSet<(int, int)>       Used    { get; init; } = new();
     internal TicketExperienceProfile   ExperienceProfile { get; init; } = TicketExperienceProfile.Balanced;
+    internal ICustomProfileSettings Settings { get; init; } = GameEngine.Engine.Settings;
 }
 
 internal sealed class FireCtx
@@ -174,14 +173,17 @@ internal sealed class FillTracker
     private readonly int[] _fills;
     private readonly Dictionary<int, int> _used = new();
     private readonly Dictionary<int, int> _collectedUsed = new();
+    private readonly ICustomProfileSettings _settings;
     private int _cursor;
     private int _collectedCursor;
 
     internal FillTracker(
         int[] fills,
-        IReadOnlyDictionary<int, int>? collectedReserve = null)
+        IReadOnlyDictionary<int, int>? collectedReserve = null,
+        ICustomProfileSettings? settings = null)
     {
         _fills = fills;
+        _settings = settings ?? Settings;
         foreach (var f in fills) _used[f] = 0;
         foreach (var f in fills)
             _collectedUsed[f] = collectedReserve?.GetValueOrDefault(f) ?? 0;
@@ -216,7 +218,7 @@ internal sealed class FillTracker
             int idx = (_collectedCursor + i) % _fills.Length;
             int sym = _fills[idx];
             int cnt = _collectedUsed[sym];
-            if (cnt >= Settings.SymbolFillCap(sym) - 1) continue;
+            if (cnt >= _settings.SymbolFillCap(sym) - 1) continue;
             if (cnt < bestCount) { bestCount = cnt; best = sym; }
         }
 

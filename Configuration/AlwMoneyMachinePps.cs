@@ -2,15 +2,31 @@ namespace CoinPusherEngine;
 
 public static class AlwMoneyMachinePps
 {
-    public static GameEngine.DefaultCoinPusherSettings CreateSettings() =>
+    public static DefaultProfileSettings CreateSettings() =>
         new()
         {
             MAX_SPINS = 8,
             PrizeLadderRows = AlwMoneyMachinePps.PrizeLadderRows,
+            WinningRoundRules = AlwMoneyMachinePps.SpinRules
+                .Select(ToWinningRoundRule)
+                .ToArray(),
             PpsCombinations = AlwMoneyMachinePps.Combinations,
             PpsSpinRules = AlwMoneyMachinePps.SpinRules,
             ExtraSpinFeatureConfig = (0.20, 3, 1, 97, 3),
             PrizeUpgradeFeatureConfig = (0.15, 6, 1, 97, 4),
+        };
+
+    private static WinningRoundRule ToWinningRoundRule(PpsSpinRule rule) =>
+        new()
+        {
+            MinWinInclusive = rule.MinWinInclusive,
+            MaxWinExclusive = rule.MaxWinExclusive,
+            ExtraGoCounts = Enumerable.Range(
+                    rule.MinExtraGo,
+                    rule.MaxExtraGo - rule.MinExtraGo + 1)
+                .ToArray(),
+            MinWinningTurn = rule.MinWinningTurn,
+            MaxWinningTurn = rule.MaxWinningTurn,
         };
 
     public static IReadOnlyList<PrizeLadderRow> PrizeLadderRows { get; } =

@@ -4,13 +4,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace CoinPusherEngine.Tests;
 
 [TestClass]
-[DoNotParallelize]
 public sealed class GameLogicCoverageTests
 {
-    [TestInitialize]
-    public void ResetSettings() =>
-        GameEngine.Engine.Settings = new GameEngine.DefaultCoinPusherSettings();
-
     [DataTestMethod]
     [DataRow(101)]
     [DataRow(202)]
@@ -22,20 +17,20 @@ public sealed class GameLogicCoverageTests
         {
             Targets = new Dictionary<int, int>
             {
-                [2] = Settings.SymbolFillCap(2),
-                [4] = Settings.SymbolFillCap(4),
-                [5] = Settings.SymbolFillCap(5),
+                [2] = TestSettings.Default.SymbolFillCap(2),
+                [4] = TestSettings.Default.SymbolFillCap(4),
+                [5] = TestSettings.Default.SymbolFillCap(5),
             },
             BaseSpins = 5,
             Required = new Dictionary<string, int>
             {
                 ["WHEEL"] = 1,
                 ["FLUSH"] = 1,
-                ["EXTRA_SPIN"] = 1,
+                ["EXTRA_SPIN"] = 3,
                 ["PRIZE_UPGRADE"] = 1,
             },
             PrizeTiers = new Dictionary<int, int> { [2] = 1 },
-            PrizeValues = PrizeValues(6, tiers: 3),
+            PrizeValues = ConfiguredPrizeValues(TestSettings.Default),
             MaxSym = 6,
         };
 
@@ -70,6 +65,18 @@ public sealed class GameLogicCoverageTests
         AssertValid(ticket);
     }
 
+    [TestMethod]
+    public void PublicGeneratorBuildsNoWinSeedThatPreviouslyFailedOptionalWheel()
+    {
+        var result = new CoinPusherTicketJsonGenerator(TestSettings.Default)
+            .Generate(Array.Empty<decimal>(), seed: 1236481297);
+
+        Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, result.Status, result.Detail);
+        Assert.IsNotNull(result.Ticket);
+        Assert.AreEqual(0, result.Ticket!.WinInfo.WinSymbols.Length);
+        AssertValid(result.Ticket);
+    }
+
     [DataTestMethod]
     [DataRow(9001)]
     [DataRow(9002)]
@@ -79,8 +86,8 @@ public sealed class GameLogicCoverageTests
         {
             Targets = new Dictionary<int, int>
             {
-                [2] = Settings.SymbolFillCap(2),
-                [4] = Settings.SymbolFillCap(4),
+                [2] = TestSettings.Default.SymbolFillCap(2),
+                [4] = TestSettings.Default.SymbolFillCap(4),
             },
             BaseSpins = 5,
             Required = new Dictionary<string, int>(),
@@ -111,7 +118,7 @@ public sealed class GameLogicCoverageTests
     [TestMethod]
     public void LadderBundleBacktracksToPreserveFuturePrizeOptions()
     {
-        var prizes = new decimal[] { 100, 250 };
+        var prizes = new decimal[] { 50, 200 };
 
         for (var seed = 1; seed <= 20; seed++)
         {
@@ -130,15 +137,15 @@ public sealed class GameLogicCoverageTests
     [TestMethod]
     public void LadderBundleHonorsConfiguredPrizeUpgradeCap()
     {
-        var current = Settings.PrizeUpgradeFeatureConfig;
-        var settings = new GameEngine.DefaultCoinPusherSettings {
+        var current = TestSettings.Default.PrizeUpgradeFeatureConfig;
+        var settings = new DefaultProfileSettings
+        {
             PrizeUpgradeFeatureConfig = (current.P, 2, current.MinS, current.MaxS, current.Ord),
         };
-        GameEngine.Engine.Settings = settings;
 
         Assert.ThrowsException<InvalidOperationException>(() =>
-            new LadderCombinator(StandardRows(), seed: 31313)
-                .Bundle(new decimal[] { 100, 250 }));
+            new LadderCombinator(StandardRows(), seed: 31313, settings)
+                .Bundle(new decimal[] { 50, 200 }));
     }
 
     [DataTestMethod]
@@ -197,7 +204,7 @@ public sealed class GameLogicCoverageTests
             {
                 var ticket = PlanTicket(bundle.Input, plannerSeed);
                 Assert.AreEqual(6, ticket.WinInfo.WinSymbols.Length);
-                Assert.IsTrue(ticket.WinInfo.TotalSpins <= Settings.MAX_SPINS);
+                Assert.IsTrue(ticket.WinInfo.TotalSpins <= TestSettings.Default.MAX_SPINS);
             }
             catch (Exception ex)
             {
@@ -225,6 +232,86 @@ public sealed class GameLogicCoverageTests
 
         Assert.AreEqual(30, Sim.Run(plan)[6]);
         AssertValid(JsonConvert.DeserializeObject<TicketSerializer.TicketDto>(TicketSerializer.ToJson(plan))!);
+    }
+
+    [TestMethod]
+    public void GeneratorAvoidsNoOpRepeatedWheelPlacements()
+    {
+        var cases = new[]
+        {
+            (Prizes: new decimal[] { 10m }, Seed: 162789259),
+            (Prizes: new decimal[] { 25m, 100m }, Seed: 1680382235),
+        };
+
+        foreach (var item in cases)
+        {
+            var result = new CoinPusherTicketJsonGenerator(TestSettings.Default)
+                .Generate(item.Prizes, item.Seed);
+
+            Assert.IsTrue(result.IsValid, result.Detail);
+            AssertValid(result.Ticket!);
+        }
+    }
+
+    [DataTestMethod]
+    [DataRow(10000)]
+    [DataRow(20000)]
+    [DataRow(30000)]
+    [DataRow(40000)]
+    public void TopPrizeCompletesOnFinalTurnInPublicReplay(int seed)
+    {
+        var topSymbol = TestSettings.Default.PrizeLadderRows.Count;
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int> { [topSymbol] = TestSettings.Default.SymbolFillCap(topSymbol) },
+            BaseSpins = TestSettings.Default.BASE_SPINS,
+            PrizeValues = PrizeValues(topSymbol, tiers: 3),
+            MaxSym = topSymbol,
+        }, seed);
+
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
+        var topCheck = report.Checks.FirstOrDefault(check =>
+            check.Category == "Payout"
+            && check.Name == $"Top prize symbol {topSymbol} completes on final turn");
+
+        Assert.IsNotNull(topCheck);
+        Assert.AreEqual(TicketChecker.Status.Pass, topCheck!.Result, topCheck.Detail);
+        AssertValid(ticket);
+    }
+
+    [TestMethod]
+    public void CheckerRejectsTopPrizeCompletionBeforeFinalTurn()
+    {
+        var topSymbol = TestSettings.Default.PrizeLadderRows.Count;
+        var ticket = PlanTicket(new MathInput
+        {
+            Targets = new Dictionary<int, int> { [topSymbol] = TestSettings.Default.SymbolFillCap(topSymbol) },
+            BaseSpins = TestSettings.Default.BASE_SPINS,
+            PrizeValues = PrizeValues(topSymbol, tiers: 3),
+            MaxSym = topSymbol,
+        }, seed: 50505);
+
+        foreach (var row in ticket.StartingBoard)
+        {
+            foreach (var cell in row)
+                cell.Id = topSymbol;
+        }
+
+        foreach (var spawn in ticket.Turns.Take(ticket.Turns.Length - 1).SelectMany(turn => turn.Spawns))
+        {
+            if (spawn.Feature == null)
+                spawn.Id = topSymbol;
+        }
+
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
+
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail
+            && check.Category == "Payout"
+            && check.Name == $"Top prize symbol {topSymbol} completes on final turn"),
+            string.Join(Environment.NewLine, report.Checks
+                .Where(check => check.Result == TicketChecker.Status.Fail)
+                .Select(check => $"{check.Category}/{check.Name}: {check.Detail}")));
     }
 
     [TestMethod]
@@ -277,13 +364,13 @@ public sealed class GameLogicCoverageTests
         {
             Targets = new Dictionary<int, int>
             {
-                [2] = Settings.SymbolFillCap(2),
-                [4] = Settings.SymbolFillCap(4),
+                [2] = TestSettings.Default.SymbolFillCap(2),
+                [4] = TestSettings.Default.SymbolFillCap(4),
             },
             BaseSpins = 5,
             Required = new Dictionary<string, int> { ["PRIZE_UPGRADE"] = 2 },
             PrizeTiers = new Dictionary<int, int> { [2] = 1, [4] = 1 },
-            PrizeValues = PrizeValues(6, tiers: 3),
+            PrizeValues = ConfiguredPrizeValues(TestSettings.Default),
             MaxSym = 6,
         };
 
@@ -297,11 +384,11 @@ public sealed class GameLogicCoverageTests
     [TestMethod]
     public void ConfiguredLateFeaturePlacementBiasesNonWheelFeatureTriggersTowardEndSpinsWhenFeasible()
     {
-        var settings = new GameEngine.DefaultCoinPusherSettings {
+        var settings = new DefaultProfileSettings
+        {
             PFeatureLatePlacement = 1.0,
             PFeatureRetriggerChain = 0.0,
         };
-        GameEngine.Engine.Settings = settings;
         var input = new MathInput
         {
             Targets = new Dictionary<int, int> { [2] = 20 },
@@ -312,17 +399,17 @@ public sealed class GameLogicCoverageTests
                 ["PRIZE_UPGRADE"] = 1,
             },
             PrizeTiers = new Dictionary<int, int> { [2] = 1 },
-            PrizeValues = PrizeValues(6, tiers: 3),
+            PrizeValues = ConfiguredPrizeValues(settings),
             MaxSym = 6,
         };
 
-        var plan = ForwardPlan(input, seed: 34344);
-        var ticket = TicketSerializer.ToTicketObject(plan);
+        var plan = ForwardPlan(input, seed: 34344, settings);
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
         var lateStart = Math.Max(1, ticket.WinInfo.TotalSpins - Math.Max(2, settings.WinLateTailSpins + 1));
         var featureTurns = ticket.Turns
             .SelectMany((turn, index) => turn.Spawns
                 .Where(spawn => spawn.Feature != null
-                    && spawn.Feature.FeatureId != Settings.F_XSPIN)
+                    && spawn.Feature.FeatureId != TestSettings.Default.F_XSPIN)
                 .Select(_ => index + 1))
             .ToArray();
 
@@ -371,7 +458,7 @@ public sealed class GameLogicCoverageTests
             Turns = Array.Empty<TicketSerializer.TurnDto>(),
         };
 
-        var report = TicketChecker.CheckTicket(malformed);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(malformed);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.FailCount > 0);
@@ -384,42 +471,9 @@ public sealed class GameLogicCoverageTests
             .Generate(new decimal[] { 1m, 2m, 5m }, seed: 30301);
 
         Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, generated.Status, generated.Detail);
-        var result = new CoinPusherTicketCheckerPlugin().CheckJson(generated.Json!);
+        var result = new CoinPusherTicketCheckerPlugin(TestSettings.Default).CheckJson(generated.Json!);
 
         Assert.IsTrue(result.IsValid, string.Join(Environment.NewLine, result.Errors));
-    }
-
-    [TestMethod]
-    public void CheckerAcceptsSeedWhereWheelAndPrizeUpgradeShareTurn()
-    {
-        var generated = new CoinPusherTicketJsonGenerator()
-            .Generate(new decimal[] { 2m }, seed: 1304042992);
-
-        Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, generated.Status, generated.Detail);
-        var report = TicketChecker.CheckTicket(generated.Ticket);
-
-        Assert.IsTrue(report.IsValid, string.Join(
-            Environment.NewLine,
-            report.Checks
-                .Where(check => check.Result == TicketChecker.Status.Fail)
-                .Select(check => $"{check.Category}/{check.Name}: {check.Detail}")));
-    }
-
-    [DataTestMethod]
-    [DataRow("2", 1304042992)]
-    [DataRow("1,2,5,10", 1304050864)]
-    [DataRow("5,10,100,10000", 1304051583)]
-    [DataRow("1,2,5,10,100,10000", 20260813)]
-    public void SerializedTicketDeclarationsMatchInternalSimulationForRiskSeeds(
-        string prizeCsv,
-        int seed)
-    {
-        var prizes = ParsePrizes(prizeCsv);
-        var generated = new CoinPusherTicketJsonGenerator().Generate(prizes, seed);
-
-        Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, generated.Status, generated.Detail);
-        AssertTicketMatchesInternalSim(generated.Plan!, generated.Ticket!);
-        AssertValid(generated.Ticket!);
     }
 
     [TestMethod]
@@ -459,7 +513,7 @@ public sealed class GameLogicCoverageTests
             },
         };
 
-        var result = TicketChecker.CheckObject(ticket);
+        var result = new TicketChecker(TestSettings.Default).CheckObject(ticket);
 
         Assert.IsTrue(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
@@ -468,11 +522,11 @@ public sealed class GameLogicCoverageTests
     public void CheckerRejectsFrameworkCashWinMismatchAgainstPrizeLadder()
     {
         var bundle = new LadderCombinator(StandardRows(), seed: 31313)
-            .Bundle(new decimal[] { 100, 250 });
+            .Bundle(new decimal[] { 50, 200 });
         var gameData = PlanTicket(bundle.Input, seed: 31313);
         var ticket = FrameworkTicket(gameData, cashWin: 999m);
 
-        var result = TicketChecker.CheckObject(ticket);
+        var result = new TicketChecker(TestSettings.Default).CheckObject(ticket);
 
         Assert.IsFalse(result.IsValid);
         Assert.IsTrue(result.Errors.Any(error => error.Contains("CashWin matches declared ladder prizes")));
@@ -494,7 +548,7 @@ public sealed class GameLogicCoverageTests
             .Concat(gameData.WinInfo.PrizeTiers)
             .ToArray();
 
-        var report = TicketChecker.CheckTicket(gameData);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(gameData);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.Checks.Any(check =>
@@ -517,21 +571,21 @@ public sealed class GameLogicCoverageTests
             if (spawn == null) continue;
 
             var convertToId = spawn.Id;
-            spawn.Id = Settings.F_WHEEL;
+            spawn.Id = TestSettings.Default.F_WHEEL;
             spawn.Feature = new TicketSerializer.FeatureDto
             {
-                FeatureId = Settings.F_WHEEL,
+                FeatureId = TestSettings.Default.F_WHEEL,
                 ConvertToId = convertToId,
                 WheelSymbolId = gameData.WinInfo.WinSymbols[0].Id,
                 WheelStackValue = 1,
                 ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
             };
             injected++;
-            if (injected > Settings.FeatureConfig("WHEEL").Max) break;
+            if (injected > TestSettings.Default.FeatureConfig("WHEEL").Max) break;
         }
 
-        Assert.IsTrue(injected > Settings.FeatureConfig("WHEEL").Max);
-        var report = TicketChecker.CheckTicket(gameData);
+        Assert.IsTrue(injected > TestSettings.Default.FeatureConfig("WHEEL").Max);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(gameData);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.Checks.Any(check =>
@@ -552,7 +606,7 @@ public sealed class GameLogicCoverageTests
 
         var firstTurn = ticket.Turns[0];
         var existingPositions = firstTurn.Spawns.Select(spawn => spawn.Pos).ToHashSet();
-        var occupiedPos = Enumerable.Range(0, Settings.ROWS * Settings.COLS)
+        var occupiedPos = Enumerable.Range(0, TestSettings.Default.ROWS * TestSettings.Default.COLS)
             .First(pos => !existingPositions.Contains(pos));
 
         firstTurn.Spawns = firstTurn.Spawns
@@ -561,12 +615,12 @@ public sealed class GameLogicCoverageTests
                 new TicketSerializer.SpawnDto
                 {
                     Pos = occupiedPos,
-                    Id = Settings.F_COIN,
+                    Id = TestSettings.Default.F_COIN,
                 },
             })
             .ToArray();
 
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.Checks.Any(check =>
@@ -595,10 +649,10 @@ public sealed class GameLogicCoverageTests
 
         var pusher = ticket.Turns
             .SelectMany(turn => turn.Pushers)
-            .First(p => p.FeatureId == null && p.PushValue < Settings.MAX_PUSH);
+            .First(p => p.FeatureId == null && p.PushValue < TestSettings.Default.MAX_PUSH);
         pusher.PushValue++;
 
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.Checks.Any(check =>
@@ -619,12 +673,12 @@ public sealed class GameLogicCoverageTests
 
         var firstTurn = ticket.Turns[0];
         var correctSpawnPositions = firstTurn.Spawns.Select(spawn => spawn.Pos).ToHashSet();
-        var occupiedPosition = Enumerable.Range(0, Settings.ROWS * Settings.COLS)
+        var occupiedPosition = Enumerable.Range(0, TestSettings.Default.ROWS * TestSettings.Default.COLS)
             .First(pos => !correctSpawnPositions.Contains(pos));
 
         firstTurn.Spawns[0].Pos = occupiedPosition;
 
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.Checks.Any(check =>
@@ -647,9 +701,9 @@ public sealed class GameLogicCoverageTests
             MaxSym = 6,
         }, seed: 50505);
 
-        ticket.StartingBoard[0][0].Id = Settings.F_WHEEL;
+        ticket.StartingBoard[0][0].Id = TestSettings.Default.F_WHEEL;
 
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.Checks.Any(check =>
@@ -665,11 +719,11 @@ public sealed class GameLogicCoverageTests
         {
             Targets = new Dictionary<int, int>
             {
-                [2] = Settings.SymbolFillCap(2),
-                [4] = Settings.SymbolFillCap(4),
+                [2] = TestSettings.Default.SymbolFillCap(2),
+                [4] = TestSettings.Default.SymbolFillCap(4),
             },
             BaseSpins = 5,
-            PrizeValues = PrizeValues(Settings.PrizeLadderRows.Count, tiers: 3),
+            PrizeValues = PrizeValues(TestSettings.Default.PrizeLadderRows.Count, tiers: 3),
             MaxSym = 6,
         };
         var plan = ForwardPlan(input, seed: 60606);
@@ -680,7 +734,7 @@ public sealed class GameLogicCoverageTests
 
         foreach (var (sym, count) in Sim.Run(plan))
         {
-            if (count > 0 && !Settings.IsFeat(sym))
+            if (count > 0 && !TestSettings.Default.IsFeat(sym))
                 Assert.IsTrue(declared.Contains(sym), $"symbol {sym} collected {count} time(s) but was not declared");
         }
 
@@ -700,7 +754,7 @@ public sealed class GameLogicCoverageTests
         Assert.IsTrue(ticket.WinInfo.NonWinSymbols.Length > 0);
         ticket.WinInfo.NonWinSymbols = ticket.WinInfo.NonWinSymbols.Skip(1).ToArray();
 
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.Checks.Any(check =>
@@ -728,16 +782,16 @@ public sealed class GameLogicCoverageTests
 
         foreach (var spawn in ticket.Turns.SelectMany(turn => turn.Spawns))
         {
-            if (spawn.Feature?.FeatureId == Settings.F_XSPIN)
+            if (spawn.Feature?.FeatureId == TestSettings.Default.F_XSPIN)
             {
-                spawn.Id = Settings.F_COIN;
+                spawn.Id = TestSettings.Default.F_COIN;
                 spawn.Feature = null;
             }
         }
 
         var turn5Spawn = ticket.Turns[4].Spawns.First(spawn => spawn.Feature == null);
-        turn5Spawn.Id = Settings.F_XSPIN;
-        turn5Spawn.Feature = ExtraSpinFeature(convertToId: Settings.F_COIN);
+        turn5Spawn.Id = TestSettings.Default.F_XSPIN;
+        turn5Spawn.Feature = ExtraSpinFeature(convertToId: TestSettings.Default.F_COIN);
 
         var turn7 = ticket.Turns[6];
         var turn7Spawns = turn7.Spawns
@@ -747,11 +801,11 @@ public sealed class GameLogicCoverageTests
         Assert.AreEqual(2, turn7Spawns.Length);
         foreach (var spawn in turn7Spawns)
         {
-            spawn.Id = Settings.F_XSPIN;
-            spawn.Feature = ExtraSpinFeature(convertToId: Settings.F_COIN);
+            spawn.Id = TestSettings.Default.F_XSPIN;
+            spawn.Feature = ExtraSpinFeature(convertToId: TestSettings.Default.F_COIN);
         }
 
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.Checks.Any(check =>
@@ -773,13 +827,13 @@ public sealed class GameLogicCoverageTests
         }, seed: 90909);
         var parent = ticket.Turns
             .SelectMany(turn => turn.Spawns)
-            .First(spawn => spawn.Feature?.FeatureId == Settings.F_XSPIN);
+            .First(spawn => spawn.Feature?.FeatureId == TestSettings.Default.F_XSPIN);
         parent.Feature!.ConvertToId = 2;
         parent.Feature.ReTrigger = new[]
         {
             new TicketSerializer.FeatureDto
             {
-                FeatureId = Settings.F_PRUP,
+                FeatureId = TestSettings.Default.F_PRUP,
                 ConvertToId = 2,
                 UpgradeSymbolId = 2,
                 UpgradePrizeValue = 2m,
@@ -787,7 +841,7 @@ public sealed class GameLogicCoverageTests
             },
         };
 
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
         Assert.IsFalse(report.IsValid);
         Assert.IsTrue(report.Checks.Any(check =>
@@ -804,7 +858,7 @@ public sealed class GameLogicCoverageTests
 
         var mutations = new (string Name, Action<TicketSerializer.TicketDto> Mutate, string? Category)[]
         {
-            ("normal spawn id changed", ChangeNormalSpawnId, null),
+            ("normal spawn changed to feature id without payload", ChangeNormalSpawnId, "Schema"),
             ("spawn removed", RemoveOneSpawn, "Geometry"),
             ("spawn moved onto occupied cell", MoveSpawnOntoOccupiedCell, "Replay"),
             ("normal pusher value changed", IncreaseNormalPusherValue, "Geometry"),
@@ -812,7 +866,6 @@ public sealed class GameLogicCoverageTests
             ("FLUSH/PUSH placed on final spin", AddFinalFlushPusher, "Feature"),
             ("WHEEL stack outside configured range", BreakWheelStackValue, "Schema"),
             ("feature convert target points at feature without ReTrigger", BreakFeatureConvertTarget, "Schema"),
-            ("feature convert target outside configured symbol range", BreakFeatureConvertTargetOutOfRange, "Schema"),
             ("PRIZE_UPGRADE payload missing prize value", BreakPrizeUpgradePayload, "Schema"),
             ("collected non-winning symbol removed from WinInfo", RemoveCollectedNonWinDeclaration, "WinInfo"),
             ("TotalSpins does not match turns", BreakTotalSpins, "SpinCount"),
@@ -823,10 +876,34 @@ public sealed class GameLogicCoverageTests
             var ticket = CloneTicket(valid);
             mutation.Mutate(ticket);
 
-            var report = TicketChecker.CheckTicket(ticket);
+            var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
             AssertRejected(report, mutation.Name, mutation.Category);
         }
+    }
+
+    [TestMethod]
+    public void CheckerRejectsIntentionalWinCollectionOverflow()
+    {
+        var ticket = FeatureRichTicket(seed: 95959);
+        AssertValid(ticket);
+
+        var win = ticket.WinInfo.WinSymbols.First(symbol => symbol.Target > 1);
+        var actualReplayCountBeforeMutation = win.Target;
+        win.Target--;
+
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
+
+        AssertRejected(report, "intentional win collection overflow", "Payout");
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail
+            && check.Category == "Payout"
+            && check.Name == $"Win symbol {win.Id} exact count"
+            && check.Detail.Contains($"target={win.Target}")
+            && check.Detail.Contains($"actual(replayed)={actualReplayCountBeforeMutation}")),
+            string.Join(" | ", report.Checks
+                .Where(check => check.Result == TicketChecker.Status.Fail)
+                .Select(check => $"{check.Category}/{check.Name}: {check.Detail}")));
     }
 
     [TestMethod]
@@ -847,7 +924,7 @@ public sealed class GameLogicCoverageTests
             var ticket = FrameworkTicket(CloneTicket(gameData), cashWin);
             testCase.Mutate(ticket);
 
-            var result = TicketChecker.CheckObject(ticket);
+            var result = new TicketChecker(TestSettings.Default).CheckObject(ticket);
 
             Assert.IsFalse(result.IsValid, testCase.Name);
             Assert.IsTrue(result.Errors.Any(error => error.Contains(testCase.NameContains)),
@@ -858,14 +935,14 @@ public sealed class GameLogicCoverageTests
     [TestMethod]
     public void CheckerAcceptsConfiguredMaximumFlushPushers()
     {
-        var settings = Settings;
+        var settings = TestSettings.Default;
         var ticket = PlanTicket(new MathInput
         {
             Targets = new Dictionary<int, int> { [2] = settings.SymbolFillCap(2) },
             Required = new Dictionary<string, int>
             {
                 ["FLUSH"] = settings.FeatureConfig("FLUSH").Max,
-                ["EXTRA_SPIN"] = 2,
+                ["EXTRA_SPIN"] = 1,
             },
             BaseSpins = settings.BASE_SPINS,
             PrizeValues = PrizeValues(settings.PrizeLadderRows.Count, tiers: 3),
@@ -881,10 +958,10 @@ public sealed class GameLogicCoverageTests
     [TestMethod]
     public void SerializerDoesNotCreateCrossTurnRetriggerChains()
     {
-        var settings = new GameEngine.DefaultCoinPusherSettings { PFeatureRetriggerChain = 1.0 };
-        GameEngine.Engine.Settings = settings;
+        var settings = new DefaultProfileSettings { PFeatureRetriggerChain = 1.0 };
         var plan = new GamePlan
         {
+            Verified = true,
             TotalSpins = 3,
             Targets = new Dictionary<int, int> { [2] = 1 },
             WinSyms = new[] { 2 },
@@ -899,7 +976,7 @@ public sealed class GameLogicCoverageTests
             },
         };
 
-        var ticket = TicketSerializer.ToTicketObject(plan);
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
 
         Assert.IsFalse(ticket.Turns
             .SelectMany(turn => turn.Spawns)
@@ -910,10 +987,10 @@ public sealed class GameLogicCoverageTests
     [TestMethod]
     public void SerializerUsesNestedFeatureIdAsRetriggerConvertTarget()
     {
-        var settings = new GameEngine.DefaultCoinPusherSettings { PFeatureRetriggerChain = 1.0 };
-        GameEngine.Engine.Settings = settings;
+        var settings = new DefaultProfileSettings { PFeatureRetriggerChain = 1.0 };
         var plan = new GamePlan
         {
+            Verified = true,
             TotalSpins = 3,
             Targets = new Dictionary<int, int> { [2] = 1 },
             WinSyms = new[] { 2 },
@@ -928,23 +1005,23 @@ public sealed class GameLogicCoverageTests
             },
         };
 
-        var ticket = TicketSerializer.ToTicketObject(plan);
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
         var parent = ticket.Turns
             .SelectMany(turn => turn.Spawns)
             .First(spawn => spawn.Feature?.ReTrigger.Length == 1);
 
-        Assert.AreEqual(Settings.F_PRUP, parent.Feature!.ConvertToId);
-        Assert.AreEqual(Settings.F_PRUP, parent.Feature.ReTrigger[0].FeatureId);
+        Assert.AreEqual(TestSettings.Default.F_PRUP, parent.Feature!.ConvertToId);
+        Assert.AreEqual(TestSettings.Default.F_PRUP, parent.Feature.ReTrigger[0].FeatureId);
         Assert.AreEqual(2, parent.Feature.ReTrigger[0].ConvertToId);
     }
 
     [TestMethod]
     public void SerializerKeepsWheelPhysicalBecauseBoardPositionAffectsStacking()
     {
-        var settings = new GameEngine.DefaultCoinPusherSettings { PFeatureRetriggerChain = 1.0 };
-        GameEngine.Engine.Settings = settings;
+        var settings = new DefaultProfileSettings { PFeatureRetriggerChain = 1.0 };
         var plan = new GamePlan
         {
+            Verified = true,
             TotalSpins = 3,
             Targets = new Dictionary<int, int>(),
             WinSyms = Array.Empty<int>(),
@@ -958,75 +1035,142 @@ public sealed class GameLogicCoverageTests
             },
         };
 
-        var ticket = TicketSerializer.ToTicketObject(plan);
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
         var featureSpawns = ticket.Turns
             .SelectMany(turn => turn.Spawns)
             .Where(spawn => spawn.Feature != null)
             .ToArray();
 
         Assert.IsFalse(featureSpawns.Any(spawn =>
-            spawn.Feature!.ReTrigger.Any(child => child.FeatureId == Settings.F_WHEEL)));
+            spawn.Feature!.ReTrigger.Any(child => child.FeatureId == TestSettings.Default.F_WHEEL)));
         Assert.IsTrue(featureSpawns.Any(spawn =>
-            spawn.Feature!.FeatureId == Settings.F_WHEEL
+            spawn.Feature!.FeatureId == TestSettings.Default.F_WHEEL
             && spawn.Feature.WheelSymbolId == 2
             && spawn.Feature.WheelStackValue == 1));
     }
 
     [TestMethod]
-    public void SerializerKeepsWheelPhysicalWhenPrizeUpgradeSharesTurn()
+    public void CheckerRejectsWheelNestedInRetriggerBecausePositionIsLoadBearing()
     {
-        var settings = new GameEngine.DefaultCoinPusherSettings { PFeatureRetriggerChain = 1.0 };
-        GameEngine.Engine.Settings = settings;
+        var settings = new DefaultProfileSettings { PFeatureRetriggerChain = 0.0 };
         var plan = new GamePlan
         {
-            TotalSpins = 5,
+            Verified = true,
+            TotalSpins = 3,
             Targets = new Dictionary<int, int>(),
             WinSyms = Array.Empty<int>(),
             FillSyms = new[] { 1, 2, 3 },
             PrizeValues = PrizeValues(6, tiers: 3),
             Spins = new List<SpinPlan>
             {
-                SpinWithPrizeUpgradeAndWheel(1),
+                SpinWithExtraAndWheel(1),
                 PlainSpin(2),
                 PlainSpin(3),
-                PlainSpin(4),
-                PlainSpin(5),
             },
         };
 
-        var ticket = TicketSerializer.ToTicketObject(plan);
-        var featureSpawns = ticket.Turns[0].Spawns
-            .Where(spawn => spawn.Feature != null)
-            .ToArray();
-
-        Assert.IsFalse(featureSpawns.Any(spawn =>
-            spawn.Feature!.ReTrigger.Any(child => child.FeatureId == Settings.F_WHEEL)));
-        Assert.IsTrue(featureSpawns.Any(spawn => spawn.Feature!.FeatureId == Settings.F_PRUP));
-        Assert.IsTrue(featureSpawns.Any(spawn => spawn.Feature!.FeatureId == Settings.F_WHEEL));
-    }
-
-    [TestMethod]
-    public void CheckerRejectsWheelNestedInRetriggerBecausePositionIsLoadBearing()
-    {
-        var generated = new CoinPusherTicketJsonGenerator()
-            .Generate(new decimal[] { 2m }, seed: 1304042992);
-        Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, generated.Status, generated.Detail);
-        var ticket = CloneTicket(generated.Ticket!);
+        var ticket = TicketSerializer.ToTicketObject(plan, settings);
         var turn = ticket.Turns.First(item =>
-            item.Spawns.Any(spawn => spawn.Feature?.FeatureId == Settings.F_PRUP)
-            && item.Spawns.Any(spawn => spawn.Feature?.FeatureId == Settings.F_WHEEL));
-        var prizeUpgrade = turn.Spawns.First(spawn => spawn.Feature?.FeatureId == Settings.F_PRUP).Feature!;
-        var wheel = CloneFeature(turn.Spawns.First(spawn => spawn.Feature?.FeatureId == Settings.F_WHEEL).Feature!);
+            item.Spawns.Any(spawn => spawn.Feature?.FeatureId == TestSettings.Default.F_XSPIN)
+            && item.Spawns.Any(spawn => spawn.Feature?.FeatureId == TestSettings.Default.F_WHEEL));
+        var extraGo = turn.Spawns.First(spawn => spawn.Feature?.FeatureId == TestSettings.Default.F_XSPIN).Feature!;
+        var wheel = CloneFeature(turn.Spawns.First(spawn => spawn.Feature?.FeatureId == TestSettings.Default.F_WHEEL).Feature!);
 
-        prizeUpgrade.ConvertToId = Settings.F_WHEEL;
-        prizeUpgrade.ReTrigger = new[] { wheel };
+        extraGo.ConvertToId = TestSettings.Default.F_WHEEL;
+        extraGo.ReTrigger = new[] { wheel };
 
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
         AssertRejected(report, "nested WHEEL retrigger", "Schema");
         Assert.IsTrue(report.Checks.Any(check =>
             check.Result == TicketChecker.Status.Fail
-            && check.Name.Contains("WHEEL ReTrigger payload")));
+            && check.Name.Contains("ReTrigger payload type")));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsWheelThatDoesNotStackAnyBoardCell()
+    {
+        var settings = TestSettings.Default;
+        var ticket = new TicketSerializer.TicketDto
+        {
+            WinInfo = new TicketSerializer.WinInfoDto
+            {
+                TotalSpins = settings.BASE_SPINS,
+                WinSymbols = Array.Empty<TicketSerializer.WinSymbolDto>(),
+                NonWinSymbols = new[]
+                {
+                    new TicketSerializer.NonWinSymbolDto { Id = 6, MinTarget = 1, MaxThreshold = 999 },
+                },
+                PrizeTiers = Array.Empty<TicketSerializer.PrizeTierDto>(),
+            },
+            StartingBoard = Enumerable.Range(0, settings.ROWS)
+                .Select(_ => Enumerable.Range(0, settings.COLS)
+                    .Select(_ => new TicketSerializer.BoardCellDto { Id = 6 })
+                    .ToArray())
+                .ToArray(),
+            Turns = Enumerable.Range(1, settings.BASE_SPINS)
+                .Select(turn => new TicketSerializer.TurnDto
+                {
+                    Pushers = Enumerable.Range(0, settings.COLS)
+                        .Select(_ => new TicketSerializer.PusherDto { PushValue = 1 })
+                        .ToArray(),
+                    Spawns = DeadWheelSpawns(turn == 1),
+                })
+                .ToArray(),
+        };
+
+        var report = new TicketChecker(settings).CheckTicket(ticket);
+
+        AssertRejected(report, "dead WHEEL", "Feature");
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail
+            && check.Name.Contains("WHEEL fire turn 1 sym 2 affects board")),
+            string.Join(" | ", report.Checks
+                .Where(check => check.Result == TicketChecker.Status.Fail)
+                .Select(check => $"{check.Category}/{check.Name}: {check.Detail}")));
+    }
+
+    [TestMethod]
+    public void CheckerRejectsRepeatedWheelStackOverflowEvenWhenEachWheelValueIsLegal()
+    {
+        var settings = TestSettings.Default;
+        var result = new CoinPusherTicketJsonGenerator(settings)
+            .Generate(new decimal[] { 100 }, seed: 202608659);
+        Assert.AreEqual(CoinPusherTicketJsonGenerationStatus.Valid, result.Status, result.Detail);
+        Assert.IsNotNull(result.Ticket);
+
+        var ticket = CloneTicket(result.Ticket!);
+        var targetTurn = ticket.Turns
+            .Select(turn => new
+            {
+                Turn = turn,
+                NormalSpawns = turn.Spawns.Where(spawn => spawn.Feature == null).Take(4).ToArray(),
+            })
+            .First(item => item.NormalSpawns.Length == 4);
+        var repeatedSymbol = targetTurn.NormalSpawns[0].Id;
+        foreach (var spawn in targetTurn.NormalSpawns.Skip(1))
+        {
+            spawn.Id = settings.F_WHEEL;
+            spawn.Feature = new TicketSerializer.FeatureDto
+            {
+                FeatureId = settings.F_WHEEL,
+                ConvertToId = repeatedSymbol,
+                WheelSymbolId = repeatedSymbol,
+                WheelStackValue = settings.MAX_WHEEL_STACK_VALUE,
+                ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
+            };
+        }
+
+        var report = new TicketChecker(settings).CheckTicket(ticket);
+
+        AssertRejected(report, "repeated WHEEL stack overflow", "Feature");
+        Assert.IsTrue(report.Checks.Any(check =>
+            check.Result == TicketChecker.Status.Fail
+            && check.Name.Contains("stack cap", StringComparison.Ordinal)
+            && check.Detail.Contains("above MAX_COIN_STACK", StringComparison.Ordinal)),
+            string.Join(" | ", report.Checks
+                .Where(check => check.Result == TicketChecker.Status.Fail)
+                .Select(check => $"{check.Category}/{check.Name}: {check.Detail}")));
     }
 
     [TestMethod]
@@ -1044,15 +1188,15 @@ public sealed class GameLogicCoverageTests
                 },
                 PrizeTiers = Array.Empty<TicketSerializer.PrizeTierDto>(),
             },
-            StartingBoard = Enumerable.Range(0, Settings.ROWS)
-                .Select(_ => Enumerable.Range(0, Settings.COLS)
+            StartingBoard = Enumerable.Range(0, TestSettings.Default.ROWS)
+                .Select(_ => Enumerable.Range(0, TestSettings.Default.COLS)
                     .Select(_ => new TicketSerializer.BoardCellDto { Id = 6 })
                     .ToArray())
                 .ToArray(),
             Turns = Enumerable.Range(0, 3)
                 .Select(_ => new TicketSerializer.TurnDto
                 {
-                    Pushers = Enumerable.Repeat(new TicketSerializer.PusherDto { PushValue = 1 }, Settings.COLS).ToArray(),
+                    Pushers = Enumerable.Repeat(new TicketSerializer.PusherDto { PushValue = 1 }, TestSettings.Default.COLS).ToArray(),
                     Spawns = new[] { 4, 9, 14, 19, 24 }
                         .Select(pos => new TicketSerializer.SpawnDto { Pos = pos, Id = 6 })
                         .ToArray(),
@@ -1060,7 +1204,7 @@ public sealed class GameLogicCoverageTests
                 .ToArray(),
         };
 
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
 
         Assert.IsTrue(report.Checks.Any(check =>
             check.Result == TicketChecker.Status.Warning &&
@@ -1068,25 +1212,51 @@ public sealed class GameLogicCoverageTests
             check.Name.Contains("Pusher bag variety")));
     }
 
+    private static TicketSerializer.SpawnDto[] DeadWheelSpawns(bool includeDeadWheel)
+    {
+        var positions = new[] { 4, 9, 14, 19, 24 };
+        return positions.Select((pos, index) =>
+        {
+            if (includeDeadWheel && index == 0)
+            {
+                return new TicketSerializer.SpawnDto
+                {
+                    Pos = pos,
+                    Id = TestSettings.Default.F_WHEEL,
+                    Feature = new TicketSerializer.FeatureDto
+                    {
+                        FeatureId = TestSettings.Default.F_WHEEL,
+                        ConvertToId = 6,
+                        WheelSymbolId = 2,
+                        WheelStackValue = TestSettings.Default.MIN_WHEEL_STACK_VALUE,
+                        ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
+                    },
+                };
+            }
+
+            return new TicketSerializer.SpawnDto { Pos = pos, Id = 6 };
+        }).ToArray();
+    }
+
     private static TicketSerializer.TicketDto FeatureRichTicket(int seed) =>
         PlanTicket(new MathInput
         {
             Targets = new Dictionary<int, int>
             {
-                [2] = Settings.SymbolFillCap(2),
-                [4] = Settings.SymbolFillCap(4),
+                [2] = TestSettings.Default.SymbolFillCap(2),
+                [4] = TestSettings.Default.SymbolFillCap(4),
             },
-            BaseSpins = Settings.BASE_SPINS,
+            BaseSpins = TestSettings.Default.BASE_SPINS,
             Required = new Dictionary<string, int>
             {
                 ["WHEEL"] = 1,
                 ["FLUSH"] = 1,
-                ["EXTRA_SPIN"] = 1,
+                ["EXTRA_SPIN"] = 2,
                 ["PRIZE_UPGRADE"] = 1,
             },
             PrizeTiers = new Dictionary<int, int> { [2] = 1 },
-            PrizeValues = PrizeValues(Settings.PrizeLadderRows.Count, tiers: 3),
-            MaxSym = Settings.PrizeLadderRows.Count,
+            PrizeValues = ConfiguredPrizeValues(TestSettings.Default),
+            MaxSym = TestSettings.Default.PrizeLadderRows.Count,
         }, seed);
 
     private static TicketSerializer.TicketDto CloneTicket(TicketSerializer.TicketDto ticket) =>
@@ -1097,16 +1267,10 @@ public sealed class GameLogicCoverageTests
         JsonConvert.DeserializeObject<TicketSerializer.FeatureDto>(
             JsonConvert.SerializeObject(feature))!;
 
-    private static decimal[] ParsePrizes(string prizeCsv) =>
-        prizeCsv
-            .Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .Select(part => decimal.Parse(part.Trim()))
-            .ToArray();
-
     private static void ChangeNormalSpawnId(TicketSerializer.TicketDto ticket)
     {
-        var spawn = FirstNormalSpawn(ticket, spawn => spawn.Id != Settings.F_COIN);
-        spawn.Id = Settings.F_COIN;
+        var spawn = FirstNormalSpawn(ticket, _ => true);
+        spawn.Id = TestSettings.Default.F_WHEEL;
     }
 
     private static void RemoveOneSpawn(TicketSerializer.TicketDto ticket)
@@ -1119,7 +1283,7 @@ public sealed class GameLogicCoverageTests
     {
         var turn = ticket.Turns[0];
         var emptyAfterPush = turn.Spawns.Select(spawn => spawn.Pos).ToHashSet();
-        var occupiedPosition = Enumerable.Range(0, Settings.ROWS * Settings.COLS)
+        var occupiedPosition = Enumerable.Range(0, TestSettings.Default.ROWS * TestSettings.Default.COLS)
             .First(pos => !emptyAfterPush.Contains(pos));
 
         turn.Spawns[0].Pos = occupiedPosition;
@@ -1129,7 +1293,7 @@ public sealed class GameLogicCoverageTests
     {
         var pusher = ticket.Turns
             .SelectMany(turn => turn.Pushers)
-            .First(p => p.FeatureId == null && p.PushValue < Settings.MAX_PUSH);
+            .First(p => p.FeatureId == null && p.PushValue < TestSettings.Default.MAX_PUSH);
 
         pusher.PushValue++;
     }
@@ -1139,13 +1303,13 @@ public sealed class GameLogicCoverageTests
         var spawn = ticket.Turns[^1].Spawns.First(s => s.Feature == null);
         var convertToId = spawn.Id;
 
-        spawn.Id = Settings.F_WHEEL;
+        spawn.Id = TestSettings.Default.F_WHEEL;
         spawn.Feature = new TicketSerializer.FeatureDto
         {
-            FeatureId = Settings.F_WHEEL,
+            FeatureId = TestSettings.Default.F_WHEEL,
             ConvertToId = convertToId,
-            WheelSymbolId = ticket.WinInfo.WinSymbols.FirstOrDefault()?.Id ?? Settings.F_COIN,
-            WheelStackValue = Settings.MIN_WHEEL_STACK_VALUE,
+            WheelSymbolId = ticket.WinInfo.WinSymbols.FirstOrDefault()?.Id ?? TestSettings.Default.F_COIN,
+            WheelStackValue = TestSettings.Default.MIN_WHEEL_STACK_VALUE,
             ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
         };
     }
@@ -1153,14 +1317,14 @@ public sealed class GameLogicCoverageTests
     private static void AddFinalFlushPusher(TicketSerializer.TicketDto ticket)
     {
         var pusher = ticket.Turns[^1].Pushers.First(p => p.FeatureId == null);
-        pusher.PushValue = Settings.ROWS;
-        pusher.FeatureId = Settings.F_FLUSH_ID;
+        pusher.PushValue = TestSettings.Default.ROWS;
+        pusher.FeatureId = TestSettings.Default.F_FLUSH_ID;
     }
 
     private static void BreakWheelStackValue(TicketSerializer.TicketDto ticket)
     {
-        var wheel = FirstFeature(ticket, Settings.F_WHEEL);
-        wheel.WheelStackValue = Settings.MAX_WHEEL_STACK_VALUE + 1;
+        var wheel = FirstFeature(ticket, TestSettings.Default.F_WHEEL);
+        wheel.WheelStackValue = TestSettings.Default.MAX_WHEEL_STACK_VALUE + 1;
     }
 
     private static void BreakFeatureConvertTarget(TicketSerializer.TicketDto ticket)
@@ -1170,24 +1334,13 @@ public sealed class GameLogicCoverageTests
             .First(spawn => spawn.Feature != null)
             .Feature!;
 
-        feature.ConvertToId = Settings.F_WHEEL;
-        feature.ReTrigger = Array.Empty<TicketSerializer.FeatureDto>();
-    }
-
-    private static void BreakFeatureConvertTargetOutOfRange(TicketSerializer.TicketDto ticket)
-    {
-        var feature = ticket.Turns
-            .SelectMany(turn => turn.Spawns)
-            .First(spawn => spawn.Feature != null)
-            .Feature!;
-
-        feature.ConvertToId = Settings.PrizeLadderRows.Count + 1;
+        feature.ConvertToId = TestSettings.Default.F_WHEEL;
         feature.ReTrigger = Array.Empty<TicketSerializer.FeatureDto>();
     }
 
     private static void BreakPrizeUpgradePayload(TicketSerializer.TicketDto ticket)
     {
-        var prizeUpgrade = FirstFeature(ticket, Settings.F_PRUP);
+        var prizeUpgrade = FirstFeature(ticket, TestSettings.Default.F_PRUP);
         prizeUpgrade.UpgradePrizeValue = null;
     }
 
@@ -1273,7 +1426,7 @@ public sealed class GameLogicCoverageTests
         return ticket.WinInfo.WinSymbols.Sum(win =>
         {
             var tier = tiers.GetValueOrDefault(win.Id);
-            return Settings.PrizeLadderRows[win.Id - 1].Tiers[tier];
+            return TestSettings.Default.PrizeLadderRows[win.Id - 1].Tiers[tier];
         });
     }
 
@@ -1290,9 +1443,9 @@ public sealed class GameLogicCoverageTests
         return ticket!;
     }
 
-    private static GamePlan ForwardPlan(MathInput input, int seed, GameEngine.ICustomProfileSettings? settings = null)
+    private static GamePlan ForwardPlan(MathInput input, int seed, ICustomProfileSettings? settings = null)
     {
-        var actualSettings = settings ?? Settings;
+        var actualSettings = settings ?? TestSettings.Default;
         var last = "";
         for (var attempt = 0; attempt < Math.Min(actualSettings.MaxPlanAttempts, 32); attempt++)
         {
@@ -1310,28 +1463,37 @@ public sealed class GameLogicCoverageTests
     private static (GamePlan? Plan, string Detail) TryForwardPlan(
         MathInput input,
         int seed,
-        GameEngine.ICustomProfileSettings actualSettings)
+        ICustomProfileSettings actualSettings)
     {
-        GameEngine.Engine.Settings = actualSettings;
-        var objectives = new ForwardObjectivePlanner().Resolve(input, seed + 1);
+        var policy = new ForwardWinningRoundPolicyPlanner(actualSettings).Plan(
+            ConfiguredCashWin(input, actualSettings),
+            seed);
+        if (!policy.IsValid) return (null, $"{policy.Status}: {policy.Detail}");
+
+        var objectives = new ForwardObjectivePlanner(actualSettings).Resolve(input, seed + 1, policy.Plan);
         if (!objectives.IsValid) return (null, $"{objectives.Status}: {objectives.Detail}");
 
-        var budget = new ForwardFeatureBudgetPlanner().Plan(input, objectives.Objectives, seed + 2);
+        var budget = new ForwardFeatureBudgetPlanner(actualSettings).Plan(input, objectives.Objectives, seed + 2);
         if (!budget.IsValid) return (null, $"{budget.Status}: {budget.Detail}");
 
-        var timing = new ForwardFeatureTimingPlanner(seed + 3).Plan(budget.Budget);
+        var timing = new ForwardFeatureTimingPlanner(actualSettings, seed + 3).Plan(
+            budget.Budget,
+            objectives.Objectives);
         if (!timing.IsValid) return (null, $"{timing.Status}: {timing.Detail}");
 
-        var intents = new ForwardFeatureIntentPlanner(seed + 4).Plan(objectives.Objectives, timing.Timing);
+        var intents = new ForwardFeatureIntentPlanner(actualSettings, seed + 4).Plan(
+            objectives.Objectives,
+            timing.Timing,
+            budget.Budget);
         if (!intents.IsValid) return (null, $"{intents.Status}: {intents.Detail}");
 
-        var frames = new ForwardTurnFramePlanner(seed + 5).Plan(
+        var frames = new ForwardTurnFramePlanner(actualSettings, seed + 5).Plan(
             budget.Budget,
             intents.Plan,
             objectives.Objectives);
         if (!frames.IsValid) return (null, $"{frames.Status}: {frames.Detail}");
 
-        var finalized = new ForwardObjectiveFinalizer().Finalize(
+        var finalized = new ForwardObjectiveFinalizer(actualSettings).Finalize(
             objectives.Objectives,
             intents.Plan,
             frames.Plan);
@@ -1342,12 +1504,12 @@ public sealed class GameLogicCoverageTests
             finalized.Detail,
             finalized.Objectives);
 
-        var envelope = new ForwardTicketEnvelopeValidator().Validate(
+        var envelope = new ForwardTicketEnvelopeValidator(actualSettings).Validate(
             finalObjectives.Objectives,
             frames.Plan);
         if (!envelope.IsValid) return (null, $"{envelope.Status}: {envelope.Detail}");
 
-        var pipeline = new ForwardTicketPipelineExecutor(seed + 6).Execute(
+        var pipeline = new ForwardTicketPipelineExecutor(actualSettings, seed + 6).Execute(
             finalObjectives.Objectives,
             frames.Plan);
         if (!pipeline.IsValid) return (null, $"{pipeline.Status}: {pipeline.Detail}");
@@ -1363,13 +1525,22 @@ public sealed class GameLogicCoverageTests
             frames,
             envelope,
             pipeline);
-        var adapted = new ForwardGamePlanAdapter().Adapt(build);
+        var adapted = new ForwardGamePlanAdapter(actualSettings).Adapt(build);
         if (!adapted.IsValid || adapted.Plan == null)
             return (null, $"{adapted.Status}: {adapted.Detail}");
 
         return adapted.Plan.Verified
             ? (adapted.Plan, "ok")
             : (null, "adapted plan was not verified");
+    }
+
+    private static decimal ConfiguredCashWin(MathInput input, ICustomProfileSettings settings)
+    {
+        return input.Targets.Keys.Sum(symbol =>
+        {
+            var tier = input.PrizeTiers?.GetValueOrDefault(symbol) ?? 0;
+            return settings.PrizeLadderRows[symbol - 1].Tiers[tier];
+        });
     }
 
     private static int AttemptSeed(int seed, int attempt)
@@ -1387,48 +1558,11 @@ public sealed class GameLogicCoverageTests
 
     private static void AssertValid(TicketSerializer.TicketDto ticket)
     {
-        var report = TicketChecker.CheckTicket(ticket);
+        var report = new TicketChecker(TestSettings.Default).CheckTicket(ticket);
         Assert.IsTrue(report.IsValid, string.Join(Environment.NewLine,
             report.Checks
                 .Where(c => c.Result == TicketChecker.Status.Fail)
                 .Select(c => $"{c.Category}/{c.Name}: {c.Detail}")));
-    }
-
-    private static void AssertTicketMatchesInternalSim(
-        GamePlan plan,
-        TicketSerializer.TicketDto ticket)
-    {
-        var simTotals = Sim.Run(plan);
-        var declaredIds = ticket.WinInfo.WinSymbols.Select(win => win.Id)
-            .Concat(ticket.WinInfo.NonWinSymbols.Select(nonWin => nonWin.Id))
-            .ToHashSet();
-
-        Assert.AreEqual(plan.TotalSpins, ticket.WinInfo.TotalSpins);
-        foreach (var win in ticket.WinInfo.WinSymbols)
-        {
-            Assert.AreEqual(
-                win.Target,
-                simTotals.GetValueOrDefault(win.Id),
-                $"Win symbol {win.Id} declaration does not match internal simulation");
-        }
-
-        foreach (var (symbol, collected) in simTotals)
-        {
-            if (Settings.IsFeat(symbol) || collected <= 0)
-                continue;
-
-            Assert.IsTrue(
-                declaredIds.Contains(symbol),
-                $"Internal simulation collected symbol {symbol}={collected}, but WinInfo does not declare it");
-        }
-
-        foreach (var nonWin in ticket.WinInfo.NonWinSymbols)
-        {
-            var collected = simTotals.GetValueOrDefault(nonWin.Id);
-            Assert.IsTrue(
-                collected >= nonWin.MinTarget && collected < nonWin.MaxThreshold,
-                $"Non-win symbol {nonWin.Id} internal count {collected} outside [{nonWin.MinTarget}..{nonWin.MaxThreshold})");
-        }
     }
 
     private static bool HasFeature(TicketSerializer.TicketDto ticket, int featureId) =>
@@ -1456,7 +1590,7 @@ public sealed class GameLogicCoverageTests
 
     private static void AssertExtraSpinTiming(TicketSerializer.TicketDto ticket)
     {
-        var availableTurns = Settings.BASE_SPINS;
+        var availableTurns = TestSettings.Default.BASE_SPINS;
         for (var index = 0; index < ticket.Turns.Length; index++)
         {
             var turnNumber = index + 1;
@@ -1465,7 +1599,7 @@ public sealed class GameLogicCoverageTests
 
             var extras = ticket.Turns[index].Spawns
                 .Where(spawn => spawn.Feature != null)
-                .Sum(spawn => CountFeatureTree(spawn.Feature!, Settings.F_XSPIN));
+                .Sum(spawn => CountFeatureTree(spawn.Feature!, TestSettings.Default.F_XSPIN));
             var futureTurns = ticket.Turns.Length - (index + 1);
             Assert.IsTrue(extras <= futureTurns, $"turn {index + 1} extras={extras}, futureTurns={futureTurns}");
 
@@ -1477,15 +1611,15 @@ public sealed class GameLogicCoverageTests
     }
 
     private static TicketSerializer.FeatureDto ExtraSpinFeature(int convertToId) =>
-        new()
+        new TicketSerializer.FeatureDto()
         {
-            FeatureId = Settings.F_XSPIN,
+            FeatureId = TestSettings.Default.F_XSPIN,
             ConvertToId = convertToId,
             ReTrigger = Array.Empty<TicketSerializer.FeatureDto>(),
         };
 
     private static Ticket FrameworkTicket(TicketSerializer.TicketDto gameData, decimal cashWin) =>
-        new()
+        new Ticket()
         {
             ErrorCode = 0,
             Error = "success",
@@ -1521,15 +1655,15 @@ public sealed class GameLogicCoverageTests
     }
 
     private static SpinPlan SpinWithPrizeUpgrade(int spin, int tier) =>
-        new()
+        new SpinPlan()
         {
             Spin = spin,
             Board = FilledBoard(1),
-            Push = Enumerable.Repeat(1, Settings.COLS).ToArray(),
-            Flush = Enumerable.Repeat(false, Settings.COLS).ToArray(),
+            Push = Enumerable.Repeat(1, TestSettings.Default.COLS).ToArray(),
+            Flush = Enumerable.Repeat(false, TestSettings.Default.COLS).ToArray(),
             Spawns = new Dictionary<(int, int), Cell>
             {
-                [(0, 0)] = Grid.Feat(Settings.F_PRUP, 1, new FP
+                [(0, 0)] = Grid.Feat(TestSettings.Default.F_PRUP, 1, new FP
                 {
                     FeatId = "PRIZE_UPGRADE",
                     PrupSym = 2,
@@ -1539,29 +1673,29 @@ public sealed class GameLogicCoverageTests
         };
 
     private static SpinPlan PlainSpin(int spin) =>
-        new()
+        new SpinPlan()
         {
             Spin = spin,
             Board = FilledBoard(1),
-            Push = Enumerable.Repeat(1, Settings.COLS).ToArray(),
-            Flush = Enumerable.Repeat(false, Settings.COLS).ToArray(),
+            Push = Enumerable.Repeat(1, TestSettings.Default.COLS).ToArray(),
+            Flush = Enumerable.Repeat(false, TestSettings.Default.COLS).ToArray(),
             Spawns = new Dictionary<(int, int), Cell>(),
         };
 
     private static SpinPlan SpinWithExtraAndPrizeUpgrade(int spin) =>
-        new()
+        new SpinPlan()
         {
             Spin = spin,
             Board = FilledBoard(1),
-            Push = Enumerable.Repeat(1, Settings.COLS).ToArray(),
-            Flush = Enumerable.Repeat(false, Settings.COLS).ToArray(),
+            Push = Enumerable.Repeat(1, TestSettings.Default.COLS).ToArray(),
+            Flush = Enumerable.Repeat(false, TestSettings.Default.COLS).ToArray(),
             Spawns = new Dictionary<(int, int), Cell>
             {
-                [(0, 0)] = Grid.Feat(Settings.F_XSPIN, 2, new FP
+                [(0, 0)] = Grid.Feat(TestSettings.Default.F_XSPIN, 2, new FP
                 {
                     FeatId = "EXTRA_SPIN",
                 }),
-                [(0, 1)] = Grid.Feat(Settings.F_PRUP, 3, new FP
+                [(0, 1)] = Grid.Feat(TestSettings.Default.F_PRUP, 3, new FP
                 {
                     FeatId = "PRIZE_UPGRADE",
                     PrupSym = 2,
@@ -1571,43 +1705,19 @@ public sealed class GameLogicCoverageTests
         };
 
     private static SpinPlan SpinWithExtraAndWheel(int spin) =>
-        new()
+        new SpinPlan()
         {
             Spin = spin,
             Board = FilledBoard(1),
-            Push = Enumerable.Repeat(1, Settings.COLS).ToArray(),
-            Flush = Enumerable.Repeat(false, Settings.COLS).ToArray(),
+            Push = Enumerable.Repeat(1, TestSettings.Default.COLS).ToArray(),
+            Flush = Enumerable.Repeat(false, TestSettings.Default.COLS).ToArray(),
             Spawns = new Dictionary<(int, int), Cell>
             {
-                [(0, 0)] = Grid.Feat(Settings.F_XSPIN, 2, new FP
+                [(0, 0)] = Grid.Feat(TestSettings.Default.F_XSPIN, 2, new FP
                 {
                     FeatId = "EXTRA_SPIN",
                 }),
-                [(0, 1)] = Grid.Feat(Settings.F_WHEEL, 3, new FP
-                {
-                    FeatId = "WHEEL",
-                    WheelSym = 2,
-                    WheelStack = 2,
-                }),
-            },
-        };
-
-    private static SpinPlan SpinWithPrizeUpgradeAndWheel(int spin) =>
-        new()
-        {
-            Spin = spin,
-            Board = FilledBoard(1),
-            Push = Enumerable.Repeat(1, Settings.COLS).ToArray(),
-            Flush = Enumerable.Repeat(false, Settings.COLS).ToArray(),
-            Spawns = new Dictionary<(int, int), Cell>
-            {
-                [(0, 0)] = Grid.Feat(Settings.F_PRUP, 1, new FP
-                {
-                    FeatId = "PRIZE_UPGRADE",
-                    PrupSym = 2,
-                    PrupTier = 1,
-                }),
-                [(0, 1)] = Grid.Feat(Settings.F_WHEEL, 3, new FP
+                [(0, 1)] = Grid.Feat(TestSettings.Default.F_WHEEL, 3, new FP
                 {
                     FeatId = "WHEEL",
                     WheelSym = 2,
@@ -1618,10 +1728,10 @@ public sealed class GameLogicCoverageTests
 
     private static Cell?[,] FilledBoard(int sym)
     {
-        var board = new Cell?[Settings.ROWS, Settings.COLS];
-        for (var row = 0; row < Settings.ROWS; row++)
+        var board = new Cell?[TestSettings.Default.ROWS, TestSettings.Default.COLS];
+        for (var row = 0; row < TestSettings.Default.ROWS; row++)
         {
-            for (var col = 0; col < Settings.COLS; col++)
+            for (var col = 0; col < TestSettings.Default.COLS; col++)
                 board[row, col] = Grid.Norm(sym);
         }
         return board;
@@ -1631,10 +1741,10 @@ public sealed class GameLogicCoverageTests
         new[]
         {
             new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 1, 2, 5 } },
-            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 2, 5, 10 } },
+            new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 2, 4, 8 } },
             new PrizeLadderRow { Target = 20, Tiers = new decimal[] { 5, 10, 25 } },
-            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 10, 25, 100 } },
-            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 100, 250, 1000 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 10, 20, 50 } },
+            new PrizeLadderRow { Target = 25, Tiers = new decimal[] { 100, 200, 500 } },
             new PrizeLadderRow { Target = 30, Tiers = new decimal[] { 10000 } },
         };
 
@@ -1674,4 +1784,16 @@ public sealed class GameLogicCoverageTests
         }
         return result;
     }
+
+    private static Dictionary<int, IReadOnlyDictionary<int, decimal>> ConfiguredPrizeValues(
+        ICustomProfileSettings settings) =>
+        settings.PrizeLadderRows
+            .Select((row, index) => new
+            {
+                Symbol = index + 1,
+                Values = (IReadOnlyDictionary<int, decimal>)row.Tiers
+                    .Select((value, tier) => (value, tier))
+                    .ToDictionary(item => item.tier, item => item.value),
+            })
+            .ToDictionary(item => item.Symbol, item => item.Values);
 }

@@ -11,9 +11,11 @@ public sealed class AlwPpsTests
         GameEngine.Engine.Settings = AlwSettings();
 
     [TestMethod]
-    public void PpsResolverBuildsExactCombinationAndPacingForTen()
+    public void PpsResolverBuildsExactCombinationForTen()
     {
-        var result = new ForwardMathInputResolver().Resolve(new decimal[] { 10m }, seed: 101);
+        var settings = GameEngine.Engine.Settings;
+        var result = new ForwardMathInputResolver(settings)
+            .Resolve(new decimal[] { 10m }, seed: 101);
 
         Assert.AreEqual(ForwardMathInputStatus.Valid, result.Status);
         Assert.IsNotNull(result.Bundle);
@@ -21,20 +23,32 @@ public sealed class AlwPpsTests
 
         CollectionAssert.Contains(new[] { 69, 70, 71, 72 }, input.PpsCombinationId!.Value);
         Assert.AreEqual(10m, input.PpsTotalPrize);
-        Assert.IsTrue(input.LockExtraGoCount);
-        Assert.IsTrue(input.Required.TryGetValue("EXTRA_SPIN", out var extraGo));
-        Assert.IsTrue(extraGo is 2 or 3);
-        Assert.IsTrue(input.WinCompletionTurn is >= 7 and <= 8);
-        Assert.IsTrue(input.WinCompletionTurn <= Settings.BASE_SPINS + extraGo);
         Assert.AreEqual(input.Targets.Keys.Count(), input.Targets.Keys.Distinct().Count());
         Assert.AreEqual(10m, ResolvedPrizeTotal(input));
     }
 
     [TestMethod]
+    public void SharedWinningPolicyUsesPpsSpinRangeForTen()
+    {
+        var settings = GameEngine.Engine.Settings;
+        for (var seed = 1; seed <= 50; seed++)
+        {
+            var result = new ForwardWinningRoundPolicyPlanner(settings).Plan(10m, seed);
+
+            Assert.IsTrue(result.IsValid, result.Detail);
+            Assert.IsNotNull(result.Plan);
+            Assert.IsTrue(result.Plan!.ExtraGoCount is 2 or 3);
+            Assert.IsTrue(result.Plan.WinningCompletionTurn is >= 7 and <= 8);
+            Assert.IsTrue(result.Plan.WinningCompletionTurn <= result.Plan.TotalTurns);
+        }
+    }
+
+    [TestMethod]
     public void PpsResolverRandomizesRowsWhenTotalHasMultipleCombinations()
     {
+        var settings = GameEngine.Engine.Settings;
         var ids = Enumerable.Range(1, 80)
-            .Select(seed => new ForwardMathInputResolver()
+            .Select(seed => new ForwardMathInputResolver(settings)
                 .Resolve(new decimal[] { 10m }, seed)
                 .Bundle!
                 .Input
@@ -44,7 +58,23 @@ public sealed class AlwPpsTests
             .ToArray();
 
         CollectionAssert.IsSubsetOf(ids, new[] { 69, 70, 71, 72 });
-        Assert.IsTrue(ids.Length > 1, "same total prize should be able to select different PPS rows");
+        Assert.IsTrue(ids.Length > 1, "same total prize should select different PPS rows across seeds");
+    }
+
+    [TestMethod]
+    public void EveryPpsRowResolvesItsExactConfiguredPrize()
+    {
+        var settings = GameEngine.Engine.Settings;
+        foreach (var row in AlwMoneyMachinePps.Combinations)
+        {
+            var resolved = Enumerable.Range(1, 500)
+                .Select(seed => new ForwardMathInputResolver(settings)
+                    .Resolve(new[] { row.TotalPrize }, seed))
+                .First(result => result.Bundle!.Input.PpsCombinationId == row.Id);
+
+            Assert.AreEqual(ForwardMathInputStatus.Valid, resolved.Status, $"row {row.Id}");
+            Assert.AreEqual(row.TotalPrize, ResolvedPrizeTotal(resolved.Bundle!.Input), $"row {row.Id}");
+        }
     }
 
     [TestMethod]
@@ -54,11 +84,12 @@ public sealed class AlwPpsTests
             new Dictionary<int, int> { [1] = 2 },
             new Dictionary<int, int>(),
             maxSymbol: 6,
-            expectedWinCompletionTurn: 7);
+            GameEngine.Engine.Settings,
+            winningCompletionTurn: 7);
 
         Assert.AreEqual(SymbolCollectionStatus.Valid, ledger.Collect(1, collectionTurn: 6).Status);
         Assert.AreEqual(
-            SymbolCollectionStatus.WouldCompleteWinOnWrongTurn,
+            SymbolCollectionStatus.AllWinsCompleteBeforeRequiredTurn,
             ledger.Collect(1, collectionTurn: 6).Status);
         Assert.AreEqual(SymbolCollectionStatus.Valid, ledger.Collect(1, collectionTurn: 7).Status);
         Assert.AreEqual(0, ledger.ValidateFinal().Count);
@@ -67,17 +98,20 @@ public sealed class AlwPpsTests
     [TestMethod]
     public void AlwGeneratedTicketHonorsPpsCombinationAndWinningRound()
     {
-        var generated = new ForwardTicketGenerator(seed: 20260813).Generate(new decimal[] { 10m });
+        var generated = new ForwardTicketGenerator(GameEngine.Engine.Settings, seed: 20260813)
+            .Generate(new decimal[] { 10m });
 
         Assert.AreEqual(ForwardTicketGenerationStatus.Valid, generated.Status, generated.Detail);
         Assert.IsNotNull(generated.Build?.MathInput?.Bundle?.Input);
+        Assert.IsNotNull(generated.Build?.Objectives?.Objectives?.WinningRoundPlan);
         Assert.IsNotNull(generated.AdaptedPlan?.Plan);
 
         var input = generated.Build!.MathInput!.Bundle!.Input;
+        var policy = generated.Build.Objectives!.Objectives!.WinningRoundPlan!;
         var plan = generated.AdaptedPlan!.Plan!;
         Assert.AreEqual(10m, ResolvedPrizeTotal(input));
-        Assert.AreEqual(input.Required.GetValueOrDefault("EXTRA_SPIN"), plan.TotalSpins - Settings.BASE_SPINS);
-        Assert.AreEqual(input.WinCompletionTurn, ActualWinCompletionTurn(plan));
+        Assert.AreEqual(policy.ExtraGoCount, plan.TotalSpins - GameEngine.Engine.Settings.BASE_SPINS);
+        Assert.AreEqual(policy.WinningCompletionTurn, ActualWinCompletionTurn(plan));
     }
 
     [TestMethod]
@@ -89,12 +123,13 @@ public sealed class AlwPpsTests
         {
             for (var seed = 1; seed <= 5; seed++)
             {
-                var generated = new CoinPusherTicketGenerator().Generate(new[] { total }, seed: 30000 + (seed * 97) + (int)total);
+                var generated = new CoinPusherTicketGenerator(GameEngine.Engine.Settings)
+                    .Generate(new[] { total }, seed: 30000 + (seed * 97) + (int)Math.Min(total, int.MaxValue));
                 Assert.AreEqual(CoinPusherTicketGenerationStatus.Valid, generated.Status, $"{total}: {generated.Detail}");
 
                 var plan = generated.Plan!;
                 var rule = AlwMoneyMachinePps.SpinRules.First(item => item.Matches(total));
-                var extraGo = plan.TotalSpins - Settings.BASE_SPINS;
+                var extraGo = plan.TotalSpins - GameEngine.Engine.Settings.BASE_SPINS;
                 var completionTurn = ActualWinCompletionTurn(plan);
                 Assert.AreEqual(total, ResolvedPlanPrizeTotal(plan), $"total {total}");
                 Assert.IsTrue(extraGo >= rule.MinExtraGo && extraGo <= rule.MaxExtraGo, $"total {total} extraGo={extraGo}");
@@ -102,6 +137,45 @@ public sealed class AlwPpsTests
                 Assert.IsTrue(completionTurn.Value >= rule.MinWinningTurn!.Value
                     && completionTurn.Value <= Math.Min(rule.MaxWinningTurn!.Value, plan.TotalSpins), $"total {total} completion={completionTurn}");
             }
+        }
+    }
+
+    [TestMethod]
+    public void AlwSettingsPassRequestValidation()
+    {
+        var result = new CoinPusherTicketGenerationRequestValidator(GameEngine.Engine.Settings)
+            .Validate(new decimal[] { 10m });
+
+        Assert.IsTrue(result.IsValid, $"{result.Status}: {result.Detail}");
+    }
+
+    [TestMethod]
+    public void AlwSettingsDifferFromFreshForwardOnlyForPpsOwnedConfiguration()
+    {
+        var freshForward = new DefaultProfileSettings();
+        var alw = AlwSettings();
+        var ppsOwnedProperties = new HashSet<string>
+        {
+            nameof(DefaultProfileSettings.MAX_SPINS),
+            nameof(DefaultProfileSettings.MAX_EXTRA_GO_PER_TURN),
+            nameof(DefaultProfileSettings.ExtraSpinFeatureConfig),
+            nameof(DefaultProfileSettings.PrizeUpgradeFeatureConfig),
+            nameof(DefaultProfileSettings.FeatureConfigs),
+            nameof(DefaultProfileSettings.PrizeLadderRows),
+            nameof(DefaultProfileSettings.WinningRoundRules),
+            nameof(DefaultProfileSettings.PpsCombinations),
+            nameof(DefaultProfileSettings.PpsSpinRules),
+        };
+
+        foreach (var property in typeof(DefaultProfileSettings).GetProperties())
+        {
+            if (!property.CanRead || ppsOwnedProperties.Contains(property.Name))
+                continue;
+
+            Assert.AreEqual(
+                Fingerprint(property.GetValue(freshForward)),
+                Fingerprint(property.GetValue(alw)),
+                $"ALW overrides non-PPS setting {property.Name}");
         }
     }
 
@@ -147,6 +221,20 @@ public sealed class AlwPpsTests
         return total;
     }
 
-    private static GameEngine.DefaultCoinPusherSettings AlwSettings() =>
+    private static DefaultProfileSettings AlwSettings() =>
         AlwMoneyMachinePps.CreateSettings();
+
+    private static string Fingerprint(object? value)
+    {
+        if (value == null)
+            return "<null>";
+        if (value is string text)
+            return text;
+        if (value is System.Collections.IEnumerable sequence)
+        {
+            return "[" + string.Join(",", sequence.Cast<object?>().Select(Fingerprint)) + "]";
+        }
+
+        return value.ToString() ?? value.GetType().FullName ?? "<unknown>";
+    }
 }

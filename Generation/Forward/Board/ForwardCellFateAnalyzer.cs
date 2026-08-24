@@ -67,12 +67,19 @@ internal readonly struct ForwardCellFate
 
 internal sealed class ForwardCellFateAnalyzer
 {
+    private readonly ICustomProfileSettings _settings;
+
+    internal ForwardCellFateAnalyzer(ICustomProfileSettings settings)
+    {
+        _settings = settings;
+    }
+
     internal ForwardCellFate Analyze(
         int row,
         int col,
         IReadOnlyList<ForwardFutureTurn> futureTurns)
     {
-        if (row < 0 || row >= Settings.ROWS || col < 0 || col >= Settings.COLS)
+        if (row < 0 || row >= _settings.ROWS || col < 0 || col >= _settings.COLS)
         {
             return new ForwardCellFate(
                 ForwardCellFateStatus.InvalidStartPosition,
@@ -119,12 +126,12 @@ internal sealed class ForwardCellFateAnalyzer
 
             previousTurn = future.TurnNumber;
             var pusher = future.Shape.Pushers[currentCol];
-            if (pusher.IsFlush())
+            if (pusher.IsFlush(_settings))
             {
                 return Collected(row, col, currentRow, currentCol, future.TurnNumber);
             }
 
-            if (currentRow >= Settings.ROWS - pusher.PushValue)
+            if (currentRow >= _settings.ROWS - pusher.PushValue)
             {
                 return Collected(row, col, currentRow, currentCol, future.TurnNumber);
             }
@@ -161,5 +168,5 @@ internal sealed class ForwardCellFateAnalyzer
             $"collected on turn {turn} at ({row},{col})");
 
     private (int row, int col) RotateClockwise(int row, int col) =>
-        (col, Settings.ROWS - 1 - row);
+        (col, _settings.ROWS - 1 - row);
 }

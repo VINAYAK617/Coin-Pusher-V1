@@ -7,6 +7,7 @@ internal enum ForwardStackImpactStatus
     InvalidSpawnStack,
     InvalidCollectionTurn,
     InvalidWheel,
+    StackOverflow,
 }
 
 internal readonly struct ForwardWheelImpact
@@ -58,13 +59,16 @@ internal sealed class ForwardStackImpactAnalyzer
 {
     private readonly IReadOnlyList<ForwardWheelImpact> _wheels;
     private readonly int _maxSymbol;
+    private readonly ICustomProfileSettings _settings;
 
     internal ForwardStackImpactAnalyzer(
         IReadOnlyList<ForwardWheelImpact> wheels,
-        int maxSymbol)
+        int maxSymbol,
+        ICustomProfileSettings settings)
     {
         _wheels = wheels.OrderBy(wheel => wheel.FireTurn).ToArray();
         _maxSymbol = maxSymbol;
+        _settings = settings;
     }
 
     internal ForwardStackImpact Analyze(
@@ -73,7 +77,7 @@ internal sealed class ForwardStackImpactAnalyzer
         int? collectionTurn,
         int spawnStack = 1)
     {
-        if (symbol < 1 || symbol > _maxSymbol || Settings.IsFeat(symbol))
+        if (symbol < 1 || symbol > _maxSymbol || _settings.IsFeat(symbol))
         {
             return Fail(
                 ForwardStackImpactStatus.InvalidSymbol,
@@ -84,7 +88,7 @@ internal sealed class ForwardStackImpactAnalyzer
                 $"symbol {symbol} is outside 1..{_maxSymbol} or is a feature symbol");
         }
 
-        if (spawnStack <= 0 || spawnStack > Settings.MAX_COIN_STACK)
+        if (spawnStack <= 0 || spawnStack > _settings.MAX_COIN_STACK)
         {
             return Fail(
                 ForwardStackImpactStatus.InvalidSpawnStack,
@@ -92,7 +96,7 @@ internal sealed class ForwardStackImpactAnalyzer
                 spawnStack,
                 collectionTurn ?? 0,
                 0,
-                $"spawn stack {spawnStack} must be in 1..{Settings.MAX_COIN_STACK}");
+                $"spawn stack {spawnStack} must be in 1..{_settings.MAX_COIN_STACK}");
         }
 
         if (!collectionTurn.HasValue)
@@ -130,7 +134,18 @@ internal sealed class ForwardStackImpactAnalyzer
             if (wheel.FireTurn < spawnTurn) continue;
             if (wheel.FireTurn >= collectionTurn.Value) continue;
 
-            var next = Math.Min(Settings.MAX_COIN_STACK, stack + wheel.StackAdd);
+            var next = stack + wheel.StackAdd;
+            if (next > _settings.MAX_COIN_STACK)
+            {
+                return Fail(
+                    ForwardStackImpactStatus.StackOverflow,
+                    symbol,
+                    spawnStack,
+                    collectionTurn.Value,
+                    stack,
+                    $"symbol {symbol} stack would become {next}, above max {_settings.MAX_COIN_STACK}");
+            }
+
             if (next != stack)
                 applied++;
             stack = next;
@@ -151,9 +166,9 @@ internal sealed class ForwardStackImpactAnalyzer
         if (wheel.FireTurn <= 0
             || wheel.Symbol < 1
             || wheel.Symbol > _maxSymbol
-            || Settings.IsFeat(wheel.Symbol)
+            || _settings.IsFeat(wheel.Symbol)
             || wheel.StackValue <= 0
-            || wheel.StackValue > Settings.MAX_COIN_STACK)
+            || wheel.StackValue > _settings.MAX_COIN_STACK)
         {
             return Fail(
                 ForwardStackImpactStatus.InvalidWheel,

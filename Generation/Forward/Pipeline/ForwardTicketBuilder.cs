@@ -4,6 +4,7 @@ internal enum ForwardTicketBuildStatus
 {
     Valid,
     MathInputFailed,
+    WinningPolicyFailed,
     ObjectiveFailed,
     FeatureBudgetFailed,
     FeatureTimingFailed,
@@ -55,16 +56,18 @@ internal sealed class ForwardTicketBuildResult
 
 internal sealed class ForwardTicketBuilder
 {
+    private readonly ICustomProfileSettings _settings;
     private readonly int _seed;
 
-    internal ForwardTicketBuilder(int seed)
+    internal ForwardTicketBuilder(ICustomProfileSettings settings, int seed)
     {
+        _settings = settings;
         _seed = seed;
     }
 
     internal ForwardTicketBuildResult Build(IReadOnlyList<decimal>? prizeAmounts)
     {
-        var math = new ForwardMathInputResolver().Resolve(
+        var math = new ForwardMathInputResolver(_settings).Resolve(
             prizeAmounts,
             SeedFor("math"));
         if (!math.IsValid)
@@ -75,9 +78,21 @@ internal sealed class ForwardTicketBuilder
                 math);
         }
 
-        var objectives = new ForwardObjectivePlanner().Resolve(
+        var winningPolicy = new ForwardWinningRoundPolicyPlanner(_settings).Plan(
+            prizeAmounts!.Sum(),
+            SeedFor("winning-policy"));
+        if (!winningPolicy.IsValid)
+        {
+            return Fail(
+                ForwardTicketBuildStatus.WinningPolicyFailed,
+                $"{winningPolicy.Status}: {winningPolicy.Detail}",
+                math);
+        }
+
+        var objectives = new ForwardObjectivePlanner(_settings).Resolve(
             math.Bundle!.Input,
-            SeedFor("objectives"));
+            SeedFor("objectives"),
+            winningPolicy.Plan);
         if (!objectives.IsValid)
         {
             return Fail(
@@ -87,7 +102,7 @@ internal sealed class ForwardTicketBuilder
                 objectives);
         }
 
-        var budget = new ForwardFeatureBudgetPlanner().Plan(
+        var budget = new ForwardFeatureBudgetPlanner(_settings).Plan(
             math.Bundle.Input,
             objectives.Objectives,
             SeedFor("budget"));
@@ -102,6 +117,7 @@ internal sealed class ForwardTicketBuilder
         }
 
         var timing = new ForwardFeatureTimingPlanner(
+            _settings,
             SeedFor("timing")).Plan(budget.Budget, objectives.Objectives);
         if (!timing.IsValid)
         {
@@ -115,7 +131,8 @@ internal sealed class ForwardTicketBuilder
         }
 
         var intents = new ForwardFeatureIntentPlanner(
-            SeedFor("intents")).Plan(objectives.Objectives, timing.Timing);
+            _settings,
+            SeedFor("intents")).Plan(objectives.Objectives, timing.Timing, budget.Budget);
         if (!intents.IsValid)
         {
             return Fail(
@@ -128,8 +145,96 @@ internal sealed class ForwardTicketBuilder
                 intents);
         }
 
+        ForwardTicketBuildResult? lastRealizationFailure = null;
+        var localAttempts = Math.Max(1, _settings.LocalRealizationAttempts);
+        var primaryGeometryAttempts = Math.Max(1, (localAttempts * 3) / 4);
+        for (var localAttempt = 0; localAttempt < primaryGeometryAttempts; localAttempt++)
+        {
+            var realization = BuildRealization(
+                math,
+                objectives,
+                budget,
+                timing,
+                intents,
+                planningVariant: 0,
+                localAttempt);
+            if (realization.IsValid)
+                return realization;
+
+            lastRealizationFailure = realization;
+        }
+
+        var remainingCandidates = localAttempts - primaryGeometryAttempts;
+        for (var planningVariant = 1; planningVariant <= remainingCandidates; planningVariant++)
+        {
+            var alternateTiming = new ForwardFeatureTimingPlanner(
+                _settings,
+                SeedForPlanningVariant("timing", planningVariant)).Plan(
+                    budget.Budget,
+                    objectives.Objectives);
+            if (!alternateTiming.IsValid)
+            {
+                lastRealizationFailure = Fail(
+                    ForwardTicketBuildStatus.FeatureTimingFailed,
+                    $"{alternateTiming.Status}: {alternateTiming.Detail}",
+                    math,
+                    objectives,
+                    budget,
+                    alternateTiming);
+                continue;
+            }
+
+            var alternateIntents = new ForwardFeatureIntentPlanner(
+                _settings,
+                SeedForPlanningVariant("intents", planningVariant)).Plan(
+                    objectives.Objectives,
+                    alternateTiming.Timing,
+                    budget.Budget);
+            if (!alternateIntents.IsValid)
+            {
+                lastRealizationFailure = Fail(
+                    ForwardTicketBuildStatus.FeatureIntentFailed,
+                    $"{alternateIntents.Status}: {alternateIntents.Detail}",
+                    math,
+                    objectives,
+                    budget,
+                    alternateTiming,
+                    alternateIntents);
+                continue;
+            }
+
+            var realization = BuildRealization(
+                math,
+                objectives,
+                budget,
+                alternateTiming,
+                alternateIntents,
+                planningVariant,
+                localAttempt: 0);
+            if (realization.IsValid)
+                return realization;
+
+            lastRealizationFailure = realization;
+        }
+
+        return lastRealizationFailure!;
+    }
+
+    private ForwardTicketBuildResult BuildRealization(
+        ForwardMathInputResult math,
+        ForwardObjectiveResult objectives,
+        ForwardFeatureBudgetResult budget,
+        ForwardFeatureTimingResult timing,
+        ForwardFeatureIntentResult intents,
+        int planningVariant,
+        int localAttempt)
+    {
         var frames = new ForwardTurnFramePlanner(
-            SeedFor("frames")).Plan(budget.Budget, intents.Plan, objectives.Objectives);
+            _settings,
+            SeedForLocalGeometry(planningVariant, localAttempt)).Plan(
+                budget.Budget,
+                intents.Plan,
+                objectives.Objectives);
         if (!frames.IsValid)
         {
             return Fail(
@@ -143,7 +248,7 @@ internal sealed class ForwardTicketBuilder
                 frames);
         }
 
-        var finalizedObjectives = new ForwardObjectiveFinalizer().Finalize(
+        var finalizedObjectives = new ForwardObjectiveFinalizer(_settings).Finalize(
             objectives.Objectives,
             intents.Plan,
             frames.Plan);
@@ -164,11 +269,9 @@ internal sealed class ForwardTicketBuilder
             ForwardObjectiveStatus.Valid,
             finalizedObjectives.Detail,
             finalizedObjectives.Objectives);
-
-        var envelope = new ForwardTicketEnvelopeValidator().Validate(
+        var envelope = new ForwardTicketEnvelopeValidator(_settings).Validate(
             finalObjectiveResult.Objectives,
-            frames.Plan,
-            intents.Plan);
+            frames.Plan);
         if (!envelope.IsValid)
         {
             return Fail(
@@ -184,6 +287,7 @@ internal sealed class ForwardTicketBuilder
         }
 
         var pipeline = new ForwardTicketPipelineExecutor(
+            _settings,
             SeedFor("pipeline")).Execute(finalObjectiveResult.Objectives, frames.Plan);
         if (!pipeline.IsValid)
         {
@@ -211,6 +315,34 @@ internal sealed class ForwardTicketBuilder
             frames,
             envelope,
             pipeline);
+    }
+
+    private int SeedForLocalGeometry(int planningVariant, int localAttempt)
+    {
+        var baseSeed = SeedForPlanningVariant("frames", planningVariant);
+        if (planningVariant == 0 && localAttempt == 0)
+            return baseSeed;
+
+        unchecked
+        {
+            var seed = (baseSeed * 397) ^ localAttempt;
+            seed ^= 0x45d9f3b;
+            return seed == int.MinValue ? 0 : Math.Abs(seed);
+        }
+    }
+
+    private int SeedForPlanningVariant(string scope, int planningVariant)
+    {
+        var baseSeed = SeedFor(scope);
+        if (planningVariant == 0)
+            return baseSeed;
+
+        unchecked
+        {
+            var seed = (baseSeed * 397) ^ planningVariant;
+            seed ^= 0x27d4eb2d;
+            return seed == int.MinValue ? 0 : Math.Abs(seed);
+        }
     }
 
     private int SeedFor(string scope)

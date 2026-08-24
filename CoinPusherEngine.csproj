@@ -5,6 +5,8 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UseStandaloneGameEngineShim Condition="'$(UseStandaloneGameEngineShim)' == ''">true</UseStandaloneGameEngineShim>
+    <DefineConstants Condition="'$(UseStandaloneGameEngineShim)' == 'true'">$(DefineConstants);COINPUSHER_STANDALONE</DefineConstants>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**;CoinPusherEngine.Tests/**;CoinPusherEngine.Tests - Copy/**;CoinPusherEngine.VolumeAudit/**;CoinPusherEngine.TicketChecker/**</DefaultItemExcludes>
   </PropertyGroup>
