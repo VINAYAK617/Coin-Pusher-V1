@@ -1,0 +1,74 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net5.0-windows</TargetFramework>
+    <RootNamespace>UIGameEngine</RootNamespace>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Authors>Fabien Sacriste</Authors>
+    <Company>SG Studios</Company>
+    <Copyright>SG Studios ©  2023</Copyright>
+    <AssemblyName>XXX - Game Engine</AssemblyName>
+    <Version>1.11.0</Version>
+    <RunPostBuildEvent>Always</RunPostBuildEvent>
+	  <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="SharpZipLib" Version="1.4.2" />
+    <PackageReference Include="System.IO.Packaging" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GameEngine\GameEngine.csproj" />
+    <ProjectReference Include="..\TicketChecker\TicketChecker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="NeoComboGenerator">
+      <HintPath>..\Resources\NeoComboGenerator.dll</HintPath>
+    </Reference>
+    <Reference Include="NeoCore">
+      <HintPath>..\Resources\NeoCore.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Properties\Resources.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+    <Compile Update="Properties\Settings.Designer.cs">
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Settings.settings</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Update="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Properties\Settings.settings">
+      <Generator>SettingsSingleFileGenerator</Generator>
+      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+
+<Target Name="MoveProfilesAfterBuild" AfterTargets="Build">
+  <Exec Condition="'$(OS)' == 'Windows_NT'"
+        Command="call &quot;$(SolutionDir)Scripts\MoveProfile.bat&quot; &quot;$(SolutionDir)&quot; &quot;$(ProjectDir)&quot; &quot;$(Configuration)&quot; &quot;net5.0&quot; &quot;false&quot;" />
+
+  <Exec Condition="'$(OS)' != 'Windows_NT'"
+        Command="bash &quot;$(SolutionDir)Scripts/MoveProfile.sh&quot; &quot;$(SolutionDir)&quot; &quot;$(ProjectDir)&quot; &quot;$(Configuration)&quot; &quot;net5.0&quot; &quot;false&quot;" />
+</Target>
+
+</Project>

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net5.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ApplicationIcon />
+    <StartupObject />
+    <Authors>Fabien Sacriste</Authors>
+    <Company>Sideplay</Company>
+    <Copyright>Sideplay ©  2021</Copyright>
+    <Version>1.0.2</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GameEngine\GameEngine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="NeoComboGenerator">
+      <HintPath>..\Resources\NeoComboGenerator.dll</HintPath>
+    </Reference>
+    <Reference Include="NeoCore">
+      <HintPath>..\Resources\NeoCore.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

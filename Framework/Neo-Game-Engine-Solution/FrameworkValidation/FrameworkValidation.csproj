@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net5.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GameEngine\GameEngine.csproj" />
+    <ProjectReference Include="..\Profiles\Profile1\ALW-Coin-Pusher.csproj" />
+    <ProjectReference Include="..\TicketChecker\TicketChecker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="NeoComboGenerator">
+      <HintPath>..\Resources\NeoComboGenerator.dll</HintPath>
+    </Reference>
+    <Reference Include="NeoCore">
+      <HintPath>..\Resources\NeoCore.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

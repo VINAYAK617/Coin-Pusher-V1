@@ -1,0 +1,2072 @@
+{
+  "tickets": [
+    {
+      "errorCode": 0,
+      "error": "success",
+      "game": {
+        "publicState": {
+          "game": {
+            "Parameters": {
+              "TierNumber": 40,
+              "StakeMultiplier": 45.0,
+              "IsWinner": true,
+              "Seed": 568639450,
+              "CashWin": 45.0,
+              "Currency": "£",
+              "VersionNum": 1,
+              "EngineVersion": 2.0,
+              "Stake": 1.0,
+              "FreeGame": {
+                "Active": false,
+                "Remaining": 0,
+                "Stake": 1.0,
+                "TotalBetValue": 0.0
+              },
+              "IndividualPrizes": [],
+              "IndivdualPrizeSpecifiers": []
+            },
+            "GameData": {
+              "WinInfo": {
+                "TotalSpins": 7,
+                "WinSymbols": [
+                  {
+                    "Id": 1,
+                    "Target": 20
+                  },
+                  {
+                    "Id": 2,
+                    "Target": 20
+                  },
+                  {
+                    "Id": 3,
+                    "Target": 20
+                  }
+                ],
+                "NonWinSymbols": [
+                  {
+                    "Id": 4,
+                    "MinTarget": 3,
+                    "MaxThreshold": 25
+                  },
+                  {
+                    "Id": 5,
+                    "MinTarget": 4,
+                    "MaxThreshold": 25
+                  },
+                  {
+                    "Id": 6,
+                    "MinTarget": 19,
+                    "MaxThreshold": 30
+                  }
+                ],
+                "PrizeTiers": [
+                  {
+                    "SymId": 1,
+                    "Tier": 1
+                  },
+                  {
+                    "SymId": 2,
+                    "Tier": 2
+                  },
+                  {
+                    "SymId": 3,
+                    "Tier": 1
+                  }
+                ]
+              },
+              "StartingBoard": [
+                [
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 1
+                  }
+                ],
+                [
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 2
+                  }
+                ],
+                [
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 3
+                  }
+                ],
+                [
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 3
+                  }
+                ],
+                [
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 2
+                  }
+                ]
+              ],
+              "Turns": [
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 2
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 3,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 2
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 4
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 3,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 11,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 17,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 1
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 4,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 17,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 1
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 4
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 3,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 11,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 2
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 5,
+                      "FeatureId": 14
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 2
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 0,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 1,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 3,
+                        "UpgradeSymbolId": 3,
+                        "UpgradePrizeValue": 20.0,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 2,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 13,
+                        "UpgradeSymbolId": 2,
+                        "UpgradePrizeValue": 10.0,
+                        "ReTrigger": [
+                          {
+                            "FeatureId": 13,
+                            "ConvertToId": 2,
+                            "UpgradeSymbolId": 1,
+                            "UpgradePrizeValue": 5.0,
+                            "ReTrigger": []
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "Pos": 3,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 11,
+                      "Feature": {
+                        "FeatureId": 11,
+                        "ConvertToId": 5,
+                        "WheelSymbolId": 5,
+                        "WheelStackValue": 3,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 12,
+                      "Feature": {
+                        "FeatureId": 12,
+                        "ConvertToId": 6,
+                        "ReTrigger": []
+                      }
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 4,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 2,
+                        "UpgradeSymbolId": 2,
+                        "UpgradePrizeValue": 20.0,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 11,
+                      "Feature": {
+                        "FeatureId": 11,
+                        "ConvertToId": 5,
+                        "WheelSymbolId": 6,
+                        "WheelStackValue": 2,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 12,
+                      "Feature": {
+                        "FeatureId": 12,
+                        "ConvertToId": 6,
+                        "ReTrigger": []
+                      }
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 3,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 4
+                    }
+                  ]
+                }
+              ]
+            },
+            "GameState": {
+              "Current": "GAMBLED",
+              "Next": "TO_COLLECT"
+            }
+          }
+        },
+        "privateState": {
+          "FreeGame": {
+            "Active": false,
+            "Remaining": 0,
+            "Stake": 1.0,
+            "TotalBetValue": 0.0
+          },
+          "Stake": 1.0,
+          "TierNumber": 40,
+          "PendingCashWin": 45.0,
+          "GameState": {
+            "Current": "GAMBLED",
+            "Next": "TO_COLLECT"
+          }
+        }
+      },
+      "end": false,
+      "creditAmount": 0.0
+    },
+    {
+      "errorCode": 0,
+      "error": "success",
+      "game": {
+        "publicState": {
+          "game": {
+            "Parameters": {
+              "TierNumber": 40,
+              "StakeMultiplier": 45.0,
+              "IsWinner": true,
+              "Seed": 568639446,
+              "CashWin": 45.0,
+              "Currency": "£",
+              "VersionNum": 1,
+              "EngineVersion": 2.0,
+              "Stake": 1.0,
+              "FreeGame": {
+                "Active": false,
+                "Remaining": 0,
+                "Stake": 1.0,
+                "TotalBetValue": 0.0
+              },
+              "IndividualPrizes": [],
+              "IndivdualPrizeSpecifiers": []
+            },
+            "GameData": {
+              "WinInfo": {
+                "TotalSpins": 7,
+                "WinSymbols": [
+                  {
+                    "Id": 1,
+                    "Target": 20
+                  },
+                  {
+                    "Id": 2,
+                    "Target": 20
+                  },
+                  {
+                    "Id": 3,
+                    "Target": 20
+                  }
+                ],
+                "NonWinSymbols": [
+                  {
+                    "Id": 4,
+                    "MinTarget": 10,
+                    "MaxThreshold": 25
+                  },
+                  {
+                    "Id": 5,
+                    "MinTarget": 2,
+                    "MaxThreshold": 25
+                  },
+                  {
+                    "Id": 6,
+                    "MinTarget": 6,
+                    "MaxThreshold": 30
+                  }
+                ],
+                "PrizeTiers": [
+                  {
+                    "SymId": 1,
+                    "Tier": 1
+                  },
+                  {
+                    "SymId": 2,
+                    "Tier": 2
+                  },
+                  {
+                    "SymId": 3,
+                    "Tier": 1
+                  }
+                ]
+              },
+              "StartingBoard": [
+                [
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 3
+                  }
+                ],
+                [
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 4
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 2
+                  }
+                ],
+                [
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 3
+                  }
+                ],
+                [
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 4
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 2
+                  }
+                ],
+                [
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 3
+                  }
+                ]
+              ],
+              "Turns": [
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 2
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 2,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 3,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 1
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 4
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 2,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 3,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 21,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 22,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 2
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 3,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 2
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 4
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 1,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 2,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 3,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 2
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 2
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 4,
+                      "Id": 12,
+                      "Feature": {
+                        "FeatureId": 12,
+                        "ConvertToId": 4,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 13,
+                        "UpgradeSymbolId": 2,
+                        "UpgradePrizeValue": 10.0,
+                        "ReTrigger": [
+                          {
+                            "FeatureId": 13,
+                            "ConvertToId": 6,
+                            "UpgradeSymbolId": 1,
+                            "UpgradePrizeValue": 5.0,
+                            "ReTrigger": []
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 4
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 5,
+                      "FeatureId": 14
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 2,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 2,
+                        "UpgradeSymbolId": 2,
+                        "UpgradePrizeValue": 20.0,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 3,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 3,
+                        "UpgradeSymbolId": 3,
+                        "UpgradePrizeValue": 20.0,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 11,
+                      "Feature": {
+                        "FeatureId": 11,
+                        "ConvertToId": 4,
+                        "WheelSymbolId": 4,
+                        "WheelStackValue": 2,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 20,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 21,
+                      "Id": 11,
+                      "Feature": {
+                        "FeatureId": 11,
+                        "ConvertToId": 6,
+                        "WheelSymbolId": 4,
+                        "WheelStackValue": 3,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 22,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 12,
+                      "Feature": {
+                        "FeatureId": 12,
+                        "ConvertToId": 6,
+                        "ReTrigger": []
+                      }
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 3,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 6
+                    }
+                  ]
+                }
+              ]
+            },
+            "GameState": {
+              "Current": "GAMBLED",
+              "Next": "TO_COLLECT"
+            }
+          }
+        },
+        "privateState": {
+          "FreeGame": {
+            "Active": false,
+            "Remaining": 0,
+            "Stake": 1.0,
+            "TotalBetValue": 0.0
+          },
+          "Stake": 1.0,
+          "TierNumber": 40,
+          "PendingCashWin": 45.0,
+          "GameState": {
+            "Current": "GAMBLED",
+            "Next": "TO_COLLECT"
+          }
+        }
+      },
+      "end": false,
+      "creditAmount": 0.0
+    },
+    {
+      "errorCode": 0,
+      "error": "success",
+      "game": {
+        "publicState": {
+          "game": {
+            "Parameters": {
+              "TierNumber": 40,
+              "StakeMultiplier": 45.0,
+              "IsWinner": true,
+              "Seed": 568639434,
+              "CashWin": 45.0,
+              "Currency": "£",
+              "VersionNum": 1,
+              "EngineVersion": 2.0,
+              "Stake": 1.0,
+              "FreeGame": {
+                "Active": false,
+                "Remaining": 0,
+                "Stake": 1.0,
+                "TotalBetValue": 0.0
+              },
+              "IndividualPrizes": [],
+              "IndivdualPrizeSpecifiers": []
+            },
+            "GameData": {
+              "WinInfo": {
+                "TotalSpins": 7,
+                "WinSymbols": [
+                  {
+                    "Id": 1,
+                    "Target": 20
+                  },
+                  {
+                    "Id": 2,
+                    "Target": 20
+                  },
+                  {
+                    "Id": 3,
+                    "Target": 20
+                  }
+                ],
+                "NonWinSymbols": [
+                  {
+                    "Id": 4,
+                    "MinTarget": 7,
+                    "MaxThreshold": 25
+                  },
+                  {
+                    "Id": 5,
+                    "MinTarget": 6,
+                    "MaxThreshold": 25
+                  },
+                  {
+                    "Id": 6,
+                    "MinTarget": 23,
+                    "MaxThreshold": 30
+                  }
+                ],
+                "PrizeTiers": [
+                  {
+                    "SymId": 1,
+                    "Tier": 1
+                  },
+                  {
+                    "SymId": 2,
+                    "Tier": 2
+                  },
+                  {
+                    "SymId": 3,
+                    "Tier": 1
+                  }
+                ]
+              },
+              "StartingBoard": [
+                [
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 2
+                  }
+                ],
+                [
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 1
+                  }
+                ],
+                [
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 3
+                  }
+                ],
+                [
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 1
+                  },
+                  {
+                    "Id": 1
+                  }
+                ],
+                [
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 2
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 3
+                  },
+                  {
+                    "Id": 1
+                  }
+                ]
+              ],
+              "Turns": [
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 4
+                    },
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 2,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 3,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 6,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 1
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 2
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 4
+                    },
+                    {
+                      "PushValue": 2
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 3,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 16,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 17,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 2
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 2
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 4,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 17,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 2
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 4
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 2
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 1,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 2,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 3,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 17,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 18,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 4
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 5,
+                      "FeatureId": 14
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 1
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 4,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 5,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 2,
+                        "UpgradeSymbolId": 2,
+                        "UpgradePrizeValue": 10.0,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 6,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 6,
+                        "UpgradeSymbolId": 3,
+                        "UpgradePrizeValue": 20.0,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 5
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 11,
+                      "Feature": {
+                        "FeatureId": 11,
+                        "ConvertToId": 6,
+                        "WheelSymbolId": 4,
+                        "WheelStackValue": 1,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 12,
+                      "Feature": {
+                        "FeatureId": 12,
+                        "ConvertToId": 4,
+                        "ReTrigger": []
+                      }
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 2
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 2,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 3,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 2,
+                        "UpgradeSymbolId": 2,
+                        "UpgradePrizeValue": 20.0,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 13,
+                      "Feature": {
+                        "FeatureId": 13,
+                        "ConvertToId": 1,
+                        "UpgradeSymbolId": 1,
+                        "UpgradePrizeValue": 5.0,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 11,
+                      "Feature": {
+                        "FeatureId": 11,
+                        "ConvertToId": 5,
+                        "WheelSymbolId": 6,
+                        "WheelStackValue": 2,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 12,
+                      "Feature": {
+                        "FeatureId": 12,
+                        "ConvertToId": 5,
+                        "ReTrigger": []
+                      }
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 11,
+                      "Feature": {
+                        "FeatureId": 11,
+                        "ConvertToId": 6,
+                        "WheelSymbolId": 6,
+                        "WheelStackValue": 1,
+                        "ReTrigger": []
+                      }
+                    }
+                  ]
+                },
+                {
+                  "Pushers": [
+                    {
+                      "PushValue": 4
+                    },
+                    {
+                      "PushValue": 3
+                    },
+                    {
+                      "PushValue": 4
+                    },
+                    {
+                      "PushValue": 1
+                    },
+                    {
+                      "PushValue": 2
+                    }
+                  ],
+                  "Spawns": [
+                    {
+                      "Pos": 1,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 2,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 3,
+                      "Id": 2
+                    },
+                    {
+                      "Pos": 4,
+                      "Id": 6
+                    },
+                    {
+                      "Pos": 7,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 8,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 9,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 11,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 12,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 13,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 14,
+                      "Id": 3
+                    },
+                    {
+                      "Pos": 19,
+                      "Id": 4
+                    },
+                    {
+                      "Pos": 23,
+                      "Id": 1
+                    },
+                    {
+                      "Pos": 24,
+                      "Id": 4
+                    }
+                  ]
+                }
+              ]
+            },
+            "GameState": {
+              "Current": "GAMBLED",
+              "Next": "TO_COLLECT"
+            }
+          }
+        },
+        "privateState": {
+          "FreeGame": {
+            "Active": false,
+            "Remaining": 0,
+            "Stake": 1.0,
+            "TotalBetValue": 0.0
+          },
+          "Stake": 1.0,
+          "TierNumber": 40,
+          "PendingCashWin": 45.0,
+          "GameState": {
+            "Current": "GAMBLED",
+            "Next": "TO_COLLECT"
+          }
+        }
+      },
+      "end": false,
+      "creditAmount": 0.0
+    }
+  ]
+}

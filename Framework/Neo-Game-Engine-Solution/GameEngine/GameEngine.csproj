@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net5.0</TargetFramework>
+	  <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <Copyright>SG Studios ©  2023</Copyright>
+    <Company>SG Studios</Company>
+	  <Version>1.0.6</Version>
+	  <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+      <LangVersion>latest</LangVersion>
+      <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="NeoComboGenerator">
+      <HintPath>..\Resources\NeoComboGenerator.dll</HintPath>
+    </Reference>
+    <Reference Include="NeoCore">
+      <HintPath>..\Resources\NeoCore.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="CoinPusherCore\Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+</Project>
