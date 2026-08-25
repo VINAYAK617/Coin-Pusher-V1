@@ -5,6 +5,39 @@ using CoinPusherEngine;
 using CoinPusherEngine.VolumeAudit;
 using GameEngine;
 
+if (args.Length > 0
+    && args[0].Equals("export-alw-fixed", StringComparison.OrdinalIgnoreCase))
+{
+    var output = args.Length > 1
+        ? args[1]
+        : Path.Combine("QA_Samples", "ALW_Fixed_Tickets");
+    var exportSeed = args.Length > 2 && int.TryParse(args[2], out var parsedExportSeed)
+        ? parsedExportSeed
+        : 20260825;
+    var exportSettings = AlwMoneyMachinePps.CreateSettings();
+    GameEngine.Engine.Settings = exportSettings;
+    var export = new AlwFixedTicketExporter(exportSettings).Export(output, exportSeed);
+    Console.WriteLine(
+        $"ALW fixed tickets exported: tickets={export.TicketCount}, " +
+        $"candidates={export.GeneratedCandidateCount}, rejectedAttempts={export.RejectedAttemptCount}");
+    Console.WriteLine($"folder={export.OutputDirectory}");
+    Console.WriteLine($"zip={export.ZipPath}");
+    return;
+}
+
+if (args.Length > 0
+    && args[0].Equals("verify-alw-fixed", StringComparison.OrdinalIgnoreCase))
+{
+    var output = args.Length > 1
+        ? args[1]
+        : Path.Combine("QA_Samples", "ALW_Fixed_Tickets");
+    var verifySettings = AlwMoneyMachinePps.CreateSettings();
+    GameEngine.Engine.Settings = verifySettings;
+    new AlwFixedTicketExporter(verifySettings).VerifyExport(output);
+    Console.WriteLine($"ALW fixed-ticket export verified: folder={Path.GetFullPath(output)}, tickets=400");
+    return;
+}
+
 var count = ArgInt(args, 0, 5000000);
 var seed = ArgInt(args, 1, 20260806);
 var progressEvery = 5000;// Math.Max(1, ArgInt(args, 2, Math.Max(1, count / 20)));
