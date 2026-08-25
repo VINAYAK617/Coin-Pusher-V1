@@ -12,7 +12,7 @@ internal sealed class AlwFixedTicketTier
     internal int TierNumber { get; }
     internal int PpsCombinationId { get; }
     internal int TicketCount { get; }
-    internal bool IsNoWin => TierNumber == 0;
+    internal bool IsNoWin => PpsCombinationId == 0;
 }
 
 internal static class AlwFixedTicketCatalog
@@ -52,7 +52,7 @@ internal static class AlwFixedTicketCatalog
 
         var catalog = new List<AlwFixedTicketTier>
         {
-            new(tierNumber: 0, ppsCombinationId: 0, ticketCount: 80),
+            new(tierNumber: 77, ppsCombinationId: 0, ticketCount: 80),
         };
         catalog.AddRange(rows.Select((row, index) =>
             new AlwFixedTicketTier(
